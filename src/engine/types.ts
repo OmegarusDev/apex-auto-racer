@@ -1,0 +1,193 @@
+import type { DisciplineId } from '../data/disciplines';
+import type { PartCategory } from '../data/parts';
+import type { TraitId } from '../data/traits';
+import type { RankId } from '../data/balance';
+import type { ObjectiveKind } from '../data/objectives';
+
+export type { DisciplineId };
+
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
+export interface DriverStats {
+  skill: number;
+  bravery: number;
+  focus: number;
+  determination: number;
+}
+
+export interface Driver {
+  id: string;
+  name: string;
+  trait: TraitId;
+  skill: number;
+  bravery: number;
+  focus: number;
+  determination: number;
+  xp: number;
+  level: number;
+  unspentPoints: number;
+}
+
+export type VehicleParts = Record<PartCategory, number>;
+
+export interface VehicleSave {
+  partTiers: VehicleParts;
+  condition: number;
+}
+
+export type DisciplineVehicles = Record<DisciplineId, VehicleSave>;
+
+export interface EffectiveStats {
+  topSpeed: number;
+  acceleration: number;
+  braking: number;
+  grip: number;
+  downforce: number;
+  vMax: number;
+  aAccel: number;
+  aBrake: number;
+  gripFactor: number;
+  D: number;
+  kUnder: number;
+  lineNoise: number;
+  condGrip: number;
+  condTop: number;
+}
+
+export interface VehicleState {
+  id: string;
+  driverId: string;
+  teamId: number;
+  isPlayerControlled: boolean;
+  s: number;
+  l: number;
+  v: number;
+  slipAngle: number;
+  tyreTemp: number;
+  balanceB: number;
+  driftState: boolean;
+  stunRemaining: number;
+  spinRemaining: number;
+  throttle: number;
+  brake: number;
+  condition: number;
+  lap: number;
+  finished: boolean;
+  finishTime: number;
+  wallHits: number;
+  spinCount: number;
+  overtakeCount: number;
+}
+
+export type RaceEventKind =
+  | 'overtake'
+  | 'mistake'
+  | 'spin'
+  | 'crash'
+  | 'driftEntry'
+  | 'draftPass'
+  | 'wallHit'
+  | 'finish'
+  | 'lap';
+
+export interface RaceEvent {
+  kind: RaceEventKind;
+  time: number;
+  carId: string;
+  driverName?: string;
+  detail?: string;
+}
+
+export interface VolumeOptions {
+  master: number;
+  engine: number;
+  fx: number;
+  ui: number;
+}
+
+export interface GameOptions {
+  volumes: VolumeOptions;
+}
+
+export interface CareerStats {
+  races: number;
+  wins: number;
+  earnings: number;
+}
+
+export interface TournamentStandingsEntry {
+  teamId: number;
+  points: number;
+  name: string;
+}
+
+export interface TournamentProgress {
+  defId: string;
+  raceIndex: number;
+  standings: TournamentStandingsEntry[];
+  opponentDrivers: Driver[];
+  playerLineup: string[];
+  leadDriverId: string;
+}
+
+export type InProgressTournaments = Record<DisciplineId, TournamentProgress | null>;
+
+export type RankUnlocked = Record<DisciplineId, RankId>;
+
+export interface ObjectivesState {
+  active: ObjectiveKind[];
+  completed: ObjectiveKind[];
+  cycleSeed: number;
+}
+
+export interface OnboardingFlags {
+  shownPedalControls: boolean;
+  shownBrakeHint: boolean;
+  shownCrashHint: boolean;
+}
+
+export interface GameState {
+  version: number;
+  seed: number;
+  lastSaveTimestamp: number;
+  cash: number;
+  vehicles: DisciplineVehicles;
+  roster: Driver[];
+  rankUnlocked: RankUnlocked;
+  inProgressTournaments: InProgressTournaments;
+  careerStats: CareerStats;
+  objectives: ObjectivesState;
+  onboarding: OnboardingFlags;
+  options: GameOptions;
+}
+
+export const SAVE_VERSION = 1;
+
+export const DEFAULT_VOLUMES: VolumeOptions = {
+  master: 0.8,
+  engine: 0.25,
+  fx: 0.5,
+  ui: 0.6,
+};
+
+export function emptyVehicleParts(startTier: number): VehicleParts {
+  return {
+    engine: startTier,
+    intake: startTier,
+    exhaust: startTier,
+    tyres: startTier,
+    brakes: startTier,
+    suspension: startTier,
+    spoiler: startTier,
+  };
+}
+
+export function defaultVehicleSave(startTier: number, condition = 1.0): VehicleSave {
+  return {
+    partTiers: emptyVehicleParts(startTier),
+    condition,
+  };
+}

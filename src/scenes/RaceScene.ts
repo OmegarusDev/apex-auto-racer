@@ -1,0 +1,824 @@
+import type { Scene } from '../engine/SceneManager';
+import type { GameContext } from '../engine/GameContext';
+import { BALANCE } from '../data/balance';
+import { getTrait } from '../data/traits';
+import { PHYSICS } from '../data/physics';
+import {
+  RaceDirector,
+  teamColor,
+  type CountdownPhase,
+  type GhostSample,
+  type GhostTrace,
+} from '../engine/RaceDirector';
+import type { CarSimState } from '../engine/Vehicle';
+import type { OnboardingFlags, RaceEvent } from '../engine/types';
+import {
+  buildRaceConfig,
+  buildResultsPayload,
+  loadGhostTrace,
+  storeGhostTrace,
+  type RaceLaunchConfig,
+  type RaceObjectiveStats,
+} from '../engine/raceTypes';
+import { Camera } from '../graphics/Camera';
+import { Particles } from '../graphics/Particles';
+import { VectorRenderer, sampleTrack } from '../graphics/VectorRenderer';
+import {
+  drawButton,
+  handleButton,
+  drawModal,
+  handleModal,
+  layoutModalButtons,
+  pad,
+  ensureMinTouch,
+  type ButtonDef,
+  type ModalDef,
+} from '../ui/components';
+import { createTheme, type ThemeTokens } from '../ui/theme';
+import { disciplineAccent } from './sceneUtils';
+import { createResultsScene } from './ResultsScene';
+
+const FINISH_DELAY_SEC = 2.2;
+const TICKER_MAX = 4;
+const TICKER_TTL = 6;
+
+interface TickerLine {
+  text: string;
+  ttl: number;
+}
+
+function sampleGhost(trace: GhostTrace, carId: string, time: number): GhostSample | null {
+  const car = trace.find((g) => g.carId === carId);
+  if (car === undefined || car.samples.length === 0) return null;
+
+  let lo = 0;
+  for (let i = 0; i < car.samples.length; i++) {
+    if (car.samples[i]!.time <= time) lo = i;
+  }
+  return car.samples[lo] ?? null;
+}
+
+export class RaceScene implements Scene {
+  private readonly g: GameContext;
+  private readonly launch: RaceLaunchConfig;
+  private director: RaceDirector | null = null;
+  private renderer = new VectorRenderer();
+  private camera = new Camera();
+  private particles = new Particles();
+  private paused = false;
+  private pauseModal: ModalDef = { open: false, title: '', body: '', buttons: [] };
+  private finishTimer = 0;
+  private transitioned = false;
+  private prevCountdown: CountdownPhase | undefined;
+  private prevPlayerWallHits = 0;
+  private prevPlayerSpins = 0;
+  private prevCarSamples = new Map<string, { x: number; y: number; s: number; l: number }>();
+  private ticker: TickerLine[] = [];
+  private seenEventCount = 0;
+  private hintText: string | null = null;
+  private hintT = 0;
+  private ghostCarId: string | null = null;
+  private ghostTrace: GhostTrace | null = null;
+  private lastDt = 1 / 60;
+  private prevCarWallHits = new Map<string, number>();
+  private stats: RaceObjectiveStats = {
+    playerBrakeUsed: false,
+    playerWallHits: 0,
+    playerSpinCount: 0,
+    playerOvertakes: 0,
+    startGridPosition: 1,
+    vehicleConditionAtStart: 1,
+    vehicleRepairedBeforeRace: false,
+  };
+
+  constructor(ctx: GameContext, config: RaceLaunchConfig) {
+    this.g = ctx;
+    this.launch = config;
+  }
+
+  enter(): void {
+    const state = this.g.state;
+    if (state === null) {
+      this.g.scenes.back();
+      return;
+    }
+
+    this.g.input.setMode('race');
+    this.g.input.resetRaceInput();
+    this.paused = false;
+    this.finishTimer = 0;
+    this.transitioned = false;
+    this.prevCountdown = undefined;
+    this.prevPlayerWallHits = 0;
+    this.prevPlayerSpins = 0;
+    this.prevCarSamples.clear();
+    this.ticker = [];
+    this.seenEventCount = 0;
+    this.hintText = null;
+    this.hintT = 0;
+
+    const vehicle = state.vehicles[this.launch.discipline];
+    this.stats = {
+      playerBrakeUsed: false,
+      playerWallHits: 0,
+      playerSpinCount: 0,
+      playerOvertakes: 0,
+      startGridPosition: 1,
+      vehicleConditionAtStart: vehicle.condition,
+      vehicleRepairedBeforeRace: vehicle.condition >= BALANCE.conditionMax - 0.001,
+    };
+
+    const raceConfig = buildRaceConfig(state, this.launch);
+    this.director = new RaceDirector(raceConfig);
+    this.renderer.bakeTrack(this.director.track, this.launch.discipline);
+    this.particles.setRaining(this.director.rain);
+    this.g.audio.setRain(this.director.rain);
+
+    if (this.launch.again) {
+      const stored = loadGhostTrace();
+      if (stored !== null) {
+        this.ghostTrace = stored.trace;
+        this.ghostCarId = stored.carId;
+      }
+    }
+
+    const standings = this.director.currentStandings;
+    const player = standings.find((s) => s.isPlayerControlled);
+    if (player !== undefined) {
+      this.stats.startGridPosition = player.position;
+    }
+
+    this.setupCountdownCamera();
+    this.queueOnboardingHint();
+  }
+
+  exit(): void {
+    this.g.input.setMode('menu');
+    this.g.audio.setRain(false);
+    this.g.audio.setKerb(false);
+    this.g.audio.setScreech(0, false);
+  }
+
+  onResize(_w: number, _h: number): void {}
+
+  handleBack(): boolean {
+    if (this.director?.isRaceFinished) return true;
+    if (!this.paused) {
+      this.openPause();
+    }
+    return true;
+  }
+
+  update(dt: number): void {
+    const director = this.director;
+    if (director === null) return;
+
+    this.lastDt = dt;
+
+    if (this.paused) {
+      this.handlePauseInput();
+      return;
+    }
+
+    if (director.isRaceFinished) {
+      this.finishTimer += dt;
+      if (!this.transitioned && this.finishTimer >= FINISH_DELAY_SEC) {
+        this.transitioned = true;
+        this.finishRace();
+      }
+      return;
+    }
+
+    if (this.g.input.brake > 0.1) this.stats.playerBrakeUsed = true;
+
+    director.setPlayerPedals(this.g.input.throttle, this.g.input.brake);
+    director.update(dt);
+
+    this.updateCountdownAudio(director.countdown);
+    this.updateCarAudioAndParticles(director);
+    this.updateCamera(director);
+    this.updateTicker(director.recentEvents, dt);
+    this.updateHints(dt);
+
+    if (director.isRaceFinished) {
+      this.finishTimer = 0;
+    }
+  }
+
+  render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const director = this.director;
+    if (director === null) return;
+
+    const token = createTheme(w, h);
+    const accent = disciplineAccent(this.launch.discipline);
+    const cam = this.camera.getTransform();
+
+    this.renderer.blitTrack(ctx, cam, w, h);
+
+    if (this.ghostTrace !== null && this.ghostCarId !== null && director.countdown === null) {
+      const sample = sampleGhost(this.ghostTrace, this.ghostCarId, director.raceClock);
+      if (sample !== null) {
+        const track = this.renderer.getTrack();
+        if (track !== null) {
+          const ts = sampleTrack(track, sample.s);
+          const wx = ts.pos.x + ts.normal.x * sample.l;
+          const wy = ts.pos.y + ts.normal.y * sample.l;
+          const tang = Math.atan2(ts.tangent.y, ts.tangent.x);
+          this.renderer.drawGhost(ctx, wx, wy, tang, `${accent}66`, cam, w, h);
+        }
+      }
+    }
+
+    const cars = director.cars;
+    const teamCount = director.config.format.teamCount;
+    const playerIdx = cars.findIndex((c) => c.isPlayerControlled);
+
+    for (let i = 0; i < cars.length; i++) {
+      const car = cars[i]!;
+      const color = teamColor(car.teamId, teamCount);
+      this.renderer.drawCar(ctx, car, color, car.isPlayerControlled, cam, w, h);
+    }
+
+    this.particles.render(ctx, cam, w, h);
+    this.particles.renderRain(ctx, w, h);
+
+    this.drawHud(ctx, w, h, token, accent, director, cars, playerIdx);
+    this.drawPedalTints(ctx, w, h, token);
+    this.drawCountdownBanner(ctx, w, h, token, director.countdown);
+    if (director.rain) this.drawRainBanner(ctx, w, h, token);
+    this.drawTicker(ctx, w, h, token);
+    this.drawOnboardingHint(ctx, w, h, token, accent);
+
+    if (director.isRaceFinished) {
+      this.drawFinishOverlay(ctx, w, h, token, accent, director);
+    }
+
+    if (this.paused) {
+      layoutModalButtons(this.pauseModal, {
+        pointerX: this.g.input.pointerX,
+        pointerY: this.g.input.pointerY,
+        pointerDown: this.g.input.peekClick() !== null,
+        pointerClicked: this.g.input.consumeClick() !== null,
+        dt: 0,
+        w,
+        h,
+        token,
+        accent,
+      });
+      drawModal(ctx, this.pauseModal, {
+        pointerX: this.g.input.pointerX,
+        pointerY: this.g.input.pointerY,
+        pointerDown: false,
+        pointerClicked: false,
+        dt: 0,
+        w,
+        h,
+        token,
+        accent,
+      });
+    }
+
+    if (this.g.debug) {
+      this.drawDebugOverlay(ctx, w, h, token, director);
+    }
+  }
+
+  private openPause(): void {
+    this.director?.pause();
+    this.paused = true;
+    this.pauseModal = {
+      open: true,
+      title: 'Paused',
+      body: 'Resume racing or retire from the event.',
+      buttons: [
+        {
+          x: 0,
+          y: 0,
+          w: 0,
+          h: 0,
+          label: 'Retire',
+          onClick: () => {
+            this.paused = false;
+            this.pauseModal.open = false;
+            this.director?.retire();
+          },
+        },
+        {
+          x: 0,
+          y: 0,
+          w: 0,
+          h: 0,
+          label: 'Resume',
+          primary: true,
+          onClick: () => {
+            this.paused = false;
+            this.pauseModal.open = false;
+            this.director?.resume();
+          },
+        },
+      ],
+    };
+  }
+
+  private handlePauseInput(): void {
+    const token = createTheme(this.g.canvas.clientWidth, this.g.canvas.clientHeight);
+    const accent = disciplineAccent(this.launch.discipline);
+    const ui = {
+      pointerX: this.g.input.pointerX,
+      pointerY: this.g.input.pointerY,
+      pointerDown: this.g.input.peekClick() !== null,
+      pointerClicked: this.g.input.consumeClick() !== null,
+      dt: 0,
+      w: this.g.canvas.clientWidth,
+      h: this.g.canvas.clientHeight,
+      token,
+      accent,
+    };
+    layoutModalButtons(this.pauseModal, ui);
+    handleModal(this.pauseModal, ui);
+  }
+
+  private finishRace(): void {
+    const director = this.director;
+    const state = this.g.state;
+    if (director === null || state === null) return;
+
+    const result = director.getResult();
+    const playerCar = director.cars.find((c) => c.isPlayerControlled);
+    if (playerCar !== undefined) {
+      storeGhostTrace(result.ghostTrace, playerCar.id);
+    }
+
+    const payload = buildResultsPayload(
+      state,
+      this.launch,
+      result,
+      this.stats,
+      playerCar?.condition,
+    );
+
+    this.g.scenes.replace(createResultsScene(payload));
+  }
+
+  private setupCountdownCamera(): void {
+    const director = this.director;
+    if (director === null) return;
+    const track = this.renderer.getTrack();
+    if (track === null) return;
+
+    const positions = director.cars.map((car) => {
+      const sample = sampleTrack(track, car.s);
+      return {
+        x: sample.pos.x + sample.normal.x * car.l,
+        y: sample.pos.y + sample.normal.y * car.l,
+      };
+    });
+
+    this.camera.setCountdownTargets(
+      positions,
+      this.g.canvas.clientWidth,
+      this.g.canvas.clientHeight,
+    );
+  }
+
+  private updateCamera(director: RaceDirector): void {
+    const track = this.renderer.getTrack();
+    if (track === null) return;
+
+    if (director.countdown !== null) {
+      const positions = director.cars.map((car) => {
+        const sample = sampleTrack(track, car.s);
+        return {
+          x: sample.pos.x + sample.normal.x * car.l,
+          y: sample.pos.y + sample.normal.y * car.l,
+        };
+      });
+      this.camera.setCountdownTargets(
+        positions,
+        this.g.canvas.clientWidth,
+        this.g.canvas.clientHeight,
+      );
+    } else {
+      const player = director.cars.find((c) => c.isPlayerControlled) ?? director.cars[0];
+      if (player !== undefined) {
+        const sample = sampleTrack(track, player.s);
+        this.camera.setFollowTarget(
+          {
+            x: sample.pos.x + sample.normal.x * player.l,
+            y: sample.pos.y + sample.normal.y * player.l,
+          },
+          player.v,
+        );
+      }
+    }
+
+    this.camera.update(this.lastDt);
+  }
+
+  private updateCountdownAudio(phase: CountdownPhase): void {
+    if (phase === this.prevCountdown) return;
+    if (phase === 3 || phase === 2 || phase === 1) {
+      this.g.audio.playCountdown(phase);
+    } else if (phase === 'go') {
+      this.g.audio.playGo();
+    }
+    this.prevCountdown = phase;
+  }
+
+  private updateCarAudioAndParticles(director: RaceDirector): void {
+    const track = this.renderer.getTrack();
+    if (track === null) return;
+
+    const player = director.cars.find((c) => c.isPlayerControlled);
+    if (player !== undefined) {
+      this.g.audio.updateEngine(player.rpm, player.throttle);
+      this.g.audio.setScreech(player.gripUsage, player.driftState);
+
+      if (player.wallHits > this.prevPlayerWallHits) {
+        this.g.audio.playCrash();
+        if (!this.g.state!.onboarding.shownCrashHint) {
+          this.showHint('Wall contact reduces condition — brake earlier!', 'shownCrashHint');
+        }
+      }
+      if (player.spinCount > this.prevPlayerSpins) {
+        this.g.audio.playSpin();
+      }
+
+      this.stats.playerWallHits = player.wallHits;
+      this.stats.playerSpinCount = player.spinCount;
+      this.prevPlayerWallHits = player.wallHits;
+      this.prevPlayerSpins = player.spinCount;
+
+      const sample = sampleTrack(track, player.s);
+      const onKerb =
+        Math.abs(sample.pos.x) >= 0 &&
+        Math.abs(player.l) > sample.width * 0.5 - PHYSICS.kerbOuterM &&
+        Math.abs(player.l) <= sample.width * 0.5;
+      this.g.audio.setKerb(onKerb);
+    }
+
+    let tick = 0;
+    for (const car of director.cars) {
+      const rendered = this.renderer.sampleCar(car);
+      if (rendered === null) continue;
+      const prev = this.prevCarSamples.get(car.id);
+      const px = rendered.pos.x;
+      const py = rendered.pos.y;
+
+      if (prev !== undefined && car.driftState && car.v > 4) {
+        this.particles.emitSkid(prev.x, prev.y, px, py);
+      }
+      if (car.driftState && car.v > 6) {
+        this.particles.emitDust(px, py, tick, car.gripUsage);
+      }
+      if (car.spinRemaining > 0) {
+        this.particles.emitSmoke(px, py, tick);
+      }
+      const prevHits = this.prevCarWallHits.get(car.id) ?? 0;
+      if (car.wallHits > prevHits && car.v > PHYSICS.crashSpeed) {
+        this.particles.emitSparks(px, py, tick);
+      }
+      this.prevCarWallHits.set(car.id, car.wallHits);
+
+      this.prevCarSamples.set(car.id, { x: px, y: py, s: car.s, l: car.l });
+      tick += 1;
+    }
+
+    this.particles.update(this.lastDt);
+  }
+
+  private updateTicker(events: readonly RaceEvent[], dt: number): void {
+    if (events.length > this.seenEventCount) {
+      const fresh = events.slice(this.seenEventCount);
+      for (const ev of fresh) {
+        const name = ev.driverName ?? ev.carId;
+        let text = `${ev.time.toFixed(1)}s — ${name}`;
+        switch (ev.kind) {
+          case 'overtake':
+            text = `${ev.time.toFixed(1)}s — ${name} overtakes${ev.detail ? ` ${ev.detail}` : ''}`;
+            if (this.isPlayerEvent(ev, name)) this.stats.playerOvertakes += 1;
+            break;
+          case 'spin':
+            text = `${ev.time.toFixed(1)}s — ${name} spins!`;
+            break;
+          case 'crash':
+            text = `${ev.time.toFixed(1)}s — ${name} crashes!`;
+            break;
+          case 'finish':
+            text = `${ev.time.toFixed(1)}s — ${name} finishes`;
+            break;
+          case 'lap':
+            text = `${ev.time.toFixed(1)}s — ${name} lap ${ev.detail ?? ''}`;
+            break;
+          default:
+            text = `${ev.time.toFixed(1)}s — ${name}: ${ev.kind}`;
+            break;
+        }
+        this.ticker.unshift({ text, ttl: TICKER_TTL });
+      }
+      this.seenEventCount = events.length;
+      this.ticker = this.ticker.slice(0, TICKER_MAX);
+    }
+
+    for (const line of this.ticker) {
+      line.ttl -= dt;
+    }
+    this.ticker = this.ticker.filter((l) => l.ttl > 0);
+  }
+
+  private isPlayerEvent(ev: RaceEvent, _name: string): boolean {
+    const director = this.director;
+    if (director === null) return false;
+    const car = director.cars.find((c) => c.id === ev.carId);
+    return car?.isPlayerControlled === true;
+  }
+
+  private queueOnboardingHint(): void {
+    const state = this.g.state;
+    if (state === null) return;
+
+    if (!state.onboarding.shownPedalControls) {
+      this.showHint('Hold the right side to accelerate', 'shownPedalControls');
+    } else if (!state.onboarding.shownBrakeHint) {
+      this.showHint('Tap the left side to brake', 'shownBrakeHint');
+    }
+  }
+
+  private showHint(text: string, flag: keyof OnboardingFlags): void {
+    this.hintText = text;
+    this.hintT = 5;
+    const state = this.g.state;
+    if (state !== null) {
+      state.onboarding[flag] = true;
+      this.g.autosave();
+    }
+  }
+
+  private updateHints(dt: number): void {
+    if (this.hintText === null) return;
+    this.hintT -= dt;
+    if (this.hintT <= 0) this.hintText = null;
+  }
+
+  private drawHud(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    token: ThemeTokens,
+    accent: string,
+    director: RaceDirector,
+    cars: readonly CarSimState[],
+    playerIdx: number,
+  ): void {
+    const player = cars.find((c) => c.isPlayerControlled);
+    const standing = director.currentStandings.find((s) => s.isPlayerControlled);
+    const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
+
+    const safe = token.safe;
+    const mmSize = pad(token, 10);
+    const mmX = w - safe.right - pad(token) - mmSize;
+    const mmY = safe.top + pad(token);
+    this.renderer.drawMinimap(
+      ctx,
+      { x: mmX, y: mmY, w: mmSize, h: mmSize * 0.72 },
+      cars,
+      playerIdx,
+    );
+
+    ctx.save();
+    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+    ctx.fillStyle = token.text;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    const hudX = safe.left + pad(token);
+    let hudY = safe.top + pad(token);
+
+    if (standing !== undefined) {
+      ctx.fillText(`P${standing.position}`, hudX, hudY);
+      hudY += token.fontTitle + pad(token, 0.25);
+    }
+
+    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textMuted;
+    const lap = player?.lap ?? 0;
+    ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
+    hudY += token.fontBody + pad(token, 0.5);
+
+    if (player !== undefined) {
+      const speedKmh = Math.round(player.v * 3.6);
+      ctx.fillStyle = accent;
+      ctx.fillText(`${speedKmh} km/h`, hudX, hudY);
+      ctx.fillStyle = token.textDim;
+      ctx.fillText(`G${player.gear} · ${Math.round(player.rpm)} RPM`, hudX, hudY + token.fontBody);
+      hudY += token.fontBody * 2 + pad(token, 0.5);
+
+      ctx.fillStyle = token.textMuted;
+      ctx.fillText(`Cond ${Math.round(player.condition * 100)}%`, hudX, hudY);
+      ctx.fillText(`Tyre ${Math.round(player.tyreTemp * 100)}%`, hudX + pad(token, 8), hudY);
+    }
+
+    if (leadDriver !== undefined) {
+      const trait = getTrait(leadDriver.trait);
+      const chipW = pad(token, 14);
+      const chipH = pad(token, 3.5);
+      const chipX = hudX;
+      const chipY = h - safe.bottom - pad(token) - chipH;
+      ctx.fillStyle = token.card;
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(chipX, chipY, chipW, chipH, pad(token, 0.5));
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = token.text;
+      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillText(leadDriver.name, chipX + pad(token, 0.75), chipY + pad(token, 0.5));
+      ctx.fillStyle = token.textDim;
+      ctx.fillText(trait.name, chipX + pad(token, 0.75), chipY + pad(token, 1.5));
+    }
+
+    const pauseSize = ensureMinTouch(pad(token, 4.5), token);
+    const pauseBtn: ButtonDef = {
+      x: w - safe.right - pad(token) - pauseSize,
+      y: h - safe.bottom - pad(token) - pauseSize,
+      w: pauseSize,
+      h: pauseSize,
+      label: '⏸',
+      onClick: () => this.openPause(),
+    };
+    if (!this.paused) {
+      const pauseUi = {
+        pointerX: this.g.input.pointerX,
+        pointerY: this.g.input.pointerY,
+        pointerDown: this.g.input.peekClick() !== null,
+        pointerClicked: this.g.input.consumeClick() !== null,
+        dt: 0,
+        w,
+        h,
+        token,
+        accent,
+      };
+      drawButton(ctx, pauseBtn, pauseUi);
+      handleButton(pauseBtn, pauseUi);
+    }
+
+    ctx.restore();
+  }
+
+  private drawPedalTints(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
+    const throttle = this.g.input.throttle;
+    const brake = this.g.input.brake;
+    if (throttle <= 0 && brake <= 0) return;
+
+    ctx.save();
+    if (brake > 0) {
+      ctx.fillStyle = `rgba(248,113,113,${0.08 + brake * 0.12})`;
+      ctx.fillRect(0, 0, w * 0.5, h);
+    }
+    if (throttle > 0) {
+      ctx.fillStyle = `rgba(74,222,128,${0.08 + throttle * 0.12})`;
+      ctx.fillRect(w * 0.5, 0, w * 0.5, h);
+    }
+    ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textDim;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText('BRAKE', w * 0.25, h - token.safe.bottom - pad(token, 0.5));
+    ctx.fillText('GO', w * 0.75, h - token.safe.bottom - pad(token, 0.5));
+    ctx.restore();
+  }
+
+  private drawCountdownBanner(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    token: ThemeTokens,
+    phase: CountdownPhase,
+  ): void {
+    if (phase === null) return;
+    const label = phase === 'go' ? 'GO!' : String(phase);
+    ctx.save();
+    ctx.font = `900 ${token.fontDisplay * 2}px ${token.fontFamily}`;
+    ctx.fillStyle = phase === 'go' ? token.success : token.text;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.globalAlpha = phase === 'go' ? 0.95 : 0.85;
+    ctx.fillText(label, w * 0.5, h * 0.38);
+    ctx.restore();
+  }
+
+  private drawRainBanner(ctx: CanvasRenderingContext2D, w: number, _h: number, token: ThemeTokens): void {
+    ctx.save();
+    ctx.fillStyle = 'rgba(56,189,248,0.18)';
+    ctx.fillRect(0, token.safe.top, w, pad(token, 3));
+    ctx.font = `700 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = '#7dd3fc';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('RAIN', w * 0.5, token.safe.top + pad(token, 1.5));
+    ctx.restore();
+  }
+
+  private drawTicker(ctx: CanvasRenderingContext2D, _w: number, h: number, token: ThemeTokens): void {
+    if (this.ticker.length === 0) return;
+    ctx.save();
+    ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    let y = h - token.safe.bottom - pad(token, 5);
+    for (const line of this.ticker) {
+      ctx.globalAlpha = Math.min(1, line.ttl / TICKER_TTL);
+      ctx.fillStyle = token.textMuted;
+      ctx.fillText(line.text, token.safe.left + pad(token), y);
+      y -= token.fontCaption + 4;
+    }
+    ctx.restore();
+  }
+
+  private drawOnboardingHint(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    token: ThemeTokens,
+    accent: string,
+  ): void {
+    if (this.hintText === null) return;
+    ctx.save();
+    const boxW = Math.min(w - pad(token, 4), pad(token, 36));
+    const boxH = pad(token, 4);
+    const x = (w - boxW) * 0.5;
+    const y = h * 0.72;
+    ctx.fillStyle = token.overlay;
+    ctx.beginPath();
+    ctx.roundRect(x, y, boxW, boxH, pad(token, 0.75));
+    ctx.fill();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = token.text;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.hintText, x + boxW * 0.5, y + boxH * 0.5);
+    ctx.restore();
+  }
+
+  private drawFinishOverlay(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    token: ThemeTokens,
+    accent: string,
+    director: RaceDirector,
+  ): void {
+    const standing = director.currentStandings.find((s) => s.isPlayerControlled);
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.font = `900 ${token.fontDisplay}px ${token.fontFamily}`;
+    ctx.fillStyle = token.text;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = director.isRetired ? 'RETIRED' : 'FINISH';
+    ctx.fillText(label, w * 0.5, h * 0.42);
+    if (standing !== undefined) {
+      ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+      ctx.fillStyle = accent;
+      ctx.fillText(`P${standing.position}`, w * 0.5, h * 0.42 + token.fontDisplay);
+    }
+    ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textDim;
+    ctx.fillText('Loading results…', w * 0.5, h * 0.42 + token.fontDisplay + token.fontTitle);
+    ctx.restore();
+  }
+
+  private drawDebugOverlay(
+    ctx: CanvasRenderingContext2D,
+    _w: number,
+    _h: number,
+    token: ThemeTokens,
+    director: RaceDirector,
+  ): void {
+    const player = director.cars.find((c) => c.isPlayerControlled);
+    const lines = [
+      `t=${director.raceClock.toFixed(2)} paused=${director.isPaused}`,
+      `cars=${director.cars.length} rain=${director.rain}`,
+      `dt=${PHYSICS.dt} inputT=${director.playerInputTime.toFixed(2)}`,
+      player !== undefined
+        ? `v=${player.v.toFixed(1)} grip=${player.gripUsage.toFixed(2)} drift=${player.driftState}`
+        : 'no player',
+    ];
+    ctx.save();
+    ctx.font = `${token.fontCaption}px monospace`;
+    ctx.fillStyle = '#4ade80';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    let y = token.safe.top + pad(token, 12);
+    for (const line of lines) {
+      ctx.fillText(line, token.safe.left + pad(token), y);
+      y += token.fontCaption + 2;
+    }
+    ctx.restore();
+  }
+}

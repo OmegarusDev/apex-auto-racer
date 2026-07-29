@@ -1,0 +1,272 @@
+import { BALANCE } from '../data/balance';
+import { OBJECTIVES } from '../data/objectives';
+import { FIRST_NAMES, LAST_NAMES } from '../data/names';
+import { TRAITS } from '../data/traits';
+import type { DisciplineId } from '../data/disciplines';
+import type { ObjectiveKind } from '../data/objectives';
+import type { TraitId } from '../data/traits';
+import type { Rng } from './rng';
+import { mulberry32, randInt, pick, shuffleInPlace } from './rng';
+import type {
+  Driver,
+  GameState,
+  InProgressTournaments,
+  ObjectivesState,
+  RankUnlocked,
+} from './types';
+import {
+  SAVE_VERSION,
+  DEFAULT_VOLUMES,
+  defaultVehicleSave,
+} from './types';
+
+const STORAGE_KEY = 'apex-save-v1';
+
+export type SaveWarning = 'storage_unavailable';
+
+export interface SaveLoadResult {
+  state: GameState | null;
+  warning?: SaveWarning;
+}
+
+let nextDriverId = 1;
+
+function makeDriverId(): string {
+  const id = `drv-${nextDriverId}`;
+  nextDriverId += 1;
+  return id;
+}
+
+function defaultRankUnlocked(): RankUnlocked {
+  return { track: 0, street: 0, rally: 0 };
+}
+
+function defaultTournaments(): InProgressTournaments {
+  return { track: null, street: null, rally: null };
+}
+
+function pickUniqueName(rng: Rng, used: Set<string>): string {
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const name = `${pick(rng, FIRST_NAMES)} ${pick(rng, LAST_NAMES)}`;
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
+  }
+  const fallback = `${pick(rng, FIRST_NAMES)} ${pick(rng, LAST_NAMES)} ${randInt(rng, 2, 99)}`;
+  used.add(fallback);
+  return fallback;
+}
+
+function rollStat(rng: Rng): number {
+  return randInt(rng, BALANCE.startingDriverStatMin, BALANCE.startingDriverStatMax);
+}
+
+function createDriver(rng: Rng, usedNames: Set<string>): Driver {
+  const trait = pick(rng, TRAITS).id as TraitId;
+  return {
+    id: makeDriverId(),
+    name: pickUniqueName(rng, usedNames),
+    trait,
+    skill: rollStat(rng),
+    bravery: rollStat(rng),
+    focus: rollStat(rng),
+    determination: rollStat(rng),
+    xp: 0,
+    level: 1,
+    unspentPoints: 0,
+  };
+}
+
+function drawObjectives(rng: Rng, count: number): ObjectiveKind[] {
+  const pool = OBJECTIVES.map((o) => o.id);
+  shuffleInPlace(rng, pool);
+  return pool.slice(0, count);
+}
+
+function defaultObjectives(rng: Rng): ObjectivesState {
+  return {
+    active: drawObjectives(rng, BALANCE.activeObjectives),
+    completed: [],
+    cycleSeed: randInt(rng, 1, 0x7fffffff),
+  };
+}
+
+function createDisciplineVehicles() {
+  const tier = BALANCE.startingPartTier;
+  return {
+    track: defaultVehicleSave(tier),
+    street: defaultVehicleSave(tier),
+    rally: defaultVehicleSave(tier),
+  } as GameState['vehicles'];
+}
+
+export function createNewGame(rng: Rng, seed: number): GameState {
+  const usedNames = new Set<string>();
+  const roster: Driver[] = [];
+  for (let i = 0; i < BALANCE.startingRosterSize; i++) {
+    roster.push(createDriver(rng, usedNames));
+  }
+
+  return {
+    version: SAVE_VERSION,
+    seed,
+    lastSaveTimestamp: Date.now(),
+    cash: BALANCE.startingCash,
+    vehicles: createDisciplineVehicles(),
+    roster,
+    rankUnlocked: defaultRankUnlocked(),
+    inProgressTournaments: defaultTournaments(),
+    careerStats: { races: 0, wins: 0, earnings: 0 },
+    objectives: defaultObjectives(rng),
+    onboarding: {
+      shownPedalControls: false,
+      shownBrakeHint: false,
+      shownCrashHint: false,
+    },
+    options: {
+      volumes: { ...DEFAULT_VOLUMES },
+    },
+  };
+}
+
+function migrate(raw: unknown): GameState | null {
+  if (raw === null || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const version = typeof obj.version === 'number' ? obj.version : 0;
+
+  if (version > SAVE_VERSION) return null;
+
+  if (version < SAVE_VERSION) {
+    obj.version = SAVE_VERSION;
+  }
+
+  return obj as unknown as GameState;
+}
+
+export class SaveManager {
+  private state: GameState | null = null;
+  private storageAvailable = true;
+  private warning: SaveWarning | undefined;
+
+  get warningFlag(): SaveWarning | undefined {
+    return this.warning;
+  }
+
+  getState(): GameState | null {
+    return this.state;
+  }
+
+  setState(state: GameState): void {
+    this.state = state;
+  }
+
+  hasSave(): boolean {
+    if (this.state !== null) return true;
+    if (!this.canUseStorage()) return false;
+    return localStorage.getItem(STORAGE_KEY) !== null;
+  }
+
+  load(): SaveLoadResult {
+    if (!this.canUseStorage()) {
+      this.warning = 'storage_unavailable';
+      return { state: this.state, warning: this.warning };
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === null) {
+      return { state: null };
+    }
+
+    try {
+      const parsed = migrate(JSON.parse(raw));
+      if (parsed === null) {
+        return { state: null };
+      }
+      this.state = parsed;
+      this.syncDriverIdCounter(parsed);
+      return { state: parsed };
+    } catch {
+      return { state: null };
+    }
+  }
+
+  autosave(): boolean {
+    if (this.state === null) return false;
+    this.state.lastSaveTimestamp = Date.now();
+    return this.persist(this.state);
+  }
+
+  save(state: GameState): boolean {
+    this.state = state;
+    state.lastSaveTimestamp = Date.now();
+    return this.persist(state);
+  }
+
+  reset(): void {
+    this.state = null;
+    if (this.canUseStorage()) {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }
+
+  createNew(rng?: Rng): GameState {
+    const seed = rng !== undefined ? randInt(rng, 1, 0x7fffffff) : Date.now() >>> 0;
+    const gameRng = rng ?? mulberry32(seed);
+    const state = createNewGame(gameRng, seed);
+    this.state = state;
+    this.autosave();
+    return state;
+  }
+
+  private persist(state: GameState): boolean {
+    if (!this.canUseStorage()) {
+      this.state = state;
+      this.warning = 'storage_unavailable';
+      return false;
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      this.warning = undefined;
+      return true;
+    } catch {
+      this.storageAvailable = false;
+      this.state = state;
+      this.warning = 'storage_unavailable';
+      return false;
+    }
+  }
+
+  private canUseStorage(): boolean {
+    if (!this.storageAvailable) return false;
+    try {
+      const probe = '__apex_probe__';
+      localStorage.setItem(probe, '1');
+      localStorage.removeItem(probe);
+      return true;
+    } catch {
+      this.storageAvailable = false;
+      return false;
+    }
+  }
+
+  private syncDriverIdCounter(state: GameState): void {
+    let max = 0;
+    for (const d of state.roster) {
+      const m = /^drv-(\d+)$/.exec(d.id);
+      if (m !== null) {
+        max = Math.max(max, Number(m[1]));
+      }
+    }
+    for (const key of ['track', 'street', 'rally'] as DisciplineId[]) {
+      const t = state.inProgressTournaments[key];
+      if (t === null) continue;
+      for (const d of t.opponentDrivers) {
+        const m = /^drv-(\d+)$/.exec(d.id);
+        if (m !== null) max = Math.max(max, Number(m[1]));
+      }
+    }
+    nextDriverId = max + 1;
+  }
+}

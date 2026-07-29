@@ -1,0 +1,459 @@
+import type { Scene } from '../engine/SceneManager';
+import { getGameContext } from '../engine/GameContext';
+import { RANK_NAMES } from '../data/balance';
+import type { ResultsPayload } from '../engine/raceTypes';
+import type { DriverStatKey } from '../ui/components';
+import {
+  drawButton,
+  handleButton,
+  drawHeader,
+  handleHeader,
+  drawCard,
+  drawDriverSpendPanel,
+  handleDriverSpendPanel,
+  drawUpgradePanel,
+  handleUpgradePanel,
+  driverSpendPanelHeight,
+  upgradePanelHeight,
+  headerHeight,
+  pad,
+  ensureMinTouch,
+  ToastManager,
+  type ButtonDef,
+} from '../ui/components';
+import {
+  buildUi,
+  drawBackground,
+  onSceneEnter,
+  onSceneResize,
+  disciplineAccent,
+  driverSpendData,
+  spendStatPoint,
+  buyPartTier,
+  repairVehicle,
+  launchRace,
+  findDriver,
+} from './sceneUtils';
+import { CampaignScene } from './CampaignScene';
+import { GarageScene } from './GarageScene';
+
+type ResultsPhase = 'podium' | 'standings' | 'payout' | 'xp' | 'done';
+
+export class ResultsScene implements Scene {
+  private readonly payload: ResultsPayload;
+  private readonly tournamentMode: boolean;
+  private phase: ResultsPhase = 'podium';
+  private phaseT = 0;
+  private readonly phaseDuration = 1.2;
+  private toasts = new ToastManager();
+  private upgradeCollapsed = false;
+  private selectedDriverIdx = 0;
+  private applied = false;
+
+  constructor(payload: ResultsPayload, tournamentMode = false) {
+    this.payload = payload;
+    this.tournamentMode = tournamentMode || payload.config.mode === 'tournament';
+  }
+
+  enter(): void {
+    onSceneEnter();
+    this.phase = 'podium';
+    this.phaseT = 0;
+    this.applied = false;
+    this.applyResults();
+    this.showUnlockToasts();
+  }
+
+  exit(): void {}
+
+  onResize(w: number, h: number): void {
+    onSceneResize(w, h);
+  }
+
+  handleBack(): boolean {
+    this.navigateBack();
+    return true;
+  }
+
+  private applyResults(): void {
+    if (this.applied) return;
+    const g = getGameContext();
+    const state = g.state;
+    if (state === null) return;
+
+    state.cash += this.payload.payout.total;
+    state.careerStats.races += 1;
+    if (this.payload.playerPosition === 1) state.careerStats.wins += 1;
+    state.careerStats.earnings += this.payload.payout.total;
+
+    for (const grant of this.payload.driverXp) {
+      const driver = findDriver(state, grant.driverId);
+      if (driver === undefined) continue;
+      if (grant.leveledUp) {
+        driver.level = grant.newLevel ?? driver.level;
+        driver.unspentPoints += 1;
+        driver.xp = 0;
+      } else {
+        driver.xp += grant.xpEarned;
+      }
+    }
+
+    for (const obj of this.payload.objectivesCompleted) {
+      if (!state.objectives.completed.includes(obj)) {
+        state.objectives.completed.push(obj);
+      }
+      state.objectives.active = state.objectives.active.filter((a) => a !== obj);
+    }
+
+    if (this.payload.rankUnlocked !== undefined) {
+      const next = this.payload.rankUnlocked;
+      if (state.rankUnlocked[this.payload.discipline] < next) {
+        state.rankUnlocked[this.payload.discipline] = next;
+      }
+    }
+
+    if (this.tournamentMode && this.payload.config.tournamentDefId !== undefined) {
+      const progress = state.inProgressTournaments[this.payload.discipline];
+      if (progress !== null) {
+        if (this.payload.tournamentComplete) {
+          state.inProgressTournaments[this.payload.discipline] = null;
+        } else if (this.payload.tournamentRaceIndex !== undefined) {
+          progress.raceIndex = this.payload.tournamentRaceIndex + 1;
+        }
+      }
+    }
+
+    g.autosave();
+    this.applied = true;
+  }
+
+  private showUnlockToasts(): void {
+    const accent = disciplineAccent(this.payload.discipline);
+    for (const grant of this.payload.driverXp) {
+      if (grant.leveledUp) {
+        const driver = findDriver(getGameContext().state!, grant.driverId);
+        this.toasts.push(`${driver?.name ?? 'Driver'} reached Lv ${grant.newLevel}!`, accent, 3.5);
+      }
+    }
+    if (this.payload.rankUnlocked !== undefined) {
+      this.toasts.push(
+        `${RANK_NAMES[this.payload.rankUnlocked]} rank unlocked!`,
+        accent,
+        3.5,
+      );
+    }
+  }
+
+  update(dt: number): void {
+    this.toasts.update(dt);
+    this.phaseT += dt;
+    const g = getGameContext();
+    if (g.input.consumeClick() !== null && this.phase !== 'done') {
+      this.advancePhase();
+    } else if (this.phaseT >= this.phaseDuration && this.phase !== 'done') {
+      this.advancePhase();
+    }
+  }
+
+  private advancePhase(): void {
+    const order: ResultsPhase[] = ['podium', 'standings', 'payout', 'xp', 'done'];
+    const idx = order.indexOf(this.phase);
+    if (idx < order.length - 1) {
+      this.phase = order[idx + 1]!;
+      this.phaseT = 0;
+    } else {
+      this.phase = 'done';
+    }
+  }
+
+  private navigateBack(): void {
+    const g = getGameContext();
+    if (this.tournamentMode) {
+      g.scenes.replace(new CampaignScene(this.payload.discipline));
+    } else {
+      g.scenes.replace(new GarageScene());
+    }
+  }
+
+  private raceAgain(): void {
+    const config = {
+      ...this.payload.config,
+      again: true,
+      raceSeed: (this.payload.config.raceSeed + 1) >>> 0,
+    };
+    void launchRace(config, this.toasts);
+  }
+
+  private nextRace(): void {
+    if (this.payload.nextRaceConfig !== undefined) {
+      void launchRace(this.payload.nextRaceConfig, this.toasts);
+    } else {
+      this.navigateBack();
+    }
+  }
+
+  render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const g = getGameContext();
+    const state = g.state;
+    if (state === null) return;
+
+    const accent = disciplineAccent(this.payload.discipline);
+    const { ui, token } = buildUi(w, h, 0, accent);
+    drawBackground(ctx, w, h, token);
+
+    const hh = headerHeight(token);
+    const header = {
+      x: 0,
+      y: 0,
+      w,
+      h: hh + token.safe.top,
+      title: this.tournamentMode ? 'Tournament Results' : 'Race Results',
+      back: this.phase === 'done',
+      cash: state.cash,
+      onBack: () => this.navigateBack(),
+    };
+    drawHeader(ctx, header, ui);
+
+    const contentX = pad(token, 2) + token.safe.left;
+    const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
+    let y = hh + token.safe.top + pad(token);
+
+    if (this.phase === 'podium' || this.phase === 'done') {
+      this.drawPodium(ctx, contentX, y, contentW, ui);
+      y += pad(token, 16);
+    }
+
+    if ((this.phase === 'standings' || this.phase === 'done') && this.tournamentMode) {
+      y = this.drawStandings(ctx, contentX, y, contentW, ui);
+    }
+
+    if (this.phase === 'payout' || this.phase === 'done') {
+      y = this.drawPayout(ctx, contentX, y, contentW, ui);
+    }
+
+    if (this.phase === 'xp' || this.phase === 'done') {
+      y = this.drawXpSection(ctx, contentX, y, contentW, ui, state);
+    }
+
+    if (this.phase === 'done') {
+      const btnH = ensureMinTouch(pad(token, 5.5), token);
+      const btnGap = pad(token, 0.75);
+      const btnW = (contentW - btnGap) / 2;
+      let btnY = h - token.safe.bottom - pad(token, 2) - btnH;
+
+      const againBtn: ButtonDef = {
+        x: contentX,
+        y: btnY,
+        w: btnW,
+        h: btnH,
+        label: 'Race Again',
+        onClick: () => this.raceAgain(),
+      };
+      const nextBtn: ButtonDef = {
+        x: contentX + btnW + btnGap,
+        y: btnY,
+        w: btnW,
+        h: btnH,
+        label: this.payload.nextRaceConfig !== undefined ? 'Next Race' : 'Back',
+        primary: true,
+        onClick: () => {
+          if (this.payload.nextRaceConfig !== undefined) this.nextRace();
+          else this.navigateBack();
+        },
+      };
+      drawButton(ctx, againBtn, ui);
+      drawButton(ctx, nextBtn, ui);
+      handleButton(againBtn, ui);
+      handleButton(nextBtn, ui);
+    }
+
+    if (this.phase !== 'done') {
+      ctx.save();
+      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.textDim;
+      ctx.textAlign = 'center';
+      ctx.fillText('Tap to skip', w * 0.5, h - token.safe.bottom - pad(token));
+      ctx.restore();
+    }
+
+    handleHeader(header, ui);
+    this.toasts.draw(ctx, ui);
+  }
+
+  private drawPodium(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    ui: ReturnType<typeof buildUi>['ui'],
+  ): number {
+    const { token, accent } = ui;
+    const top3 = [...this.payload.finishers].sort((a, b) => a.position - b.position).slice(0, 3);
+    const h = pad(token, 14);
+    drawCard(ctx, { x, y, w, h }, ui);
+
+    ctx.save();
+    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+    ctx.fillStyle = token.text;
+    ctx.textAlign = 'center';
+    ctx.fillText(`P${this.payload.playerPosition}`, x + w * 0.5, y + pad(token, 1.5));
+
+    const positions = [1, 0, 2];
+    const podiumW = w / 3;
+    for (let i = 0; i < 3; i++) {
+      const finisher = top3[positions[i]!];
+      if (finisher === undefined) continue;
+      const px = x + i * podiumW + podiumW * 0.5;
+      const barH = pad(token, 4 + (positions[i] === 0 ? 4 : positions[i] === 1 ? 2 : 0));
+      ctx.fillStyle = finisher.isPlayer ? accent : token.bgElevated;
+      ctx.fillRect(px - podiumW * 0.3, y + h - pad(token) - barH, podiumW * 0.6, barH);
+      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.text;
+      ctx.fillText(finisher.name.split(' ')[0] ?? finisher.name, px, y + h - pad(token) - barH - pad(token, 0.5));
+    }
+
+    if (this.payload.handsOffBonus > 0) {
+      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.success;
+      ctx.fillText(
+        `Hands-off bonus: +$${this.payload.handsOffBonus} (${Math.round(this.payload.handsOffRatio * 100)}% idle)`,
+        x + w * 0.5,
+        y + pad(token, 1.5) + token.fontTitle + pad(token, 0.5),
+      );
+    }
+    ctx.restore();
+    return h;
+  }
+
+  private drawStandings(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    ui: ReturnType<typeof buildUi>['ui'],
+  ): number {
+    const { token } = ui;
+    const rows = this.payload.standings.length;
+    const h = pad(token, 2) + token.fontBody + rows * pad(token, 4);
+    drawCard(ctx, { x, y, w, h }, ui);
+    ctx.save();
+    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textMuted;
+    ctx.textAlign = 'left';
+    ctx.fillText('Championship Standings', x + pad(token, 1.5), y + pad(token, 1));
+    let rowY = y + pad(token, 1) + token.fontBody + pad(token, 0.75);
+    const sorted = [...this.payload.standings].sort((a, b) => b.points - a.points);
+    for (let i = 0; i < sorted.length; i++) {
+      const entry = sorted[i]!;
+      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+      ctx.fillStyle = entry.teamId === 0 ? ui.accent : token.text;
+      ctx.fillText(`${i + 1}. ${entry.name}`, x + pad(token, 1.5), rowY);
+      ctx.textAlign = 'right';
+      ctx.fillText(`${entry.points} pts`, x + w - pad(token, 1.5), rowY);
+      ctx.textAlign = 'left';
+      rowY += pad(token, 4);
+    }
+    ctx.restore();
+    return y + h + pad(token, 1.5);
+  }
+
+  private drawPayout(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    ui: ReturnType<typeof buildUi>['ui'],
+  ): number {
+    const { token } = ui;
+    const p = this.payload.payout;
+    const lines: { label: string; value: number }[] = [
+      { label: 'Base', value: p.base },
+      { label: 'Placement', value: p.placement },
+      { label: 'Objectives', value: p.objective },
+      { label: 'Hands-off', value: p.handsOff },
+      { label: 'Tournament', value: p.tournament },
+    ].filter((row) => row.value > 0);
+
+    const h = pad(token, 2) + token.fontBody + lines.length * token.fontBody * 1.4 + token.fontTitle;
+    drawCard(ctx, { x, y, w, h }, ui);
+    ctx.save();
+    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textMuted;
+    ctx.textAlign = 'left';
+    ctx.fillText('Payout', x + pad(token, 1.5), y + pad(token, 1));
+    let ly = y + pad(token, 1) + token.fontBody + pad(token, 0.75);
+    for (const row of lines) {
+      ctx.fillStyle = token.text;
+      ctx.fillText(row.label, x + pad(token, 1.5), ly);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = ui.accent;
+      ctx.fillText(`+$${row.value}`, x + w - pad(token, 1.5), ly);
+      ctx.textAlign = 'left';
+      ly += token.fontBody * 1.4;
+    }
+    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+    ctx.fillStyle = token.text;
+    ctx.fillText('Total', x + pad(token, 1.5), ly);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = token.success;
+    ctx.fillText(`$${p.total}`, x + w - pad(token, 1.5), ly);
+    ctx.restore();
+    return y + h + pad(token, 1.5);
+  }
+
+  private drawXpSection(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    ui: ReturnType<typeof buildUi>['ui'],
+    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
+  ): number {
+    const grants = this.payload.driverXp;
+    if (grants.length === 0) return y;
+    const grant = grants[this.selectedDriverIdx % grants.length];
+    if (grant === undefined) return y;
+    const driver = findDriver(state, grant.driverId);
+    if (driver === undefined) return y;
+
+    const spendPanel = {
+      x,
+      y,
+      w,
+      driver: driverSpendData(driver),
+      onSpend: (stat: DriverStatKey) => {
+        if (spendStatPoint(driver, stat)) getGameContext().autosave();
+      },
+    };
+    drawDriverSpendPanel(ctx, spendPanel, ui);
+    handleDriverSpendPanel(spendPanel, ui);
+    y += driverSpendPanelHeight(spendPanel, ui.token) + pad(ui.token, 1.5);
+
+    const vehicle = state.vehicles[this.payload.discipline];
+    const upgradePanel = {
+      x,
+      y,
+      w,
+      partTiers: vehicle.partTiers,
+      condition: vehicle.condition,
+      cash: state.cash,
+      collapsed: this.upgradeCollapsed,
+      onToggleCollapse: () => {
+        this.upgradeCollapsed = !this.upgradeCollapsed;
+      },
+      onBuy: (part: import('../data/parts').PartCategory) => {
+        if (buyPartTier(state, this.payload.discipline, part)) getGameContext().autosave();
+      },
+      onRepair: () => {
+        if (repairVehicle(state, this.payload.discipline)) getGameContext().autosave();
+      },
+    };
+    drawUpgradePanel(ctx, upgradePanel, ui);
+    handleUpgradePanel(upgradePanel, ui);
+    return y + upgradePanelHeight(upgradePanel, ui.token);
+  }
+}
+
+export function createResultsScene(payload: ResultsPayload): ResultsScene {
+  return new ResultsScene(payload, payload.config.mode === 'tournament');
+}

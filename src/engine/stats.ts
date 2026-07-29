@@ -1,0 +1,122 @@
+import { BALANCE } from '../data/balance';
+import { PHYSICS } from '../data/physics';
+import { PARTS } from '../data/parts';
+import { getDiscipline } from '../data/disciplines';
+import type { DisciplineId } from '../data/disciplines';
+import type { Driver, EffectiveStats, VehicleParts } from './types';
+
+interface DisplayStats {
+  topSpeed: number;
+  acceleration: number;
+  braking: number;
+  grip: number;
+  downforce: number;
+}
+
+function clampCondition(condition: number): number {
+  return Math.max(BALANCE.conditionMin, Math.min(BALANCE.conditionMax, condition));
+}
+
+function sumPartIncrements(partTiers: VehicleParts): DisplayStats {
+  const totals: DisplayStats = {
+    topSpeed: 0,
+    acceleration: 0,
+    braking: 0,
+    grip: 0,
+    downforce: 0,
+  };
+
+  for (const part of PARTS) {
+    const tier = partTiers[part.id] ?? 0;
+    if (tier <= 0) continue;
+
+    const per = part.perTier;
+    if (per.topSpeed !== undefined) totals.topSpeed += per.topSpeed * tier;
+    if (per.acceleration !== undefined) totals.acceleration += per.acceleration * tier;
+    if (per.braking !== undefined) totals.braking += per.braking * tier;
+    if (per.grip !== undefined) totals.grip += per.grip * tier;
+    if (per.downforce !== undefined) totals.downforce += per.downforce * tier;
+  }
+
+  return totals;
+}
+
+function toPhysicsParams(display: DisplayStats, suspTier: number, condition: number): EffectiveStats {
+  const { topSpeed, acceleration, braking, grip, downforce } = display;
+
+  const vMax = 30 + 0.4 * topSpeed;
+  const aAccel = 5 + 0.1 * acceleration;
+  const aBrake = 12 + 0.18 * braking;
+  const gripFactor = 0.75 + 0.005 * grip;
+  const D = 0.006 * downforce;
+
+  let kUnder = PHYSICS.kUnderBase * (1 - 0.06 * suspTier);
+  let lineNoise = PHYSICS.lineNoiseBase * (1 - 0.08 * suspTier);
+
+  const clamped = clampCondition(condition);
+  const normalized = (clamped - BALANCE.conditionMin) / (BALANCE.conditionMax - BALANCE.conditionMin);
+  const condGrip = 0.88 + 0.12 * normalized;
+  const condTop = 0.97 + 0.03 * normalized;
+
+  lineNoise *= 2 - normalized;
+  kUnder *= 1 + 0.5 * (1 - normalized);
+
+  return {
+    topSpeed,
+    acceleration,
+    braking,
+    grip,
+    downforce,
+    vMax,
+    aAccel,
+    aBrake,
+    gripFactor,
+    D,
+    kUnder,
+    lineNoise,
+    condGrip,
+    condTop,
+  };
+}
+
+/**
+ * Effective stats pipeline (plan 4.1–4.4):
+ * discipline base + part increments → physics params + condition/suspension hooks.
+ */
+export function effectiveStats(
+  discipline: DisciplineId,
+  partTiers: VehicleParts,
+  condition: number,
+  driver?: Driver,
+): EffectiveStats {
+  const base = getDiscipline(discipline).baseStats;
+  const parts = sumPartIncrements(partTiers);
+
+  let topSpeed = base.topSpeed + parts.topSpeed;
+  let acceleration = base.acceleration + parts.acceleration;
+  let braking = base.braking + parts.braking;
+  let grip = base.grip + parts.grip;
+  let downforce = base.downforce + parts.downforce;
+
+  if (driver !== undefined) {
+    // Loose Cannon jitter is applied per-race by RaceDirector; driver optional here for future hooks.
+    void driver;
+  }
+
+  const suspTier = partTiers.suspension ?? 0;
+  return toPhysicsParams(
+    { topSpeed, acceleration, braking, grip, downforce },
+    suspTier,
+    condition,
+  );
+}
+
+/** Suspension load-transfer magnitude scale (plan 4.1). */
+export function suspensionBalanceScale(suspTier: number): number {
+  return 1 - 0.06 * suspTier;
+}
+
+/** Suspension load-transfer time-constant scale (plan 4.1). */
+export function suspensionBalanceTauScale(suspTier: number): number {
+  return 1 - 0.08 * suspTier;
+}

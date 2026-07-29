@@ -1,0 +1,17 @@
+{
+  "name": "apex-auto-racer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "terser": "^5.49.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.5",
+    "vite-node": "^6.0.0"
+  }
+}

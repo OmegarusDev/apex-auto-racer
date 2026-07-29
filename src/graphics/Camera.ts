@@ -1,0 +1,86 @@
+import { PHYSICS } from '../data/physics.ts';
+import type { Vec2 } from '../engine/types.ts';
+
+export type CameraMode = 'countdown' | 'follow';
+
+export interface CameraTransform {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+export class Camera {
+  mode: CameraMode = 'follow';
+  x = 0;
+  y = 0;
+  zoom = 1;
+
+  private targetX = 0;
+  private targetY = 0;
+  private targetZoom = 1;
+
+  /** Fit all car world positions on screen (countdown). */
+  setCountdownTargets(
+    carPositions: readonly Vec2[],
+    screenW: number,
+    screenH: number,
+    padding = 40,
+  ): void {
+    this.mode = 'countdown';
+    if (carPositions.length === 0) {
+      this.targetX = 0;
+      this.targetY = 0;
+      this.targetZoom = 1;
+      return;
+    }
+
+    let minX = carPositions[0]!.x;
+    let maxX = carPositions[0]!.x;
+    let minY = carPositions[0]!.y;
+    let maxY = carPositions[0]!.y;
+    for (let i = 1; i < carPositions.length; i++) {
+      const p = carPositions[i]!;
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+
+    const spanX = Math.max(maxX - minX, 20);
+    const spanY = Math.max(maxY - minY, 20);
+    this.targetX = (minX + maxX) * 0.5;
+    this.targetY = (minY + maxY) * 0.5;
+
+    const worldPxX = spanX * PHYSICS.pxPerM;
+    const worldPxY = spanY * PHYSICS.pxPerM;
+    const fitZoom = Math.min(
+      (screenW - padding * 2) / worldPxX,
+      (screenH - padding * 2) / worldPxY,
+    );
+    this.targetZoom = clamp(fitZoom, PHYSICS.zoomMin, PHYSICS.zoomMax);
+  }
+
+  /** Follow a single car; zoom scales with speed. */
+  setFollowTarget(worldPos: Vec2, speedMs: number): void {
+    this.mode = 'follow';
+    this.targetX = worldPos.x;
+    this.targetY = worldPos.y;
+    this.targetZoom = clamp(1.15 - 0.5 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
+  }
+
+  update(dt: number): void {
+    const posK = 1 - Math.exp(-PHYSICS.cameraPosRate * dt);
+    const zoomK = 1 - Math.exp(-PHYSICS.cameraZoomRate * dt);
+    this.x += (this.targetX - this.x) * posK;
+    this.y += (this.targetY - this.y) * posK;
+    this.zoom += (this.targetZoom - this.zoom) * zoomK;
+  }
+
+  getTransform(): CameraTransform {
+    return { x: this.x, y: this.y, zoom: this.zoom };
+  }
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}

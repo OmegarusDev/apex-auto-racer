@@ -4,35 +4,23 @@
   </a>
 </p>
 
-<p align="center"><sub>Offline shortcut: download <a href="PLAY.html"><code>PLAY.html</code></a> and open it locally — it launches the hosted game.</sub></p>
+<p align="center"><sub>Offline shortcut: <a href="PLAY.html"><code>PLAY.html</code></a> opens the hosted game.</sub></p>
 
 # Apex Auto-Racer
 
-Idle / Scalextric-style autobattler. Hold throttle and brake; steering is automatic. Drivers act as fallible autopilots — upgrades shift the game toward hands-off watching.
+Idle / Scalextric-style autobattler. You hold throttle and brake; steering is automatic. Drivers are fallible autopilots — upgrades push the game toward hands-off watching.
 
-## Run
+## How to run
 
 ```bash
+npm install
 npm run play
 ```
 
-Opens http://127.0.0.1:5173/ (or `./scripts/play.sh` if already running). Debug: `?debug=1`.
-
-## Build
-
-```bash
-npm run build
-```
-
-Production bundle target: &lt; 1MB (currently ~130KB JS across chunks).
+Serves at http://127.0.0.1:5173/ (`npm run build` / `npm run preview` for production). Debug: `?debug=1`.
 
 ## Stack
 
-- Vite + TypeScript (strict), zero runtime dependencies
-- Canvas 2D + Web Audio (no external media)
-- localStorage save (`apex-save-v1`)
-- Deterministic seeded PRNG (mulberry32) — no `Math.random`
+Vite + TypeScript (strict), Canvas 2D, Web Audio, localStorage (`apex-save-v1`). Zero runtime dependencies. Deterministic mulberry32 PRNG — no `Math.random`. Bundle target &lt; 1MB.
 
-## Spec
-
-See the engineering plan and `DEVIATIONS.md` for process/implementation notes.
+Maintainer notes: see `DEVIATIONS.md`.

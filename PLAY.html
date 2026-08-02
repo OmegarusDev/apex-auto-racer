@@ -12,6 +12,7 @@
       --muted: #8a96a0;
       --accent: #c43c2e;
       --accent-hover: #d94a3a;
+      --accent-shadow: #7a2418;
     }
     * { box-sizing: border-box; }
     body {
@@ -28,10 +29,10 @@
     main {
       text-align: center;
       padding: 2rem 1.25rem;
-      max-width: 28rem;
+      max-width: 26rem;
     }
     h1 {
-      margin: 0 0 0.4rem;
+      margin: 0 0 0.5rem;
       font-size: clamp(1.5rem, 5vw, 2rem);
       font-weight: 700;
       letter-spacing: 0.04em;
@@ -40,12 +41,12 @@
       margin: 0 0 1.5rem;
       color: var(--muted);
       font-size: 0.95rem;
-      line-height: 1.4;
+      line-height: 1.45;
     }
     a.play {
       display: inline-block;
       padding: 0.95rem 2.4rem;
-      font-size: 1.2rem;
+      font-size: 1.15rem;
       font-weight: 700;
       letter-spacing: 0.08em;
       text-decoration: none;
@@ -54,11 +55,14 @@
       background: var(--accent);
       border: 1px solid #e8a090;
       border-radius: 6px;
-      box-shadow: 0 4px 0 #7a2418;
+      box-shadow: 0 4px 0 var(--accent-shadow);
       transition: background 0.15s ease, transform 0.1s ease;
     }
     a.play:hover { background: var(--accent-hover); }
-    a.play:active { transform: translateY(2px); box-shadow: 0 2px 0 #7a2418; }
+    a.play:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 0 var(--accent-shadow);
+    }
     noscript p { margin-top: 1rem; }
   </style>
   <script>
@@ -68,7 +72,7 @@
 <body>
   <main>
     <h1>Apex Auto-Racer</h1>
-    <p>Opening the live game… If nothing happens, use the button below.</p>
+    <p>Redirecting to the live game. If nothing happens, tap below.</p>
     <a class="play" href="https://omegarusdev.github.io/apex-auto-racer/">▶ Play Now</a>
     <noscript>
       <p><a href="https://omegarusdev.github.io/apex-auto-racer/">Continue to the game</a></p>

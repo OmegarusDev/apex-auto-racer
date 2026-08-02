@@ -168,13 +168,15 @@ export class VectorRenderer {
     ctx.rotate(-heading);
 
     if (isPlayer) {
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 14 * camera.zoom;
-      ctx.strokeStyle = `${color}88`;
-      ctx.lineWidth = 3 * camera.zoom;
+      // Cheap outline halo — avoid shadowBlur (expensive gaussian blur every car frame).
+      ctx.strokeStyle = `${color}55`;
+      ctx.lineWidth = 4 * camera.zoom;
+      roundRectPath(ctx, -len * 0.54, -wid * 0.64, len * 1.08, wid * 1.28, wid * 0.38);
+      ctx.stroke();
+      ctx.strokeStyle = `${color}aa`;
+      ctx.lineWidth = 2 * camera.zoom;
       roundRectPath(ctx, -len * 0.52, -wid * 0.62, len * 1.04, wid * 1.24, wid * 0.35);
       ctx.stroke();
-      ctx.shadowBlur = 0;
     }
 
     ctx.fillStyle = color;

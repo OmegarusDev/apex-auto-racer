@@ -41,6 +41,7 @@ import { CampaignScene } from './CampaignScene';
 type ResultsPhase = 'podium' | 'standings' | 'payout' | 'xp' | 'done';
 
 export class ResultsScene implements Scene {
+  readonly raceLaunchReplace = true;
   private readonly payload: ResultsPayload;
   private readonly tournamentMode: boolean;
   private phase: ResultsPhase = 'podium';

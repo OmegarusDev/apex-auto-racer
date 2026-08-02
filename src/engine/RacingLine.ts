@@ -422,20 +422,29 @@ export interface InterpolatedNode {
   s: number;
 }
 
-/** Linear interpolation of node data at s (wraps at L). */
-export function interpolateAtS(
+/** Interpolate node data at s into `out` (wraps at L). Prefer this on hot paths. */
+export function interpolateAtSInto(
   nodes: readonly RacingLineNode[],
   trackLength: number,
   s: number,
+  out: InterpolatedNode,
 ): InterpolatedNode {
   if (nodes.length === 0) throw new Error('interpolateAtS: empty nodes');
   let distS = s % trackLength;
   if (distS < 0) distS += trackLength;
 
   const n = nodes.length;
+  // Binary search for segment start (same index logic as lookupAtS).
   let i0 = 0;
-  for (let i = 0; i < n; i++) {
-    if (nodes[i]!.s <= distS) i0 = i;
+  if (distS > nodes[0]!.s) {
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (nodes[mid]!.s <= distS) lo = mid;
+      else hi = mid;
+    }
+    i0 = lo;
   }
   const i1 = wrapIndex(i0 + 1, n);
   const n0 = nodes[i0]!;
@@ -447,20 +456,46 @@ export function interpolateAtS(
   if (localS < 0) localS += trackLength;
   const t = ds > EPS ? localS / ds : 0;
 
-  const tangent = normalize(lerpVec(n0.tangent, n1.tangent, t));
-  const normal = leftNormal(tangent);
+  out.pos.x = lerp(n0.pos.x, n1.pos.x, t);
+  out.pos.y = lerp(n0.pos.y, n1.pos.y, t);
+  const tx = lerp(n0.tangent.x, n1.tangent.x, t);
+  const ty = lerp(n0.tangent.y, n1.tangent.y, t);
+  const tl = Math.hypot(tx, ty);
+  if (tl < EPS) {
+    out.tangent.x = 1;
+    out.tangent.y = 0;
+  } else {
+    out.tangent.x = tx / tl;
+    out.tangent.y = ty / tl;
+  }
+  out.normal.x = -out.tangent.y;
+  out.normal.y = out.tangent.x;
+  out.width = lerp(n0.width, n1.width, t);
+  out.runoffWidth = lerp(n0.runoffWidth, n1.runoffWidth, t);
+  out.kappa = lerp(n0.kappa, n1.kappa, t);
+  out.kappaLine = lerp(n0.kappaLine, n1.kappaLine, t);
+  out.o = lerp(n0.o, n1.o, t);
+  out.s = distS;
+  return out;
+}
 
-  return {
-    pos: lerpVec(n0.pos, n1.pos, t),
-    tangent,
-    normal,
-    width: lerp(n0.width, n1.width, t),
-    runoffWidth: lerp(n0.runoffWidth, n1.runoffWidth, t),
-    kappa: lerp(n0.kappa, n1.kappa, t),
-    kappaLine: lerp(n0.kappaLine, n1.kappaLine, t),
-    o: lerp(n0.o, n1.o, t),
-    s: distS,
-  };
+/** Linear interpolation of node data at s (wraps at L). Allocates a new node. */
+export function interpolateAtS(
+  nodes: readonly RacingLineNode[],
+  trackLength: number,
+  s: number,
+): InterpolatedNode {
+  return interpolateAtSInto(nodes, trackLength, s, {
+    pos: { x: 0, y: 0 },
+    tangent: { x: 1, y: 0 },
+    normal: { x: 0, y: 1 },
+    width: 0,
+    runoffWidth: 0,
+    kappa: 0,
+    kappaLine: 0,
+    o: 0,
+    s: 0,
+  });
 }
 
 /** Convert track-relative (s, l) to world coordinates (centerline + l * normal). */

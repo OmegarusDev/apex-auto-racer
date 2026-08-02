@@ -54,11 +54,18 @@ function sampleGhost(trace: GhostTrace, carId: string, time: number): GhostSampl
   const car = trace.find((g) => g.carId === carId);
   if (car === undefined || car.samples.length === 0) return null;
 
+  const samples = car.samples;
+  if (time <= samples[0]!.time) return samples[0]!;
+  if (time >= samples[samples.length - 1]!.time) return samples[samples.length - 1]!;
+
   let lo = 0;
-  for (let i = 0; i < car.samples.length; i++) {
-    if (car.samples[i]!.time <= time) lo = i;
+  let hi = samples.length - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (samples[mid]!.time <= time) lo = mid;
+    else hi = mid;
   }
-  return car.samples[lo] ?? null;
+  return samples[lo] ?? null;
 }
 
 export class RaceScene implements Scene {
@@ -79,7 +86,7 @@ export class RaceScene implements Scene {
   private prevCarSamples = new Map<string, { x: number; y: number; s: number; l: number }>();
   private prevCarDeslots = new Map<string, number>();
   private ticker: TickerLine[] = [];
-  private seenEventCount = 0;
+  private seenEventSeq = 0;
   private hintText: string | null = null;
   private hintT = 0;
   private ghostCarId: string | null = null;
@@ -87,6 +94,8 @@ export class RaceScene implements Scene {
   private lastDt = 1 / 60;
   private prevCarWallHits = new Map<string, number>();
   private enterError: string | null = null;
+  /** Results dynamic import failed after finish — Escape/Back should leave to Campaign. */
+  private resultsImportFailed = false;
   private stats: RaceObjectiveStats = {
     playerBrakeUsed: false,
     playerWallHits: 0,
@@ -123,7 +132,7 @@ export class RaceScene implements Scene {
       this.prevCarSamples.clear();
       this.prevCarDeslots.clear();
       this.ticker = [];
-      this.seenEventCount = 0;
+      this.seenEventSeq = 0;
       this.hintText = null;
       this.hintT = 0;
 
@@ -182,6 +191,10 @@ export class RaceScene implements Scene {
   onResize(_w: number, _h: number): void {}
 
   handleBack(): boolean {
+    if (this.resultsImportFailed) {
+      this.leaveToCampaign();
+      return true;
+    }
     if (this.enterError !== null || this.director === null) {
       this.g.scenes.back();
       return true;
@@ -191,6 +204,17 @@ export class RaceScene implements Scene {
       this.openPause();
     }
     return true;
+  }
+
+  private leaveToCampaign(): void {
+    const discipline = this.launch.discipline;
+    void import('./CampaignScene')
+      .then((mod) => {
+        this.g.scenes.replace(new mod.CampaignScene(discipline));
+      })
+      .catch(() => {
+        this.g.scenes.back();
+      });
   }
 
   update(dt: number): void {
@@ -224,7 +248,7 @@ export class RaceScene implements Scene {
     this.updateCountdownAudio(director.countdown);
     this.updateCarAudioAndParticles(director);
     this.updateCamera(director);
-    this.updateTicker(director.recentEvents, dt);
+    this.updateTicker(director.recentEvents, director.eventSequence, dt);
     this.updateHints(dt);
 
     if (director.isRaceFinished) {
@@ -393,6 +417,7 @@ export class RaceScene implements Scene {
       })
       .catch((err) => {
         console.error('[apex] ResultsScene import failed', err);
+        this.resultsImportFailed = true;
         this.enterError = err instanceof Error ? err.message || err.name : String(err);
         this.director = null;
         this.g.input.setMode('menu');
@@ -409,7 +434,10 @@ export class RaceScene implements Scene {
       h: btnH,
       label: 'Back',
       primary: true,
-      onClick: () => this.g.scenes.back(),
+      onClick: () => {
+        if (this.resultsImportFailed) this.leaveToCampaign();
+        else this.g.scenes.back();
+      },
     };
   }
 
@@ -611,9 +639,11 @@ export class RaceScene implements Scene {
     this.particles.update(this.lastDt);
   }
 
-  private updateTicker(events: readonly RaceEvent[], dt: number): void {
-    if (events.length > this.seenEventCount) {
-      const fresh = events.slice(this.seenEventCount);
+  private updateTicker(events: readonly RaceEvent[], eventSeq: number, dt: number): void {
+    if (eventSeq > this.seenEventSeq) {
+      const fresh = events
+        .filter((ev) => ev.seq > this.seenEventSeq)
+        .sort((a, b) => a.seq - b.seq);
       for (const ev of fresh) {
         const name = ev.driverName ?? ev.carId;
         let text = `${ev.time.toFixed(1)}s — ${name}`;
@@ -643,7 +673,7 @@ export class RaceScene implements Scene {
         }
         this.ticker.unshift({ text, ttl: TICKER_TTL });
       }
-      this.seenEventCount = events.length;
+      this.seenEventSeq = eventSeq;
       this.ticker = this.ticker.slice(0, TICKER_MAX);
     }
 

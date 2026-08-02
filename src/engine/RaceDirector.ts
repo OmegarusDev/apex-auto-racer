@@ -20,7 +20,7 @@ import {
   generateTrack,
 } from './TrackGenerator';
 import type { TrackData } from './TrackGenerator';
-import { interpolateAtS } from './RacingLine';
+import { interpolateAtSInto, type InterpolatedNode } from './RacingLine';
 import {
   buildVehicleContext,
   computeBrakeAuthority,
@@ -153,10 +153,24 @@ interface RaceCarEntry {
 }
 
 const EVENT_BUFFER_SIZE = 128;
+const GHOST_MAX_SAMPLES_PER_CAR = 1500;
 const GRID_ROW_SPACING = 9;
 const GRID_COL_OFFSET = 3.2;
 const COUNTDOWN_STEP_SEC = 1;
 const GO_FLASH_SEC = 0.5;
+
+/** Scratch node for hot-path track lookups (no per-call alloc). */
+const nodeScratch: InterpolatedNode = {
+  pos: { x: 0, y: 0 },
+  tangent: { x: 1, y: 0 },
+  normal: { x: 0, y: 1 },
+  width: 0,
+  runoffWidth: 0,
+  kappa: 0,
+  kappaLine: 0,
+  o: 0,
+  s: 0,
+};
 
 function clampStat(v: number): number {
   return Math.max(1, Math.min(100, v));
@@ -185,7 +199,7 @@ function displaceAlongTrack(car: CarSimState, delta: number, trackLength: number
 }
 
 function clampLateralToTrack(car: CarSimState, track: TrackData): void {
-  const node = interpolateAtS(track.nodes, track.length, car.s);
+  const node = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
   const wallLimit = wallLimitFor(node.width, node.runoffWidth);
   if (Math.abs(car.l) > wallLimit) {
     car.l = Math.sign(car.l || 1) * wallLimit;
@@ -286,7 +300,7 @@ function computeDraft(
   totalCars: number,
 ): number {
   const car = entries[idx]!.car;
-  const node = interpolateAtS(track.nodes, trackLength, car.s);
+  const node = interpolateAtSInto(track.nodes, trackLength, car.s, nodeScratch);
   const kappaAbs = Math.abs(node.kappaLine);
   // Corners kill the tow; mild bends still allow a trickle.
   const cornerFade = Math.max(
@@ -299,6 +313,10 @@ function computeDraft(
   for (let j = 0; j < entries.length; j++) {
     if (j === idx) continue;
     const other = entries[j]!.car;
+    // Ribbon proximity reject before full race-distance gap.
+    const ds = Math.abs(other.s - car.s);
+    const wrapDs = Math.min(ds, trackLength - ds);
+    if (wrapDs > BALANCE.draftGapMax) continue;
     const gap = arcGap(car, other, trackLength);
     if (gap <= 0 || gap > BALANCE.draftGapMax) continue;
     const lat = Math.abs(other.l - car.l);
@@ -461,10 +479,16 @@ export class RaceDirector {
   private countdownRemaining = 3 * COUNTDOWN_STEP_SEC + GO_FLASH_SEC;
   private countdownPhase: CountdownPhase = 3;
   private standings: StandingEntry[] = [];
+  /** carId → index into standings (refreshed with standings). */
+  private standingIndexById = new Map<string, number>();
   private standingsTimer = 0;
   private events: RaceEvent[] = [];
   private eventHead = 0;
+  private eventSeq = 0;
   private ghostTrace: GhostTrace = [];
+  private ghostSampleCounter = 0;
+  /** Stable car refs — entries never reshuffle mid-race. */
+  private carsView: CarSimState[] = [];
   private rng: Rng;
   private muSurface: number;
   private globalRainStack: Modifier[];
@@ -512,7 +536,12 @@ export class RaceDirector {
   }
 
   get cars(): readonly CarSimState[] {
-    return this.entries.map((e) => e.car);
+    return this.carsView;
+  }
+
+  /** Monotonic event counter (increments even after the ring buffer is full). */
+  get eventSequence(): number {
+    return this.eventSeq;
   }
 
   /** Headless/debug: frames with pre-resolve body overlap / residual after resolve. */
@@ -711,7 +740,10 @@ export class RaceDirector {
       };
     });
 
+    this.carsView = this.entries.map((e) => e.car);
     this.ghostTrace = this.entries.map((e) => ({ carId: e.car.id, samples: [] }));
+    this.ghostSampleCounter = 0;
+    this.eventSeq = 0;
     this.refreshStandings(true);
   }
 
@@ -752,7 +784,9 @@ export class RaceDirector {
 
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
-      const position = this.standings.find((s) => s.carId === entry.car.id)?.position ?? i + 1;
+      const standingIdx = this.standingIndexById.get(entry.car.id);
+      const position =
+        standingIdx !== undefined ? this.standings[standingIdx]!.position : i + 1;
 
       entry.draft = computeDraft(
         i,
@@ -828,7 +862,10 @@ export class RaceDirector {
     this.resolveContacts(dt);
 
     if (brainTick) {
-      this.recordGhostSamples();
+      this.ghostSampleCounter += 1;
+      if (this.ghostSampleCounter % BALANCE.ghostSampleEveryN === 0) {
+        this.recordGhostSamples();
+      }
     }
 
     this.standingsTimer += dt;
@@ -842,7 +879,8 @@ export class RaceDirector {
 
   private tickBrain(idx: number): BrainOutput {
     const entry = this.entries[idx]!;
-    const standing = this.standings.find((s) => s.carId === entry.car.id);
+    const standingIdx = this.standingIndexById.get(entry.car.id);
+    const standing = standingIdx !== undefined ? this.standings[standingIdx] : undefined;
     const position = standing?.position ?? idx + 1;
     const leader = this.standings[0];
     const leadingMarginSec =
@@ -938,8 +976,11 @@ export class RaceDirector {
 
           const dS = raceDistance(b.car, trackLength) - raceDistance(a.car, trackLength);
           const absS = Math.abs(dS);
+          // Far along-track: neither soft bumper nor solid AABB can fire.
+          if (absS >= proxS) continue;
           const dL = b.car.l - a.car.l;
           const absL = Math.abs(dL);
+          if (absL >= minL) continue;
 
           let leader: RaceCarEntry;
           let follower: RaceCarEntry;
@@ -994,8 +1035,8 @@ export class RaceDirector {
             clampLateralToTrack(b.car, this.track);
             a.car.lTarget = a.car.l;
             b.car.lTarget = b.car.l;
-            a.brainOut = { ...a.brainOut, lTarget: a.car.l };
-            b.brainOut = { ...b.brainOut, lTarget: b.car.l };
+            a.brainOut.lTarget = a.car.l;
+            b.brainOut.lTarget = b.car.l;
 
             // Lateral impulse from relative long speed + penetration — keep dl alive
             // on mild rubs so side-by-side racing doesn't feel sticky/teleported.
@@ -1081,7 +1122,12 @@ export class RaceDirector {
                   leader.car.stunRemaining,
                   (0.08 + 0.18 * severity) * launchStunScale,
                 );
-                const node = interpolateAtS(this.track.nodes, trackLength, follower.car.s);
+                const node = interpolateAtSInto(
+                  this.track.nodes,
+                  trackLength,
+                  follower.car.s,
+                  nodeScratch,
+                );
                 const curved =
                   Math.abs(node.kappaLine) >= PHYSICS.grooveKappaMin * 0.7;
                 // Hard rear-end can scrub/deslot — bends easier, straights need more.
@@ -1119,8 +1165,8 @@ export class RaceDirector {
             clampLateralToTrack(b.car, this.track);
             a.car.lTarget = a.car.l;
             b.car.lTarget = b.car.l;
-            a.brainOut = { ...a.brainOut, lTarget: a.car.l };
-            b.brainOut = { ...b.brainOut, lTarget: b.car.l };
+            a.brainOut.lTarget = a.car.l;
+            b.brainOut.lTarget = b.car.l;
           }
         }
       }
@@ -1202,9 +1248,15 @@ export class RaceDirector {
       isPlayerControlled: entry.car.isPlayerControlled,
     }));
 
+    this.standingIndexById.clear();
+    for (let i = 0; i < this.standings.length; i++) {
+      this.standingIndexById.set(this.standings[i]!.carId, i);
+    }
+
     for (const entry of this.entries) {
-      const st = this.standings.find((s) => s.carId === entry.car.id);
-      if (st === undefined) continue;
+      const idx = this.standingIndexById.get(entry.car.id);
+      if (idx === undefined) continue;
+      const st = this.standings[idx]!;
       if (entry.prevPosition > st.position && st.position <= 3) {
         this.pushEvent('overtake', entry.car, entry.driver.name, `P${st.position}`);
       }
@@ -1258,12 +1310,14 @@ export class RaceDirector {
     driverName: string,
     detail?: string,
   ): void {
+    this.eventSeq += 1;
     const event: RaceEvent = {
       kind,
       time: this.raceTime,
       carId: car.id,
       driverName,
       detail,
+      seq: this.eventSeq,
     };
 
     if (this.events.length < EVENT_BUFFER_SIZE) {
@@ -1277,7 +1331,14 @@ export class RaceDirector {
   private recordGhostSamples(): void {
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
-      this.ghostTrace[i]!.samples.push({
+      // Player always; rivals only while under the hard sample cap.
+      if (!entry.car.isPlayerControlled) {
+        const rivalSamples = this.ghostTrace[i]!.samples.length;
+        if (rivalSamples >= GHOST_MAX_SAMPLES_PER_CAR) continue;
+      }
+      const samples = this.ghostTrace[i]!.samples;
+      if (samples.length >= GHOST_MAX_SAMPLES_PER_CAR) continue;
+      samples.push({
         time: this.raceTime,
         s: entry.car.s,
         l: entry.car.l,

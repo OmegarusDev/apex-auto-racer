@@ -5,6 +5,8 @@ export interface Scene {
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void;
   onResize?(w: number, h: number): void;
   handleBack?(): boolean;
+  /** When true, launchRace replaces this scene instead of pushing (avoids stacking Results). */
+  raceLaunchReplace?: boolean;
 }
 
 const FADE_MS = 150;

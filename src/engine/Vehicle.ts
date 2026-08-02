@@ -5,7 +5,19 @@ import type { Driver, EffectiveStats, SlotMode, VehicleState } from './types';
 import type { Modifier, ModifierContext } from './modifiers';
 import { applyModifiers } from './modifiers';
 import type { TrackData } from './TrackGenerator';
-import { interpolateAtS, outwardSign } from './RacingLine';
+import { interpolateAtSInto, outwardSign, type InterpolatedNode } from './RacingLine';
+
+const nodeScratch: InterpolatedNode = {
+  pos: { x: 0, y: 0 },
+  tangent: { x: 1, y: 0 },
+  normal: { x: 0, y: 1 },
+  width: 0,
+  runoffWidth: 0,
+  kappa: 0,
+  kappaLine: 0,
+  o: 0,
+  s: 0,
+};
 
 export interface BrainOutput {
   desiredThrottle: number;
@@ -180,8 +192,15 @@ function interpolateProfile(profile: readonly number[], track: TrackData, s: num
   if (distS < 0) distS += track.length;
 
   let i0 = 0;
-  for (let i = 0; i < n; i++) {
-    if (track.nodes[i]!.s <= distS) i0 = i;
+  if (distS > track.nodes[0]!.s) {
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (track.nodes[mid]!.s <= distS) lo = mid;
+      else hi = mid;
+    }
+    i0 = lo;
   }
   const i1 = (i0 + 1) % n;
   const s0 = track.nodes[i0]!.s;
@@ -209,14 +228,36 @@ function updateCosmeticRpm(car: CarSimState, dt: number): void {
 }
 
 function assertFinite(car: CarSimState, debug: boolean): void {
-  if (!debug) return;
-  const fields: (keyof CarSimState)[] = ['s', 'l', 'v', 'slipAngle', 'tyreTemp', 'balanceB', 'lTarget'];
+  const fields: (keyof CarSimState)[] = [
+    's',
+    'l',
+    'v',
+    'slipAngle',
+    'tyreTemp',
+    'balanceB',
+    'lTarget',
+    'dl',
+  ];
+  let bad = false;
   for (const f of fields) {
     const val = car[f];
     if (typeof val === 'number' && !Number.isFinite(val)) {
-      console.warn(`[Vehicle] NaN/Inf in car.${String(f)}`, car.id);
+      bad = true;
+      if (debug) {
+        console.warn(`[Vehicle] NaN/Inf in car.${String(f)}`, car.id);
+      }
     }
   }
+  if (!bad) return;
+  // Prod: clamp/reset so a single bad frame cannot poison the race.
+  if (!Number.isFinite(car.s)) car.s = 0;
+  if (!Number.isFinite(car.l)) car.l = 0;
+  if (!Number.isFinite(car.v) || car.v < 0) car.v = 0;
+  if (!Number.isFinite(car.slipAngle)) car.slipAngle = 0;
+  if (!Number.isFinite(car.tyreTemp)) car.tyreTemp = 0.5;
+  if (!Number.isFinite(car.balanceB)) car.balanceB = 0;
+  if (!Number.isFinite(car.lTarget)) car.lTarget = car.l;
+  if (!Number.isFinite(car.dl)) car.dl = 0;
 }
 
 /** Live deslot speed at s — v_safe × driver × car (temp) margins. */
@@ -414,7 +455,7 @@ export function updateVehicle(
   }
 
   // Step 1: lookup node at s
-  const node = interpolateAtS(track.nodes, track.length, car.s);
+  const node = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
   const halfW = node.width / 2;
   const lineClamp = halfW - PHYSICS.racingLineMargin;
   const kappaUse = node.kappaLine;

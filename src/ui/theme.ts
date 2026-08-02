@@ -74,15 +74,26 @@ export function readSafeAreaInsets(): SafeAreaInsets {
   return cachedSafe;
 }
 
+let cachedTheme: ThemeTokens | null = null;
+let cachedThemeW = -1;
+let cachedThemeH = -1;
+
 export function invalidateSafeArea(): void {
   cachedSafe = null;
+  cachedTheme = null;
+  cachedThemeW = -1;
+  cachedThemeH = -1;
 }
 
 export function createTheme(w: number, h: number): ThemeTokens {
+  if (cachedTheme !== null && cachedThemeW === w && cachedThemeH === h) {
+    return cachedTheme;
+  }
+
   const min = Math.min(w, h);
   const scale = min / BASE_MIN;
 
-  return {
+  cachedTheme = {
     scale,
     grid: 8 * scale,
     touchMin: Math.max(44, 44 * scale),
@@ -106,6 +117,9 @@ export function createTheme(w: number, h: number): ThemeTokens {
     success: '#4ade80',
     safe: readSafeAreaInsets(),
   };
+  cachedThemeW = w;
+  cachedThemeH = h;
+  return cachedTheme;
 }
 
 /** Snap a length to the 8px grid (scaled). */

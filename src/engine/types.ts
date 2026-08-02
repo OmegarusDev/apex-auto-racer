@@ -108,6 +108,8 @@ export interface RaceEvent {
   carId: string;
   driverName?: string;
   detail?: string;
+  /** Monotonic id — survives ring-buffer overwrite so UI can detect new events. */
+  seq: number;
 }
 
 export interface VolumeOptions {

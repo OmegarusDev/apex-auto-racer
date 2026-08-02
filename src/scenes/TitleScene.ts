@@ -61,6 +61,14 @@ export class TitleScene implements Scene {
     const seed = freshTitlePreviewSeed();
     const discipline = pick(mulberry32(seed), DISCIPLINE_ORDER);
     this.preview = createTitlePreviewTrack(seed ^ 0x9e3779b9, discipline);
+
+    const g = getGameContext();
+    const warn = g.save.consumeWarning();
+    if (warn === 'corrupt_reset') {
+      this.toasts.push('Save was corrupt — started a new career', '#f87171', 6);
+    } else if (warn === 'storage_unavailable') {
+      this.toasts.push('Storage unavailable — progress may not save', '#f87171', 5);
+    }
   }
 
   exit(): void {}

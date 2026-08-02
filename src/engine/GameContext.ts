@@ -95,6 +95,7 @@ export class GameContext {
     if (state !== null) {
       this.audio.setVolumes(state.options.volumes);
     }
+    // warning consumed by TitleScene toast via save.warningFlag
     void warning;
     return state;
   }

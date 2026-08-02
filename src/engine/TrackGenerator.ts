@@ -222,7 +222,11 @@ export function generateTrack(
   const oval = ARCHETYPES.find((a) => a.id === 'oval')!;
   const rng = mulberry32(FALLBACK_OVAL_SEED);
   const waypoints = generateWaypoints(rng, oval);
-  return buildTrackFromWaypoints(waypoints, oval, FALLBACK_OVAL_SEED, discipline);
+  const fallback = buildTrackFromWaypoints(waypoints, oval, FALLBACK_OVAL_SEED, discipline);
+  if (!validateTrack(fallback)) {
+    console.error('[apex] oval fallback failed validateTrack — using anyway');
+  }
+  return fallback;
 }
 
 /** Plan 5.3: safe speed and braking-limited profile arrays. */

@@ -212,7 +212,7 @@ function formatLaunchError(err: unknown): string {
   return String(err);
 }
 
-/** Push RaceScene synchronously. Never toast a fake "loading" state on failure. */
+/** Open RaceScene synchronously. Replaces Results (raceLaunchReplace) so again/next don't stack. */
 export function launchRace(config: RaceLaunchConfig, toasts: ToastManager): void {
   if (raceLaunchInFlight) return;
   raceLaunchInFlight = true;
@@ -226,7 +226,12 @@ export function launchRace(config: RaceLaunchConfig, toasts: ToastManager): void
       throw new Error('RaceScene failed to load (circular import)');
     }
     const g = getGameContext();
-    g.scenes.push(new RaceScene(g, config));
+    const race = new RaceScene(g, config);
+    if (g.scenes.current?.raceLaunchReplace) {
+      g.scenes.replace(race);
+    } else {
+      g.scenes.push(race);
+    }
   } catch (err) {
     console.error('[apex] launchRace failed', err);
     toasts.push(`Could not start race: ${formatLaunchError(err)}`, accent, 5);
@@ -349,6 +354,25 @@ export interface RibbonTrackLayout {
   halfWidth?: number;
 }
 
+type RibbonProj = { sx: number; sy: number; z: number; visible: boolean };
+
+const ribbonLeft: RibbonProj[] = [];
+const ribbonRight: RibbonProj[] = [];
+const ribbonCenter: RibbonProj[] = [];
+let ribbonOrder: number[] = [];
+let ribbonOrderRotY = Number.NaN;
+let ribbonOrderRotX = Number.NaN;
+let ribbonOrderSegs = -1;
+
+function ensureRibbonProj(slot: RibbonProj[], i: number): RibbonProj {
+  let p = slot[i];
+  if (p === undefined) {
+    p = { sx: 0, sy: 0, z: 0, visible: true };
+    slot[i] = p;
+  }
+  return p;
+}
+
 /**
  * Draw a flat 2D track path rigidly rotated in 3D, then perspective-projected.
  * Circuit lies in the horizontal XZ plane (table-top); only orientation changes with time.
@@ -382,25 +406,28 @@ export function drawRibbonTrack(
   const cosX = Math.cos(rotX);
   const sinX = Math.sin(rotX);
 
-  type Proj = { sx: number; sy: number; z: number; visible: boolean };
-  const project = (px: number, pz: number): Proj => {
+  const projectInto = (px: number, pz: number, out: RibbonProj): void => {
     // Horizontal asphalt plane (px, 0, pz), then Y-spin + X-pitch.
     const x1 = px * cosY - pz * sinY;
     const z1 = px * sinY + pz * cosY;
-    const y1 = 0;
-    const x2 = x1;
-    const y2 = y1 * cosX - z1 * sinX;
-    const z2 = y1 * sinX + z1 * cosX;
+    const y2 = -z1 * sinX;
+    const z2 = z1 * cosX;
     const depth = cameraDist + z2;
-    if (depth < 0.35) return { sx: cx, sy: cy, z: z2, visible: false };
+    if (depth < 0.35) {
+      out.sx = cx;
+      out.sy = cy;
+      out.z = z2;
+      out.visible = false;
+      return;
+    }
     const k = (focal * scale) / depth;
-    return { sx: cx + x2 * k, sy: cy + y2 * k, z: z2, visible: true };
+    out.sx = cx + x1 * k;
+    out.sy = cy + y2 * k;
+    out.z = z2;
+    out.visible = true;
   };
 
   // Edge ribbons from planar normals (preserves flat-track silhouette under projection).
-  const left: Proj[] = [];
-  const right: Proj[] = [];
-  const center: Proj[] = [];
   for (let i = 0; i < segments; i++) {
     const p = planar[i]!;
     const prev = planar[(i - 1 + segments) % segments]!;
@@ -410,18 +437,34 @@ export function drawRibbonTrack(
     const len = Math.hypot(tx, ty) || 1;
     const nx = -ty / len;
     const ny = tx / len;
-    left.push(project(p.x + nx * halfWidth, p.y + ny * halfWidth));
-    right.push(project(p.x - nx * halfWidth, p.y - ny * halfWidth));
-    center.push(project(p.x, p.y));
+    projectInto(p.x + nx * halfWidth, p.y + ny * halfWidth, ensureRibbonProj(ribbonLeft, i));
+    projectInto(p.x - nx * halfWidth, p.y - ny * halfWidth, ensureRibbonProj(ribbonRight, i));
+    projectInto(p.x, p.y, ensureRibbonProj(ribbonCenter, i));
   }
 
-  // Painter's algorithm: back segments first.
-  const order = Array.from({ length: segments }, (_, i) => i);
-  order.sort((a, b) => {
-    const za = (center[a]!.z + center[(a + 1) % segments]!.z) * 0.5;
-    const zb = (center[b]!.z + center[(b + 1) % segments]!.z) * 0.5;
-    return za - zb;
-  });
+  // Painter's algorithm: only re-sort when orientation moves enough.
+  const needSort =
+    ribbonOrderSegs !== segments ||
+    !Number.isFinite(ribbonOrderRotY) ||
+    Math.abs(rotY - ribbonOrderRotY) > 0.04 ||
+    Math.abs(rotX - ribbonOrderRotX) > 0.04;
+  if (needSort) {
+    if (ribbonOrder.length !== segments) {
+      ribbonOrder = Array.from({ length: segments }, (_, i) => i);
+    }
+    ribbonOrder.sort((a, b) => {
+      const za = (ribbonCenter[a]!.z + ribbonCenter[(a + 1) % segments]!.z) * 0.5;
+      const zb = (ribbonCenter[b]!.z + ribbonCenter[(b + 1) % segments]!.z) * 0.5;
+      return za - zb;
+    });
+    ribbonOrderRotY = rotY;
+    ribbonOrderRotX = rotX;
+    ribbonOrderSegs = segments;
+  }
+  const order = ribbonOrder;
+  const left = ribbonLeft;
+  const right = ribbonRight;
+  const center = ribbonCenter;
 
   ctx.save();
   ctx.lineCap = 'round';

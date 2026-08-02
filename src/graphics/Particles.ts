@@ -87,38 +87,73 @@ export class Particles {
 
   emitSkid(x1: number, y1: number, x2: number, y2: number, life = 1.8): void {
     const i = this.skidHead;
-    this.skids[i] = { x1, y1, x2, y2, life, maxLife: life };
+    let p = this.skids[i];
+    if (p === undefined) {
+      p = { x1, y1, x2, y2, life, maxLife: life };
+      this.skids[i] = p;
+    } else {
+      p.x1 = x1;
+      p.y1 = y1;
+      p.x2 = x2;
+      p.y2 = y2;
+      p.life = life;
+      p.maxLife = life;
+    }
     this.skidHead = (i + 1) % SKID_CAP;
   }
 
   emitDust(x: number, y: number, index: number, intensity = 1): void {
     const i = this.dustHead;
     const spread = 2.5 * intensity;
-    this.dust[i] = {
-      x,
-      y,
-      vx: hashSigned(index, 11) * spread,
-      vy: hashSigned(index, 17) * spread,
-      life: 0.6 + hashUnit(index, 23) * 0.4,
-      maxLife: 1,
-      size: 3 + hashUnit(index, 29) * 4 * intensity,
-    };
-    this.dust[i]!.maxLife = this.dust[i]!.life;
+    const life = 0.6 + hashUnit(index, 23) * 0.4;
+    let p = this.dust[i];
+    if (p === undefined) {
+      p = {
+        x,
+        y,
+        vx: hashSigned(index, 11) * spread,
+        vy: hashSigned(index, 17) * spread,
+        life,
+        maxLife: life,
+        size: 3 + hashUnit(index, 29) * 4 * intensity,
+      };
+      this.dust[i] = p;
+    } else {
+      p.x = x;
+      p.y = y;
+      p.vx = hashSigned(index, 11) * spread;
+      p.vy = hashSigned(index, 17) * spread;
+      p.life = life;
+      p.maxLife = life;
+      p.size = 3 + hashUnit(index, 29) * 4 * intensity;
+    }
     this.dustHead = (i + 1) % DUST_CAP;
   }
 
   emitSmoke(x: number, y: number, index: number): void {
     const i = this.smokeHead;
-    this.smoke[i] = {
-      x,
-      y,
-      vx: hashSigned(index, 31) * 1.2,
-      vy: hashSigned(index, 37) * 1.2 + 0.8,
-      life: 1.2 + hashUnit(index, 41) * 0.8,
-      maxLife: 2,
-      size: 8 + hashUnit(index, 43) * 10,
-    };
-    this.smoke[i]!.maxLife = this.smoke[i]!.life;
+    const life = 1.2 + hashUnit(index, 41) * 0.8;
+    let p = this.smoke[i];
+    if (p === undefined) {
+      p = {
+        x,
+        y,
+        vx: hashSigned(index, 31) * 1.2,
+        vy: hashSigned(index, 37) * 1.2 + 0.8,
+        life,
+        maxLife: life,
+        size: 8 + hashUnit(index, 43) * 10,
+      };
+      this.smoke[i] = p;
+    } else {
+      p.x = x;
+      p.y = y;
+      p.vx = hashSigned(index, 31) * 1.2;
+      p.vy = hashSigned(index, 37) * 1.2 + 0.8;
+      p.life = life;
+      p.maxLife = life;
+      p.size = 8 + hashUnit(index, 43) * 10;
+    }
     this.smokeHead = (i + 1) % SMOKE_CAP;
   }
 
@@ -128,15 +163,26 @@ export class Particles {
       const sub = index * 7 + n;
       const speed = 4 + hashUnit(sub, 47) * 8;
       const angle = hashUnit(sub, 53) * Math.PI * 2;
-      this.sparks[i] = {
-        x,
-        y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 0.15 + hashUnit(sub, 59) * 0.25,
-        maxLife: 0.4,
-      };
-      this.sparks[i]!.maxLife = this.sparks[i]!.life;
+      const life = 0.15 + hashUnit(sub, 59) * 0.25;
+      let p = this.sparks[i];
+      if (p === undefined) {
+        p = {
+          x,
+          y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life,
+          maxLife: life,
+        };
+        this.sparks[i] = p;
+      } else {
+        p.x = x;
+        p.y = y;
+        p.vx = Math.cos(angle) * speed;
+        p.vy = Math.sin(angle) * speed;
+        p.life = life;
+        p.maxLife = life;
+      }
       this.sparkHead = (i + 1) % SPARK_CAP;
     }
   }

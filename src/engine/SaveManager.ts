@@ -22,11 +22,102 @@ import {
 
 const STORAGE_KEY = 'apex-save-v1';
 
-export type SaveWarning = 'storage_unavailable';
+export type SaveWarning = 'storage_unavailable' | 'corrupt_reset';
 
 export interface SaveLoadResult {
   state: GameState | null;
   warning?: SaveWarning;
+}
+
+const DISCIPLINES: DisciplineId[] = ['track', 'street', 'rally'];
+const PART_KEYS = [
+  'engine',
+  'intake',
+  'exhaust',
+  'tyres',
+  'brakes',
+  'suspension',
+  'spoiler',
+] as const;
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function isFiniteNumber(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function isDriver(v: unknown): boolean {
+  if (!isRecord(v)) return false;
+  return (
+    typeof v.id === 'string' &&
+    typeof v.name === 'string' &&
+    typeof v.trait === 'string' &&
+    isFiniteNumber(v.skill) &&
+    isFiniteNumber(v.bravery) &&
+    isFiniteNumber(v.focus) &&
+    isFiniteNumber(v.determination) &&
+    isFiniteNumber(v.xp) &&
+    isFiniteNumber(v.level) &&
+    isFiniteNumber(v.unspentPoints)
+  );
+}
+
+function isVehicleSave(v: unknown): boolean {
+  if (!isRecord(v) || !isRecord(v.partTiers) || !isFiniteNumber(v.condition)) return false;
+  for (const key of PART_KEYS) {
+    if (!isFiniteNumber(v.partTiers[key])) return false;
+  }
+  return true;
+}
+
+/** Minimal schema check so corrupt/partial JSON cannot crash later scenes. */
+function isValidGameState(obj: Record<string, unknown>): boolean {
+  if (!isFiniteNumber(obj.version) || !isFiniteNumber(obj.seed) || !isFiniteNumber(obj.cash)) {
+    return false;
+  }
+  if (!isFiniteNumber(obj.lastSaveTimestamp)) return false;
+  if (!isRecord(obj.vehicles)) return false;
+  for (const d of DISCIPLINES) {
+    if (!isVehicleSave(obj.vehicles[d])) return false;
+  }
+  if (!Array.isArray(obj.roster) || obj.roster.length === 0 || !obj.roster.every(isDriver)) {
+    return false;
+  }
+  if (!isRecord(obj.rankUnlocked)) return false;
+  for (const d of DISCIPLINES) {
+    if (!isFiniteNumber(obj.rankUnlocked[d])) return false;
+  }
+  if (!isRecord(obj.inProgressTournaments)) return false;
+  for (const d of DISCIPLINES) {
+    if (!(d in obj.inProgressTournaments)) return false;
+  }
+  if (!isRecord(obj.careerStats)) return false;
+  if (
+    !isFiniteNumber(obj.careerStats.races) ||
+    !isFiniteNumber(obj.careerStats.wins) ||
+    !isFiniteNumber(obj.careerStats.earnings)
+  ) {
+    return false;
+  }
+  if (!isRecord(obj.objectives)) return false;
+  if (!Array.isArray(obj.objectives.active) || !Array.isArray(obj.objectives.completed)) {
+    return false;
+  }
+  if (!isFiniteNumber(obj.objectives.cycleSeed)) return false;
+  if (!isRecord(obj.onboarding) || !isRecord(obj.options)) return false;
+  if (!isRecord(obj.options.volumes)) return false;
+  const vols = obj.options.volumes;
+  if (
+    !isFiniteNumber(vols.master) ||
+    !isFiniteNumber(vols.engine) ||
+    !isFiniteNumber(vols.fx) ||
+    !isFiniteNumber(vols.ui)
+  ) {
+    return false;
+  }
+  return true;
 }
 
 let nextDriverId = 1;
@@ -160,7 +251,7 @@ export function createNewGame(rng: Rng, seed: number): GameState {
 }
 
 function migrate(raw: unknown): GameState | null {
-  if (raw === null || typeof raw !== 'object') return null;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   const version = typeof obj.version === 'number' ? obj.version : 0;
 
@@ -170,6 +261,7 @@ function migrate(raw: unknown): GameState | null {
     obj.version = SAVE_VERSION;
   }
 
+  if (!isValidGameState(obj)) return null;
   return obj as unknown as GameState;
 }
 
@@ -180,6 +272,13 @@ export class SaveManager {
 
   get warningFlag(): SaveWarning | undefined {
     return this.warning;
+  }
+
+  /** Read and clear the one-shot load warning (for title toast). */
+  consumeWarning(): SaveWarning | undefined {
+    const w = this.warning;
+    this.warning = undefined;
+    return w;
   }
 
   getState(): GameState | null {
@@ -210,13 +309,25 @@ export class SaveManager {
     try {
       const parsed = migrate(JSON.parse(raw));
       if (parsed === null) {
-        return { state: null };
+        // Corrupt / partial save — wipe and start fresh (caller shows toast).
+        localStorage.removeItem(STORAGE_KEY);
+        this.warning = 'corrupt_reset';
+        const fresh = createNewGame(mulberry32(Date.now() >>> 0), Date.now() >>> 0);
+        this.state = fresh;
+        this.persist(fresh);
+        return { state: fresh, warning: this.warning };
       }
       this.state = parsed;
+      this.warning = undefined;
       this.syncDriverIdCounter(parsed);
       return { state: parsed };
     } catch {
-      return { state: null };
+      localStorage.removeItem(STORAGE_KEY);
+      this.warning = 'corrupt_reset';
+      const fresh = createNewGame(mulberry32(Date.now() >>> 0), Date.now() >>> 0);
+      this.state = fresh;
+      this.persist(fresh);
+      return { state: fresh, warning: this.warning };
     }
   }
 

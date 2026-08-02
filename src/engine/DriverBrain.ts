@@ -5,12 +5,24 @@ import type { Driver } from './types';
 import type { Modifier, ModifierContext } from './modifiers';
 import { applyModifierParam } from './modifiers';
 import type { TrackData } from './TrackGenerator';
-import { interpolateAtS } from './RacingLine';
+import { interpolateAtSInto, type InterpolatedNode } from './RacingLine';
 import type { CarSimState } from './Vehicle';
 import type { BrainOutput } from './Vehicle';
 import { computeTempGrip, computeVDeslot, vDriverAt } from './Vehicle';
 import type { Rng } from './rng';
 import { randRange } from './rng';
+
+const nodeScratch: InterpolatedNode = {
+  pos: { x: 0, y: 0 },
+  tangent: { x: 1, y: 0 },
+  normal: { x: 0, y: 1 },
+  width: 0,
+  runoffWidth: 0,
+  kappa: 0,
+  kappaLine: 0,
+  o: 0,
+  s: 0,
+};
 
 export interface RivalSnapshot {
   /** Arc distance to rival minus car length (positive = ahead with clearance). */
@@ -157,7 +169,7 @@ function computeDesiredThrottle(
   if (raceTime < PHYSICS.aiLaunchSec) {
     const launchCap =
       0.55 + 0.35 * (driver.skill / 100) + 0.15 * (raceTime / PHYSICS.aiLaunchSec);
-    const node = interpolateAtS(track.nodes, track.length, car.s);
+    const node = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
     if (Math.abs(node.kappaLine) >= PHYSICS.grooveKappaMin) {
       return Math.min(1, Math.max(PHYSICS.aiLaunchMinThrottle * 0.85, launchCap));
     }
@@ -207,7 +219,7 @@ function rivalWithinAny(rivals: readonly RivalSnapshot[], distance: number): boo
 }
 
 function pickOvertakeSide(car: CarSimState, track: TrackData, rivals: readonly RivalSnapshot[]): number {
-  const node = interpolateAtS(track.nodes, track.length, car.s);
+  const node = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
   const lineClamp = node.width / 2 - PHYSICS.racingLineMargin;
   let roomLeft = car.l + lineClamp;
   let roomRight = lineClamp - car.l;
@@ -360,8 +372,12 @@ export function tickDriverBrain(
     isLeading: ctx.isLeading,
   };
 
-  const node = interpolateAtS(ctx.track.nodes, ctx.track.length, car.s);
-  const halfW = node.width / 2;
+  interpolateAtSInto(ctx.track.nodes, ctx.track.length, car.s, nodeScratch);
+  // Snapshot — nested helpers may reuse nodeScratch.
+  const nodeO = nodeScratch.o;
+  const nodeKappa = nodeScratch.kappaLine;
+  const nodeWidth = nodeScratch.width;
+  const halfW = nodeWidth / 2;
   const lineClamp = halfW - PHYSICS.racingLineMargin;
   const tempGrip = computeTempGrip(car.tyreTemp);
 
@@ -372,7 +388,7 @@ export function tickDriverBrain(
     const raw: BrainOutput = {
       desiredThrottle: crawling ? 0.35 + 0.25 * (ctx.driver.skill / 100) : 0,
       desiredBrake: car.spinRemaining > 0 ? 1 : crawling ? 0.1 : 0.4,
-      lTarget: Math.max(-lineClamp, Math.min(lineClamp, node.o)),
+      lTarget: Math.max(-lineClamp, Math.min(lineClamp, nodeO)),
     };
     state.reactionQueue.length = 0;
     state.reactionQueue.push({ emitTime: ctx.raceTime, out: raw });
@@ -410,7 +426,7 @@ export function tickDriverBrain(
   const slotOnset =
     0.74 + 0.18 * (ctx.driver.skill / 100) + 0.08 * (ctx.driver.bravery / 100);
   if (
-    Math.abs(node.kappaLine) >= PHYSICS.grooveKappaMin &&
+    Math.abs(nodeKappa) >= PHYSICS.grooveKappaMin &&
     car.v > vDeslot * slotOnset &&
     !suppressBrake
   ) {
@@ -451,7 +467,7 @@ export function tickDriverBrain(
     aiTraffic &&
     launchWindow &&
     !traffic.blocked &&
-    Math.abs(node.kappaLine) < PHYSICS.grooveKappaMin
+    Math.abs(nodeKappa) < PHYSICS.grooveKappaMin
   ) {
     desiredThrottle = Math.max(
       desiredThrottle,
@@ -462,7 +478,7 @@ export function tickDriverBrain(
     }
   }
 
-  let lTarget = node.o;
+  let lTarget = nodeO;
 
   // Overtake: draft hold, contact block, or closing on a same-lane car.
   // Stay in the wake first — Determination shortens the hold before the pull-out.
@@ -499,10 +515,10 @@ export function tickDriverBrain(
   if (pullingOut) {
     // Use more of the asphalt on wide tracks (cap by line clamp).
     const wideShift = Math.min(
-      BALANCE.overtakeLateralShift * (0.9 + 0.25 * Math.min(1, node.width / 36)),
+      BALANCE.overtakeLateralShift * (0.9 + 0.25 * Math.min(1, nodeWidth / 36)),
       Math.max(PHYSICS.carWidth * 1.15, lineClamp * 0.55),
     );
-    lTarget = node.o + state.overtakeSide * wideShift;
+    lTarget = nodeO + state.overtakeSide * wideShift;
   }
 
   // Drafting races need throttle in the wake; only stack contact fully kills drive.
@@ -537,7 +553,7 @@ export function tickDriverBrain(
         Math.max(BALANCE.overtakeLateralShift * 0.85, PHYSICS.carWidth * 1.05),
         Math.max(PHYSICS.carWidth * 1.1, lineClamp * 0.5),
       );
-      lTarget = node.o + away * holdShift;
+      lTarget = nodeO + away * holdShift;
       if (state.overtakeSide === 0 || ctx.raceTime >= state.overtakeUntil) {
         state.overtakeSide = away;
         state.overtakeUntil = ctx.raceTime + BALANCE.overtakeDurationSec * 0.6;
@@ -568,7 +584,7 @@ export function tickDriverBrain(
   }
 
   // Hold starting-grid columns through launch, then ease into the racing line.
-  lTarget = gridAwareLineTarget(car, lTarget, ctx.raceTime, node.kappaLine);
+  lTarget = gridAwareLineTarget(car, lTarget, ctx.raceTime, nodeKappa);
   lTarget = Math.max(-lineClamp, Math.min(lineClamp, lTarget));
 
   const raw: BrainOutput = { desiredThrottle, desiredBrake, lTarget };

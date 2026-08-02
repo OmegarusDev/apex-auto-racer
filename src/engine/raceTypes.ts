@@ -107,7 +107,12 @@ export function buildRaceConfig(state: GameState, launch: RaceLaunchConfig): Rac
     .map((id) => state.roster.find((d) => d.id === id))
     .filter((d): d is Driver => d !== undefined);
 
-  const rank = state.rankUnlocked[launch.discipline] ?? 0;
+  const rank = Math.max(
+    state.rankUnlocked.track,
+    state.rankUnlocked.street,
+    state.rankUnlocked.rally,
+    state.rankUnlocked[launch.discipline] ?? 0,
+  );
   const statRange = BALANCE.opponentStatRanges[rank] ?? BALANCE.opponentStatRanges[0]!;
   const opponentBudget: [number, number] = [statRange[0] * 4, statRange[1] * 4];
   const opponentPartRange = BALANCE.opponentPartTiers[rank] ?? BALANCE.opponentPartTiers[0]!;
@@ -210,14 +215,26 @@ function evaluateObjectives(
 function computePayout(
   rank: RankId,
   playerPosition: number,
+  playerTeamPosition: number,
+  totalCars: number,
+  laps: number,
   handsOffRatio: number,
   objectivesCompleted: ObjectiveKind[],
   isTournament: boolean,
   tournamentBonus: number,
+  playerTeamWon: boolean,
+  playerCarPodiated: boolean,
 ): PayoutBreakdown {
-  const base = BALANCE.rankBasePayout[rank] ?? BALANCE.rankBasePayout[0]!;
-  const placementIdx = Math.min(Math.max(playerPosition - 1, 0), BALANCE.placementMult.length - 1);
-  const placement = Math.round(base * (BALANCE.placementMult[placementIdx] ?? 0.15));
+  const rankBase = BALANCE.rankBasePayout[rank] ?? BALANCE.rankBasePayout[0]!;
+  const placeForPayout = Math.min(playerTeamPosition, playerPosition);
+  const placementIdx = Math.min(Math.max(placeForPayout - 1, 0), BALANCE.placementMult.length - 1);
+  let placement = Math.round(rankBase * (BALANCE.placementMult[placementIdx] ?? 0.15));
+  placement = Math.round(
+    placement * (0.8 + 0.05 * totalCars) * (0.7 + 0.1 * laps),
+  );
+  if (playerCarPodiated) {
+    placement = Math.round(placement * 1.1);
+  }
 
   let objective = 0;
   for (const id of objectivesCompleted) {
@@ -225,21 +242,23 @@ function computePayout(
     objective += def?.reward ?? 0;
   }
 
-  const handsOff = Math.round(base * BALANCE.handsOffBonusMax * handsOffRatio);
+  const handsOff = playerTeamWon
+    ? Math.round(rankBase * BALANCE.handsOffBonusMax * handsOffRatio)
+    : 0;
   const tournament =
     tournamentBonus > 0
       ? tournamentBonus
       : isTournament
-        ? Math.round(base * (BALANCE.tournamentRacePayoutMult - 1))
+        ? Math.round(rankBase * (BALANCE.tournamentRacePayoutMult - 1))
         : 0;
 
   return {
-    base,
+    base: 0,
     placement,
     objective,
     handsOff,
     tournament,
-    total: base + placement + objective + handsOff + tournament,
+    total: placement + objective + handsOff + tournament,
   };
 }
 
@@ -248,16 +267,23 @@ function computeDriverXp(
   launch: RaceLaunchConfig,
   teamPoints: number,
   rank: RankId,
+  finishers: readonly RaceResultEntry[],
 ): DriverXpGrant[] {
-  const xpEarned = Math.round(
-    (BALANCE.xpBase + BALANCE.xpPerPoint * teamPoints) * (BALANCE.rankXpMult[rank] ?? 1),
-  );
+  const baseXp =
+    (BALANCE.xpBase + BALANCE.xpPerPoint * teamPoints) * (BALANCE.rankXpMult[rank] ?? 1);
 
   return launch.playerLineup.map((driverId) => {
     const driver = state.roster.find((d) => d.id === driverId);
     if (driver === undefined) {
       return { driverId, xpEarned: 0, leveledUp: false };
     }
+    let xpMult = 1;
+    if (driver.trait === 'grinder') xpMult *= 1.25;
+    if (driver.trait === 'showboat') {
+      const pos = finishers.find((f) => f.driverId === driverId)?.position ?? 99;
+      if (pos <= 3) xpMult *= 1.3;
+    }
+    const xpEarned = Math.round(baseXp * xpMult);
     const needed = xpToNextLevel(driver.level);
     const leveledUp = driver.xp + xpEarned >= needed;
     return {
@@ -370,13 +396,18 @@ export function buildResultsPayload(
   const payout = computePayout(
     rank,
     playerPosition,
+    playerTeamPosition,
+    finishers.length,
+    launch.laps,
     handsOffRatio,
     objectivesCompleted,
     launch.mode === 'tournament',
     tournamentBonus,
+    playerTeamWon,
+    playerPosition <= 3,
   );
 
-  const driverXp = computeDriverXp(state, launch, playerTeamPoints, rank);
+  const driverXp = computeDriverXp(state, launch, playerTeamPoints, rank, finishers);
 
   if (playerCarCondition !== undefined) {
     state.vehicles[launch.discipline].condition = playerCarCondition;

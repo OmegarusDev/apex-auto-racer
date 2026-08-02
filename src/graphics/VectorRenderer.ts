@@ -114,6 +114,7 @@ export class VectorRenderer {
     this.drawRunoff(ctx, track, discipline, toBake);
     this.drawAsphalt(ctx, track, discipline, toBake);
     this.drawKerbs(ctx, track, discipline, toBake);
+    this.drawBarriers(ctx, track, discipline, toBake);
     this.drawStartCheckered(ctx, track, toBake);
     this.drawGridDashes(ctx, track, toBake);
   }
@@ -408,6 +409,44 @@ export class VectorRenderer {
     }
   }
 
+  /** Hard wall / barrier stroke at the painted outer edge (W/2 + R). */
+  private drawBarriers(
+    ctx: CanvasRenderingContext2D,
+    track: TrackView,
+    discipline: DisciplineDef,
+    toBake: (wx: number, wy: number) => { x: number; y: number },
+  ): void {
+    const nodes = track.nodes;
+    if (nodes.length < 2) return;
+
+    ctx.strokeStyle = discipline.accentDim;
+    ctx.lineWidth = Math.max(2.5, 3.2 * (this.bakeMeta?.scale ?? 1));
+    ctx.lineJoin = 'round';
+
+    for (const side of [-1, 1] as const) {
+      ctx.beginPath();
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i]!;
+        const half = n.width * 0.5 + n.runoffWidth;
+        const p = toBake(
+          n.pos.x + n.normal.x * half * side,
+          n.pos.y + n.normal.y * half * side,
+        );
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      }
+      // Close the loop
+      const n0 = nodes[0]!;
+      const half0 = n0.width * 0.5 + n0.runoffWidth;
+      const p0 = toBake(
+        n0.pos.x + n0.normal.x * half0 * side,
+        n0.pos.y + n0.normal.y * half0 * side,
+      );
+      ctx.lineTo(p0.x, p0.y);
+      ctx.stroke();
+    }
+  }
+
   private drawStartCheckered(
     ctx: CanvasRenderingContext2D,
     track: TrackView,
@@ -557,10 +596,14 @@ export function sampleTrack(track: TrackView, s: number): TrackSample {
   const segLen = b.s - a.s || 1;
   const t = clamp01((ss - a.s) / segLen);
 
+  // Match physics interpolateAtS: derive normal from lerped tangent so
+  // car sprites sit on the same Frenet frame as wall clamps (no mid-road look).
+  const tangent = normalizeVec(lerpVec(a.tangent, b.tangent, t));
+  const normal = { x: -tangent.y, y: tangent.x };
   return {
     pos: lerpVec(a.pos, b.pos, t),
-    tangent: normalizeVec(lerpVec(a.tangent, b.tangent, t)),
-    normal: normalizeVec(lerpVec(a.normal, b.normal, t)),
+    tangent,
+    normal,
     width: a.width + (b.width - a.width) * t,
   };
 }

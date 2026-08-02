@@ -85,6 +85,10 @@ export function validateRegistry(): string[] {
       const fmt = FORMATS.find((f) => f.id === r.formatId);
       if (fmt === undefined) {
         errors.push(`Tournament "${t.id}" references unknown format "${r.formatId}"`);
+      } else if (fmt.teamSize !== t.teamSize) {
+        errors.push(
+          `Tournament "${t.id}" teamSize ${t.teamSize} mismatches format "${r.formatId}" teamSize ${fmt.teamSize}`,
+        );
       }
     }
   }

@@ -22,6 +22,16 @@ const DEFAULT_VOLUMES: Required<AudioVolumeOptions> = {
   ui: 0.6,
 };
 
+/** Soft low-register voicings for generative pad motion (Hz). */
+const AMBIENT_VOICINGS: ReadonlyArray<readonly number[]> = [
+  [55.0, 82.41, 110.0],
+  [49.0, 73.42, 98.0],
+  [65.41, 98.0, 130.81],
+  [41.2, 82.41, 123.47],
+  [55.0, 82.41, 164.81],
+  [61.74, 92.5, 146.83],
+];
+
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
 }
@@ -50,6 +60,16 @@ export class AudioEngine {
   private rainFilter: BiquadFilterNode;
   private rainGain: GainNode;
 
+  /** Quiet generative ambient bed (routed under FX bus). */
+  private musicBus: GainNode;
+  private musicStarted = false;
+  private padOscs: OscillatorNode[] = [];
+  private padGains: GainNode[] = [];
+  private padFilter: BiquadFilterNode | null = null;
+  private ambienceSource: AudioBufferSourceNode | null = null;
+  private musicSeed = 0x5f3759df;
+  private musicEvolveTimer: ReturnType<typeof setTimeout> | null = null;
+
   private unlocked = false;
   private volumes: Required<AudioVolumeOptions>;
 
@@ -72,6 +92,11 @@ export class AudioEngine {
     this.uiBus = this.ctx.createGain();
     this.uiBus.gain.value = this.volumes.ui;
     this.uiBus.connect(this.masterGain);
+
+    // Music sits under FX so Options FX volume covers the bed.
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = 0;
+    this.musicBus.connect(this.fxBus);
 
     this.engineOsc = this.ctx.createOscillator();
     this.engineOsc.type = 'sawtooth';
@@ -139,6 +164,134 @@ export class AudioEngine {
     this.rainSource = src;
   }
 
+  private nextMusicRand(): number {
+    this.musicSeed = (Math.imul(this.musicSeed, 1664525) + 1013904223) >>> 0;
+    return this.musicSeed / 0x100000000;
+  }
+
+  /** Soft pads + filtered noise bed with slow LFO motion and sparse voicing changes. */
+  private startAmbientMusic(): void {
+    if (this.musicStarted) return;
+    this.musicStarted = true;
+
+    const t0 = this.ctx.currentTime;
+    const voicing = AMBIENT_VOICINGS[0]!;
+
+    const bedGain = this.ctx.createGain();
+    bedGain.gain.value = 0.12;
+    bedGain.connect(this.musicBus);
+
+    const padFilter = this.ctx.createBiquadFilter();
+    padFilter.type = 'lowpass';
+    padFilter.frequency.value = 420;
+    padFilter.Q.value = 0.55;
+    padFilter.connect(bedGain);
+    this.padFilter = padFilter;
+
+    // Slow filter breathe
+    const filterLfo = this.ctx.createOscillator();
+    filterLfo.type = 'sine';
+    filterLfo.frequency.value = 0.04;
+    const filterLfoGain = this.ctx.createGain();
+    filterLfoGain.gain.value = 160;
+    filterLfo.connect(filterLfoGain);
+    filterLfoGain.connect(padFilter.frequency);
+    filterLfo.start(t0);
+
+    // Slow overall bed swell (stays positive around base 0.12)
+    const bedLfo = this.ctx.createOscillator();
+    bedLfo.type = 'sine';
+    bedLfo.frequency.value = 0.02;
+    const bedLfoDepth = this.ctx.createGain();
+    bedLfoDepth.gain.value = 0.03;
+    bedLfo.connect(bedLfoDepth);
+    bedLfoDepth.connect(bedGain.gain);
+    bedLfo.start(t0);
+
+    const types: OscillatorType[] = ['sine', 'triangle', 'sawtooth'];
+    const baseGains = [0.11, 0.07, 0.035];
+
+    for (let i = 0; i < 3; i++) {
+      const osc = this.ctx.createOscillator();
+      osc.type = types[i]!;
+      osc.frequency.value = voicing[i]!;
+
+      const gain = this.ctx.createGain();
+      gain.gain.value = 0;
+
+      osc.connect(gain);
+      gain.connect(padFilter);
+      osc.start(t0);
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(baseGains[i]!, t0 + 2.8);
+
+      this.padOscs.push(osc);
+      this.padGains.push(gain);
+    }
+
+    // Gentle filtered noise bed
+    if (!this.ambienceSource) {
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = this.noiseBuffer;
+      noise.loop = true;
+
+      const noiseFilter = this.ctx.createBiquadFilter();
+      noiseFilter.type = 'lowpass';
+      noiseFilter.frequency.value = 280;
+      noiseFilter.Q.value = 0.4;
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.value = 0;
+
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(bedGain);
+      noise.start(t0);
+      noiseGain.gain.setValueAtTime(0.0001, t0);
+      noiseGain.gain.exponentialRampToValueAtTime(0.028, t0 + 3.5);
+      this.ambienceSource = noise;
+    }
+
+    // Fade music bus in (LFO modulates bedGain, not this)
+    this.musicBus.gain.setValueAtTime(0.0001, t0);
+    this.musicBus.gain.exponentialRampToValueAtTime(1, t0 + 3.2);
+
+    this.scheduleAmbientEvolve();
+  }
+
+  private scheduleAmbientEvolve(): void {
+    if (this.musicEvolveTimer !== null) {
+      clearTimeout(this.musicEvolveTimer);
+    }
+    const delayMs = 9000 + this.nextMusicRand() * 9000;
+    this.musicEvolveTimer = setTimeout(() => {
+      this.musicEvolveTimer = null;
+      if (!this.unlocked || this.ctx.state === 'closed') return;
+      this.evolveAmbientVoicing();
+      this.scheduleAmbientEvolve();
+    }, delayMs);
+  }
+
+  private evolveAmbientVoicing(): void {
+    if (this.padOscs.length === 0 || this.padFilter === null) return;
+    const idx = Math.floor(this.nextMusicRand() * AMBIENT_VOICINGS.length);
+    const voicing = AMBIENT_VOICINGS[idx]!;
+    const t = this.ctx.currentTime;
+    const glide = 4 + this.nextMusicRand() * 4;
+
+    for (let i = 0; i < this.padOscs.length; i++) {
+      const osc = this.padOscs[i]!;
+      const target = voicing[i] ?? voicing[voicing.length - 1]!;
+      osc.frequency.cancelScheduledValues(t);
+      osc.frequency.setTargetAtTime(target, t, glide / 3);
+    }
+
+    // Soft filter retarget — LFO continues to breathe around the new base
+    const cutoff = 320 + this.nextMusicRand() * 220;
+    this.padFilter.frequency.cancelScheduledValues(t);
+    this.padFilter.frequency.setTargetAtTime(cutoff, t, 2.5);
+  }
+
   private ensureEngineRunning(): void {
     if (this.engineStarted) return;
     const t = this.ctx.currentTime;
@@ -162,6 +315,7 @@ export class AudioEngine {
     this.ensureEngineRunning();
     this.ensureKerbRunning();
     this.startRainLoop();
+    this.startAmbientMusic();
     this.unlocked = true;
   }
 
@@ -189,7 +343,9 @@ export class AudioEngine {
     const f = 55 + 350 * (rpm / 8000);
     const t = this.ctx.currentTime;
     this.engineOsc.frequency.setTargetAtTime(f, t, 0.02);
-    const vol = clamp(throttle, 0, 1) * 0.35 + 0.05;
+    // Full mute when parked (race exit); otherwise keep a quiet idle floor.
+    const vol =
+      rpm <= 0 && throttle <= 0 ? 0 : clamp(throttle, 0, 1) * 0.35 + 0.05;
     this.engineGain.gain.setTargetAtTime(vol, t, 0.05);
   }
 
@@ -215,6 +371,11 @@ export class AudioEngine {
     this.playNoiseBurst(150, 300, 0.45);
   }
 
+  /** Off-slot scrub — shorter / brighter than a full spin tumble. */
+  playDeslot(): void {
+    this.playNoiseBurst(120, 500, 0.38);
+  }
+
   setKerb(on: boolean): void {
     this.ensureKerbRunning();
     const t = this.ctx.currentTime;
@@ -228,7 +389,8 @@ export class AudioEngine {
   }
 
   click(): void {
-    this.playTone('square', 660, 0.04, this.uiBus, 0.35);
+    // Soft tick — was a piercing square beep
+    this.playTone('sine', 520, 0.05, this.uiBus, 0.18);
   }
 
   async suspend(): Promise<void> {
@@ -242,6 +404,10 @@ export class AudioEngine {
       await this.ctx.resume();
     }
     this.unlocked = true;
+    // If unlock path was skipped somehow, ensure bed exists after resume.
+    if (!this.musicStarted && this.ctx.state === 'running') {
+      this.startAmbientMusic();
+    }
   }
 
   get context(): AudioContext {

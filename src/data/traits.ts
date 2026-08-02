@@ -31,7 +31,7 @@ export const TRAITS: TraitDef[] = [
   {
     id: 'slipstreamer',
     name: 'Slipstreamer',
-    description: 'Draft bonuses ×1.5',
+    description: 'Draft bonuses ×1.65',
   },
   {
     id: 'grinder',

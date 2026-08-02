@@ -34,9 +34,12 @@ import {
   type ButtonDef,
   type ModalDef,
 } from '../ui/components';
-import { createTheme, type ThemeTokens } from '../ui/theme';
-import { disciplineAccent } from './sceneUtils';
-import { createResultsScene } from './ResultsScene';
+import { accentForDiscipline, createTheme, type ThemeTokens } from '../ui/theme';
+
+/** Avoid importing sceneUtils / ResultsScene here — that cycle breaks dynamic RaceScene load. */
+function disciplineAccent(id: import('../data/disciplines').DisciplineId): string {
+  return accentForDiscipline(id);
+}
 
 const FINISH_DELAY_SEC = 2.2;
 const TICKER_MAX = 4;
@@ -72,7 +75,9 @@ export class RaceScene implements Scene {
   private prevCountdown: CountdownPhase | undefined;
   private prevPlayerWallHits = 0;
   private prevPlayerSpins = 0;
+  private prevPlayerDeslots = 0;
   private prevCarSamples = new Map<string, { x: number; y: number; s: number; l: number }>();
+  private prevCarDeslots = new Map<string, number>();
   private ticker: TickerLine[] = [];
   private seenEventCount = 0;
   private hintText: string | null = null;
@@ -81,6 +86,7 @@ export class RaceScene implements Scene {
   private ghostTrace: GhostTrace | null = null;
   private lastDt = 1 / 60;
   private prevCarWallHits = new Map<string, number>();
+  private enterError: string | null = null;
   private stats: RaceObjectiveStats = {
     playerBrakeUsed: false,
     playerWallHits: 0,
@@ -103,53 +109,66 @@ export class RaceScene implements Scene {
       return;
     }
 
-    this.g.input.setMode('race');
-    this.g.input.resetRaceInput();
-    this.paused = false;
-    this.finishTimer = 0;
-    this.transitioned = false;
-    this.prevCountdown = undefined;
-    this.prevPlayerWallHits = 0;
-    this.prevPlayerSpins = 0;
-    this.prevCarSamples.clear();
-    this.ticker = [];
-    this.seenEventCount = 0;
-    this.hintText = null;
-    this.hintT = 0;
+    this.enterError = null;
+    try {
+      this.g.input.setMode('race');
+      this.g.input.resetRaceInput();
+      this.paused = false;
+      this.finishTimer = 0;
+      this.transitioned = false;
+      this.prevCountdown = undefined;
+      this.prevPlayerWallHits = 0;
+      this.prevPlayerSpins = 0;
+      this.prevPlayerDeslots = 0;
+      this.prevCarSamples.clear();
+      this.prevCarDeslots.clear();
+      this.ticker = [];
+      this.seenEventCount = 0;
+      this.hintText = null;
+      this.hintT = 0;
 
-    const vehicle = state.vehicles[this.launch.discipline];
-    this.stats = {
-      playerBrakeUsed: false,
-      playerWallHits: 0,
-      playerSpinCount: 0,
-      playerOvertakes: 0,
-      startGridPosition: 1,
-      vehicleConditionAtStart: vehicle.condition,
-      vehicleRepairedBeforeRace: vehicle.condition >= BALANCE.conditionMax - 0.001,
-    };
-
-    const raceConfig = buildRaceConfig(state, this.launch);
-    this.director = new RaceDirector(raceConfig);
-    this.renderer.bakeTrack(this.director.track, this.launch.discipline);
-    this.particles.setRaining(this.director.rain);
-    this.g.audio.setRain(this.director.rain);
-
-    if (this.launch.again) {
-      const stored = loadGhostTrace();
-      if (stored !== null) {
-        this.ghostTrace = stored.trace;
-        this.ghostCarId = stored.carId;
+      const vehicle = state.vehicles[this.launch.discipline];
+      if (vehicle === undefined) {
+        throw new Error(`Missing vehicle for ${this.launch.discipline}`);
       }
-    }
+      this.stats = {
+        playerBrakeUsed: false,
+        playerWallHits: 0,
+        playerSpinCount: 0,
+        playerOvertakes: 0,
+        startGridPosition: 1,
+        vehicleConditionAtStart: vehicle.condition,
+        vehicleRepairedBeforeRace: vehicle.condition >= BALANCE.conditionMax - 0.001,
+      };
 
-    const standings = this.director.currentStandings;
-    const player = standings.find((s) => s.isPlayerControlled);
-    if (player !== undefined) {
-      this.stats.startGridPosition = player.position;
-    }
+      const raceConfig = buildRaceConfig(state, this.launch);
+      this.director = new RaceDirector(raceConfig);
+      this.renderer.bakeTrack(this.director.track, this.launch.discipline);
+      this.particles.setRaining(this.director.rain);
+      this.g.audio.setRain(this.director.rain);
 
-    this.setupCountdownCamera();
-    this.queueOnboardingHint();
+      if (this.launch.again) {
+        const stored = loadGhostTrace();
+        if (stored !== null) {
+          this.ghostTrace = stored.trace;
+          this.ghostCarId = stored.carId;
+        }
+      }
+
+      const standings = this.director.currentStandings;
+      const player = standings.find((s) => s.isPlayerControlled);
+      if (player !== undefined) {
+        this.stats.startGridPosition = player.position;
+      }
+
+      this.setupCountdownCamera();
+      this.queueOnboardingHint();
+    } catch (err) {
+      console.error('[apex] RaceScene.enter failed', err);
+      this.director = null;
+      this.enterError = err instanceof Error ? err.message || err.name : String(err);
+      this.g.input.setMode('menu');
+    }
   }
 
   exit(): void {
@@ -157,12 +176,17 @@ export class RaceScene implements Scene {
     this.g.audio.setRain(false);
     this.g.audio.setKerb(false);
     this.g.audio.setScreech(0, false);
+    this.g.audio.updateEngine(0, 0);
   }
 
   onResize(_w: number, _h: number): void {}
 
   handleBack(): boolean {
-    if (this.director?.isRaceFinished) return true;
+    if (this.enterError !== null || this.director === null) {
+      this.g.scenes.back();
+      return true;
+    }
+    if (this.director.isRaceFinished) return true;
     if (!this.paused) {
       this.openPause();
     }
@@ -171,7 +195,10 @@ export class RaceScene implements Scene {
 
   update(dt: number): void {
     const director = this.director;
-    if (director === null) return;
+    if (director === null) {
+      this.handleEnterErrorInput();
+      return;
+    }
 
     this.lastDt = dt;
 
@@ -207,7 +234,10 @@ export class RaceScene implements Scene {
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const director = this.director;
-    if (director === null) return;
+    if (director === null) {
+      this.renderEnterError(ctx, w, h);
+      return;
+    }
 
     const token = createTheme(w, h);
     const accent = disciplineAccent(this.launch.discipline);
@@ -357,7 +387,85 @@ export class RaceScene implements Scene {
       playerCar?.condition,
     );
 
-    this.g.scenes.replace(createResultsScene(payload));
+    void import('./ResultsScene')
+      .then((mod) => {
+        this.g.scenes.replace(mod.createResultsScene(payload));
+      })
+      .catch((err) => {
+        console.error('[apex] ResultsScene import failed', err);
+        this.enterError = err instanceof Error ? err.message || err.name : String(err);
+        this.director = null;
+        this.g.input.setMode('menu');
+      });
+  }
+
+  private enterErrorBackButton(w: number, h: number, token: ThemeTokens): ButtonDef {
+    const btnW = pad(token, 14);
+    const btnH = ensureMinTouch(pad(token, 5.5), token);
+    return {
+      x: (w - btnW) * 0.5,
+      y: h * 0.58,
+      w: btnW,
+      h: btnH,
+      label: 'Back',
+      primary: true,
+      onClick: () => this.g.scenes.back(),
+    };
+  }
+
+  private handleEnterErrorInput(): void {
+    if (this.enterError === null) return;
+    const w = this.g.canvas.clientWidth;
+    const h = this.g.canvas.clientHeight;
+    const token = createTheme(w, h);
+    const accent = disciplineAccent(this.launch.discipline);
+    const click = this.g.input.consumeClick();
+    const ui = {
+      pointerX: this.g.input.pointerX,
+      pointerY: this.g.input.pointerY,
+      pointerDown: this.g.input.peekClick() !== null || this.g.input.getActivePointers().length > 0,
+      pointerClicked: click !== null,
+      dt: 0,
+      w,
+      h,
+      token,
+      accent,
+    };
+    handleButton(this.enterErrorBackButton(w, h, token), ui);
+  }
+
+  private renderEnterError(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    const token = createTheme(w, h);
+    const accent = disciplineAccent(this.launch.discipline);
+    ctx.fillStyle = token.bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+    ctx.fillStyle = token.text;
+    ctx.fillText('Could not start race', w * 0.5, h * 0.38);
+    ctx.font = `${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = '#f87171';
+    const msg = this.enterError ?? 'Unknown error';
+    const maxChars = 64;
+    const line = msg.length > maxChars ? `${msg.slice(0, maxChars - 1)}…` : msg;
+    ctx.fillText(line, w * 0.5, h * 0.38 + token.fontTitle + pad(token));
+    ctx.restore();
+
+    const btn = this.enterErrorBackButton(w, h, token);
+    const ui = {
+      pointerX: this.g.input.pointerX,
+      pointerY: this.g.input.pointerY,
+      pointerDown: false,
+      pointerClicked: false,
+      dt: 0,
+      w,
+      h,
+      token,
+      accent,
+    };
+    drawButton(ctx, btn, ui);
   }
 
   private setupCountdownCamera(): void {
@@ -432,12 +540,21 @@ export class RaceScene implements Scene {
     const player = director.cars.find((c) => c.isPlayerControlled);
     if (player !== undefined) {
       this.g.audio.updateEngine(player.rpm, player.throttle);
-      this.g.audio.setScreech(player.gripUsage, player.driftState);
+      this.g.audio.setScreech(
+        player.slotMode === 'deslot' ? Math.max(player.gripUsage, 1.15) : player.gripUsage,
+        player.driftState || player.slotMode === 'deslot',
+      );
 
       if (player.wallHits > this.prevPlayerWallHits) {
         this.g.audio.playCrash();
         if (!this.g.state!.onboarding.shownCrashHint) {
           this.showHint('Wall contact reduces condition — brake earlier!', 'shownCrashHint');
+        }
+      }
+      if (player.deslotCount > this.prevPlayerDeslots) {
+        this.g.audio.playDeslot();
+        if (!this.g.state!.onboarding.shownBrakeHint) {
+          this.showHint('Too fast for the corner — brake before the bend!', 'shownBrakeHint');
         }
       }
       if (player.spinCount > this.prevPlayerSpins) {
@@ -448,12 +565,13 @@ export class RaceScene implements Scene {
       this.stats.playerSpinCount = player.spinCount;
       this.prevPlayerWallHits = player.wallHits;
       this.prevPlayerSpins = player.spinCount;
+      this.prevPlayerDeslots = player.deslotCount;
 
       const sample = sampleTrack(track, player.s);
-      const onKerb =
-        Math.abs(sample.pos.x) >= 0 &&
-        Math.abs(player.l) > sample.width * 0.5 - PHYSICS.kerbOuterM &&
-        Math.abs(player.l) <= sample.width * 0.5;
+      const halfW = sample.width * 0.5;
+      const absL = Math.abs(player.l);
+      // Kerbs sit outside asphalt (matches VectorRenderer + physics zones).
+      const onKerb = absL > halfW && absL <= halfW + PHYSICS.kerbOuterM;
       this.g.audio.setKerb(onKerb);
     }
 
@@ -465,15 +583,21 @@ export class RaceScene implements Scene {
       const px = rendered.pos.x;
       const py = rendered.pos.y;
 
-      if (prev !== undefined && car.driftState && car.v > 4) {
+      const scrubbing = car.driftState || car.slotMode === 'deslot';
+      if (prev !== undefined && scrubbing && car.v > 4) {
         this.particles.emitSkid(prev.x, prev.y, px, py);
       }
-      if (car.driftState && car.v > 6) {
-        this.particles.emitDust(px, py, tick, car.gripUsage);
+      if (scrubbing && car.v > 6) {
+        this.particles.emitDust(px, py, tick, Math.max(car.gripUsage, 1.1));
       }
       if (car.spinRemaining > 0) {
         this.particles.emitSmoke(px, py, tick);
       }
+      const prevDeslots = this.prevCarDeslots.get(car.id) ?? 0;
+      if (car.deslotCount > prevDeslots) {
+        this.particles.emitSparks(px, py, tick);
+      }
+      this.prevCarDeslots.set(car.id, car.deslotCount);
       const prevHits = this.prevCarWallHits.get(car.id) ?? 0;
       if (car.wallHits > prevHits && car.v > PHYSICS.crashSpeed) {
         this.particles.emitSparks(px, py, tick);
@@ -500,6 +624,9 @@ export class RaceScene implements Scene {
             break;
           case 'spin':
             text = `${ev.time.toFixed(1)}s — ${name} spins!`;
+            break;
+          case 'deslot':
+            text = `${ev.time.toFixed(1)}s — ${name} deslots!`;
             break;
           case 'crash':
             text = `${ev.time.toFixed(1)}s — ${name} crashes!`;
@@ -806,7 +933,7 @@ export class RaceScene implements Scene {
       `cars=${director.cars.length} rain=${director.rain}`,
       `dt=${PHYSICS.dt} inputT=${director.playerInputTime.toFixed(2)}`,
       player !== undefined
-        ? `v=${player.v.toFixed(1)} grip=${player.gripUsage.toFixed(2)} drift=${player.driftState}`
+        ? `v=${player.v.toFixed(1)} grip=${player.gripUsage.toFixed(2)} slot=${player.slotMode} deslots=${player.deslotCount}`
         : 'no player',
     ];
     ctx.save();

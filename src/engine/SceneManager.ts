@@ -90,6 +90,11 @@ export class SceneManager {
       if (this.transitionT >= FADE_MS / 1000) {
         this.transition = 'none';
         this.transitionT = 0;
+        // Flush nav requested during the fade (e.g. enter failure → back).
+        if (this.pending !== null) {
+          this.beginFadeOut(this.pending);
+          return;
+        }
       }
     }
 
@@ -128,7 +133,7 @@ export class SceneManager {
     if (nav.action === 'push' && nav.scene !== undefined) {
       this.current?.exit?.();
       this.stack.push(nav.scene);
-      nav.scene.enter?.();
+      this.safeEnter(nav.scene);
       return;
     }
 
@@ -136,14 +141,24 @@ export class SceneManager {
       const outgoing = this.stack.pop();
       outgoing?.exit?.();
       this.stack.push(nav.scene);
-      nav.scene.enter?.();
+      this.safeEnter(nav.scene);
       return;
     }
 
     if (nav.action === 'back' && this.stack.length > 1) {
       const outgoing = this.stack.pop();
       outgoing?.exit?.();
-      this.current?.enter?.();
+      const current = this.current;
+      if (current !== null) this.safeEnter(current);
+    }
+  }
+
+  /** enter() must not leave the manager stuck in fadeOut forever. */
+  private safeEnter(scene: Scene): void {
+    try {
+      scene.enter?.();
+    } catch (err) {
+      console.error('[apex] scene.enter failed', err);
     }
   }
 }

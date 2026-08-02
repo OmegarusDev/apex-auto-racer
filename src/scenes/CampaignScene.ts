@@ -2,6 +2,7 @@ import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
 import { BALANCE, RANK_NAMES } from '../data/balance';
 import type { RankId } from '../data/balance';
+import { FORMATS } from '../data/formats';
 import { getTournament, TOURNAMENTS } from '../data/tournaments';
 import { generateOpponents } from '../engine/DriverGenerator';
 import { mulberry32, randInt } from '../engine/rng';
@@ -135,17 +136,16 @@ export class CampaignScene implements Scene {
     }
 
     const rng = mulberry32((g.state.seed ^ def.rank) >>> 0);
-    const opponents = generateOpponents(rng, def.teamSize * 2, def.rank);
+    const format = FORMATS.find((f) => f.id === def.races[0]?.formatId) ?? FORMATS[0]!;
+    const opponentCount = Math.max(1, (format.teamCount - 1) * format.teamSize);
+    const opponents = generateOpponents(rng, opponentCount, def.rank);
+    const rivalName = opponents[0]?.name.split(' ')[0] ?? 'Rival';
     const progress: TournamentProgress = {
       defId: def.id,
       raceIndex: 0,
       standings: [
         { teamId: 0, points: 0, name: 'You' },
-        ...opponents.slice(0, 3).map((d, i) => ({
-          teamId: i + 1,
-          points: 0,
-          name: d.name.split(' ')[0] ?? `Team ${i + 1}`,
-        })),
+        { teamId: 1, points: 0, name: rivalName },
       ],
       opponentDrivers: opponents,
       playerLineup: [...this.lineupSelection],
@@ -186,7 +186,7 @@ export class CampaignScene implements Scene {
       mode: 'tournament',
       tournamentDefId: def.id,
     };
-    void launchRace(config, this.toasts);
+    launchRace(config, this.toasts);
   }
 
   private toggleLineupDriver(id: string, maxSize: number): void {
@@ -250,8 +250,12 @@ export class CampaignScene implements Scene {
       label: 'Start',
       primary: true,
       onClick: () => {
+        if (state.roster.length < 1) {
+          this.toasts.push('Need a driver on the roster', accent);
+          return;
+        }
         const config = makeQuickRaceConfig(state, this.discipline);
-        void launchRace(config, this.toasts);
+        launchRace(config, this.toasts);
       },
     };
     drawButton(ctx, startBtn, ui);

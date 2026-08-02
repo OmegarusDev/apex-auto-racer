@@ -16,6 +16,7 @@ export interface AudioEngine {
   playGo(): void;
   playCrash(): void;
   playSpin(): void;
+  playDeslot(): void;
   setKerb(on: boolean): void;
   setRain(on: boolean): void;
   click(): void;
@@ -38,6 +39,7 @@ class NullAudioEngine implements AudioEngine {
   playGo(): void {}
   playCrash(): void {}
   playSpin(): void {}
+  playDeslot(): void {}
   setKerb(_on: boolean): void {}
   setRain(_on: boolean): void {}
   click(): void {}

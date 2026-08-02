@@ -12,7 +12,7 @@ import {
   tickDriverBrain,
 } from './DriverBrain';
 import type { BrainState, BrainTickContext, RivalSnapshot } from './DriverBrain';
-import { generateDriver } from './DriverGenerator';
+import { driverStrength01, generateFieldDrivers } from './DriverGenerator';
 import {
   buildSpeedProfiles,
   buildVDriverProfile,
@@ -20,11 +20,15 @@ import {
   generateTrack,
 } from './TrackGenerator';
 import type { TrackData } from './TrackGenerator';
+import { interpolateAtS } from './RacingLine';
 import {
   buildVehicleContext,
-  computeAuthority,
+  computeBrakeAuthority,
+  computeSDet,
+  contactDeslot,
   createCarState,
   updateVehicle,
+  wallLimitFor,
 } from './Vehicle';
 import type { BrainOutput, CarSimState, VehicleInputs } from './Vehicle';
 import { effectiveStats } from './stats';
@@ -139,6 +143,7 @@ interface RaceCarEntry {
   prevLap: number;
   prevWallHits: number;
   prevSpinCount: number;
+  prevDeslotCount: number;
   prevDrift: boolean;
   prevPosition: number;
   prevMistakeActive: boolean;
@@ -148,8 +153,8 @@ interface RaceCarEntry {
 }
 
 const EVENT_BUFFER_SIZE = 128;
-const GRID_ROW_SPACING = 8;
-const GRID_COL_OFFSET = 2.5;
+const GRID_ROW_SPACING = 9;
+const GRID_COL_OFFSET = 3.2;
 const COUNTDOWN_STEP_SEC = 1;
 const GO_FLASH_SEC = 0.5;
 
@@ -166,9 +171,37 @@ function arcGap(follower: CarSimState, leader: CarSimState, trackLength: number)
   return gap - PHYSICS.carLength;
 }
 
+/** Set arc-length progress from a non-negative race distance (handles lap wrap). */
+function setRaceDistance(car: CarSimState, dist: number, trackLength: number): void {
+  const d = Math.max(0, dist);
+  const lap = Math.floor(d / trackLength);
+  car.lap = lap;
+  car.s = d - lap * trackLength;
+  if (car.s < 0) car.s += trackLength;
+}
+
+function displaceAlongTrack(car: CarSimState, delta: number, trackLength: number): void {
+  setRaceDistance(car, raceDistance(car, trackLength) + delta, trackLength);
+}
+
+function clampLateralToTrack(car: CarSimState, track: TrackData): void {
+  const node = interpolateAtS(track.nodes, track.length, car.s);
+  const wallLimit = wallLimitFor(node.width, node.runoffWidth);
+  if (Math.abs(car.l) > wallLimit) {
+    car.l = Math.sign(car.l || 1) * wallLimit;
+  }
+}
+
+/** True when AABB footprints overlap in track-space (s,l). */
+function bodiesOverlap(a: CarSimState, b: CarSimState, trackLength: number): boolean {
+  const dS = Math.abs(raceDistance(b, trackLength) - raceDistance(a, trackLength));
+  if (dS >= PHYSICS.carLength) return false;
+  return Math.abs(b.l - a.l) < PHYSICS.carWidth;
+}
+
 function applyLooseCannon(driver: Driver, rng: Rng): Driver {
   if (driver.trait !== 'looseCannon') return driver;
-  const jitter = (): number => randRange(rng, -10, 10);
+  const jitter = (): number => Math.round(randRange(rng, -10, 10));
   return {
     ...driver,
     skill: clampStat(driver.skill + jitter()),
@@ -181,12 +214,8 @@ function applyLooseCannon(driver: Driver, rng: Rng): Driver {
 function buildRainStack(rain: boolean): Modifier[] {
   const stack = createModifierStack();
   if (rain) {
-    addModifier(stack, {
-      source: 'rain',
-      targetParam: 'muSurface',
-      op: 'mul',
-      value: BALANCE.rainMuMult,
-    });
+    // muSurface rain factor is applied once on RaceDirector.muSurface (profiles + vehicle).
+    // Do not also mul muSurface here — that squared wet grip and auto-spun early races.
     addModifier(stack, {
       source: 'rain',
       targetParam: 'mistakeRate',
@@ -204,7 +233,7 @@ function buildTraitStack(driver: Driver): Modifier[] {
       source: 'trait:slipstreamer',
       targetParam: 'draft',
       op: 'mul',
-      value: 1.5,
+      value: 1.65,
     });
   }
   return stack;
@@ -218,33 +247,75 @@ function mergeModifierStacks(...stacks: readonly Modifier[][]): Modifier[] {
   return out;
 }
 
-function generateOpponentParts(rng: Rng, range: [number, number]): VehicleParts {
+/**
+ * Opponent loadout: strength biases toward the top of the rank band, with
+ * per-part jitter so the field is not uniform scrap / uniform rockets.
+ */
+function generateOpponentParts(
+  rng: Rng,
+  range: [number, number],
+  strength01 = 0.5,
+): VehicleParts {
   const parts = emptyVehicleParts(0);
+  const [lo, hi] = range;
+  const span = hi - lo;
   for (const part of PARTS) {
-    parts[part.id] = randInt(rng, range[0], range[1]);
+    if (span <= 0) {
+      parts[part.id] = lo;
+      continue;
+    }
+    // Center near strength percentile; ±~40% of band as noise.
+    const center = lo + span * (0.15 + 0.7 * strength01);
+    const jitter = (rng() - 0.5) * span * 0.85;
+    parts[part.id] = Math.max(lo, Math.min(hi, Math.round(center + jitter)));
   }
   return parts;
 }
 
+/**
+ * Slipstream: tow from a car ahead when aligned on a straight.
+ * Fades with lateral offset and corner curvature (Scalextric wake).
+ */
 function computeDraft(
   idx: number,
   entries: readonly RaceCarEntry[],
   trackLength: number,
+  track: TrackData,
+  determination: number,
+  position: number,
+  totalCars: number,
 ): number {
   const car = entries[idx]!.car;
-  let best = 0;
+  const node = interpolateAtS(track.nodes, trackLength, car.s);
+  const kappaAbs = Math.abs(node.kappaLine);
+  // Corners kill the tow; mild bends still allow a trickle.
+  const cornerFade = Math.max(
+    0,
+    1 - kappaAbs / Math.max(PHYSICS.draftCornerKappa, 1e-3),
+  );
+  if (cornerFade <= 0.05) return 0;
 
+  let best = 0;
   for (let j = 0; j < entries.length; j++) {
     if (j === idx) continue;
     const other = entries[j]!.car;
     const gap = arcGap(car, other, trackLength);
     if (gap <= 0 || gap > BALANCE.draftGapMax) continue;
-    if (Math.abs(other.l - car.l) > BALANCE.draftLateralMax) continue;
-    const raw = 1 - gap / BALANCE.draftGapMax;
+    const lat = Math.abs(other.l - car.l);
+    if (lat > BALANCE.draftLateralMax) continue;
+    const align = 1 - lat / BALANCE.draftLateralMax;
+    const gapFactor = 1 - gap / BALANCE.draftGapMax;
+    const raw = gapFactor * align * cornerFade;
     if (raw > best) best = raw;
   }
 
-  return best;
+  // Determination harvests the wake harder when chasing (catch-up RPG).
+  const chase =
+    totalCars > 1 ? (position - 1) / (totalCars - 1) : 0;
+  const detMul = 1 + PHYSICS.draftDetBonus * (determination / 100) * chase;
+  // Mild sDet echo so mid-pack fighters feel the tow more.
+  const sDet = computeSDet(determination, position, totalCars);
+  return Math.min(1.15, best * detMul * (0.92 + 0.08 * sDet));
 }
 
 function buildRivals(
@@ -264,6 +335,7 @@ function buildRivals(
       speed: other.v,
       s: other.s,
       l: other.l,
+      deslotted: other.slotMode === 'deslot' || other.spinRemaining > 0,
     });
   }
 
@@ -279,6 +351,8 @@ function formatEvent(event: RaceEvent): string {
       return `${event.time.toFixed(1)}s — ${name} makes a mistake`;
     case 'spin':
       return `${event.time.toFixed(1)}s — ${name} spins!`;
+    case 'deslot':
+      return `${event.time.toFixed(1)}s — ${name} deslots!`;
     case 'crash':
       return `${event.time.toFixed(1)}s — ${name} crashes into the wall`;
     case 'driftEntry':
@@ -329,9 +403,15 @@ export function quickRaceConfig(
   const leadDriverId = pick(rng, playerTeamDrivers).id;
 
   const rank = state.rankUnlocked[discipline] ?? 0;
-  const statRange = BALANCE.opponentStatRanges[rank] ?? BALANCE.opponentStatRanges[0]!;
+  const highestRank = Math.max(
+    state.rankUnlocked.track,
+    state.rankUnlocked.street,
+    state.rankUnlocked.rally,
+  ) as 0 | 1 | 2 | 3 | 4 | 5;
+  const difficultyRank = Math.max(rank, highestRank) as 0 | 1 | 2 | 3 | 4 | 5;
+  const statRange = BALANCE.opponentStatRanges[difficultyRank] ?? BALANCE.opponentStatRanges[0]!;
   const opponentBudget: [number, number] = [statRange[0] * 4, statRange[1] * 4];
-  const opponentPartRange = BALANCE.opponentPartTiers[rank] ?? BALANCE.opponentPartTiers[0]!;
+  const opponentPartRange = BALANCE.opponentPartTiers[difficultyRank] ?? BALANCE.opponentPartTiers[0]!;
 
   const trackSeed = randInt(rng, 1, 0x7fffffff);
   const track = generateTrack(trackSeed, discipline);
@@ -389,6 +469,10 @@ export class RaceDirector {
   private muSurface: number;
   private globalRainStack: Modifier[];
   private resultCache: RaceResult | null = null;
+  /** Physics frames where any pair overlapped before solid resolve. */
+  private overlapFrames = 0;
+  /** Physics frames that still had a residual overlap after resolve. */
+  private residualOverlapFrames = 0;
 
   constructor(config: RaceConfig) {
     this.config = config;
@@ -429,6 +513,15 @@ export class RaceDirector {
 
   get cars(): readonly CarSimState[] {
     return this.entries.map((e) => e.car);
+  }
+
+  /** Headless/debug: frames with pre-resolve body overlap / residual after resolve. */
+  get contactStats(): { overlapFrames: number; residualOverlapFrames: number; ticks: number } {
+    return {
+      overlapFrames: this.overlapFrames,
+      residualOverlapFrames: this.residualOverlapFrames,
+      ticks: this.tickIndex,
+    };
   }
 
   get allDrivers(): readonly Driver[] {
@@ -512,10 +605,14 @@ export class RaceDirector {
     if (this.config.opponentDrivers !== undefined && this.config.opponentDrivers.length >= opponentCount) {
       opponentDrivers = this.config.opponentDrivers.slice(0, opponentCount);
     } else {
-      opponentDrivers = [];
-      for (let i = 0; i < opponentCount; i++) {
-        opponentDrivers.push(generateDriver(this.rng, opponentBudget[0], opponentBudget[1], usedNames));
-      }
+      // Stratified weak→strong within the rank band (backmarkers + standouts).
+      opponentDrivers = generateFieldDrivers(
+        this.rng,
+        opponentCount,
+        opponentBudget[0],
+        opponentBudget[1],
+        usedNames,
+      );
     }
 
     this.drivers = [
@@ -544,11 +641,13 @@ export class RaceDirector {
     for (let t = 1; t < format.teamCount; t++) {
       for (let s = 0; s < format.teamSize; s++) {
         const driverIdx = playerTeamDrivers.length + (t - 1) * format.teamSize + s;
+        const oppDriver = this.drivers[driverIdx]!;
+        const strength = driverStrength01(oppDriver, opponentBudget[0], opponentBudget[1]);
         carPlans.push({
-          driver: this.drivers[driverIdx]!,
+          driver: oppDriver,
           teamId: t,
           isPlayer: false,
-          parts: generateOpponentParts(this.rng, opponentPartRange),
+          parts: generateOpponentParts(this.rng, opponentPartRange, strength),
           condition: 1,
         });
       }
@@ -563,9 +662,14 @@ export class RaceDirector {
       const gridS = (this.track.length - row * GRID_ROW_SPACING + this.track.length) % this.track.length;
 
       const stats = effectiveStats(this.config.discipline, plan.parts, plan.condition, plan.driver);
-      const { vProfile } = buildSpeedProfiles(this.track, stats, this.muSurface);
-      const vDriver = buildVDriverProfile(vProfile, plan.driver.skill, plan.driver.bravery);
-      const authority = plan.isPlayer ? computeAuthority(plan.driver.skill) : 1;
+      const { vProfile, vSafe } = buildSpeedProfiles(this.track, stats, this.muSurface);
+      let vDriver = buildVDriverProfile(vProfile, plan.driver.skill, plan.driver.bravery);
+      // Slight player pace handicap so equal-looking stats still feel contested.
+      if (plan.isPlayer) {
+        const pace = BALANCE.playerPaceMult;
+        vDriver = vDriver.map((v) => v * pace);
+      }
+      const authority = plan.isPlayer ? computeBrakeAuthority(plan.driver.skill) : 1;
 
       const modifierStack = mergeModifierStacks(
         this.globalRainStack,
@@ -580,6 +684,7 @@ export class RaceDirector {
         stats,
         vProfile,
         vDriver,
+        vSafe,
         plan.condition,
         gridS,
         gridL,
@@ -596,6 +701,7 @@ export class RaceDirector {
         prevLap: 0,
         prevWallHits: 0,
         prevSpinCount: 0,
+        prevDeslotCount: 0,
         prevDrift: false,
         prevPosition: i + 1,
         prevMistakeActive: false,
@@ -646,8 +752,17 @@ export class RaceDirector {
 
     for (let i = 0; i < this.entries.length; i++) {
       const entry = this.entries[i]!;
+      const position = this.standings.find((s) => s.carId === entry.car.id)?.position ?? i + 1;
 
-      entry.draft = computeDraft(i, this.entries, this.track.length);
+      entry.draft = computeDraft(
+        i,
+        this.entries,
+        this.track.length,
+        this.track,
+        entry.driver.determination,
+        position,
+        totalCars,
+      );
 
       if (!entry.car.finished) {
         entry.prevS = entry.car.s;
@@ -658,7 +773,6 @@ export class RaceDirector {
           this.inputTime += dt;
         }
 
-        const position = this.standings.find((s) => s.carId === entry.car.id)?.position ?? i + 1;
         const ctx = buildVehicleContext(
           entry.driver,
           position,
@@ -676,9 +790,16 @@ export class RaceDirector {
         this.handleLapCrossing(entry);
       } else if (entry.car.finished && entry.car.spinRemaining <= 0 && entry.car.stunRemaining <= 0) {
         entry.brainOut = this.tickBrain(i);
-        entry.draft = computeDraft(i, this.entries, this.track.length);
+        entry.draft = computeDraft(
+          i,
+          this.entries,
+          this.track.length,
+          this.track,
+          entry.driver.determination,
+          position,
+          totalCars,
+        );
         entry.prevS = entry.car.s;
-        const position = this.standings.find((s) => s.carId === entry.car.id)?.position ?? i + 1;
         const ctx = buildVehicleContext(
           entry.driver,
           position,
@@ -785,45 +906,246 @@ export class RaceDirector {
   private resolveContacts(dt: number): void {
     const trackLength = this.track.length;
     const n = this.entries.length;
+    /** Exact body AABB in track-space — no soft pad that glues packs. */
+    const minS = PHYSICS.carLength;
+    const minL = PHYSICS.carWidth;
+    const iters = Math.max(1, BALANCE.contactIters);
+    /** Same-lane closing only; side-by-side / overtakes must not accordion-match. */
+    const proxS = PHYSICS.carLength + BALANCE.followMinGap * 0.7;
+    const proxL = PHYSICS.carWidth * 0.42;
+    /** Soften stun / drive-kill while the pack is still clearing grid columns. */
+    const launchSoft = this.raceTime < PHYSICS.gridHoldSec;
+    const launchStunScale = launchSoft ? 0.2 : 1;
+    const launchBlockThresh = launchSoft ? 0.85 : 0.5;
 
+    let hadOverlap = false;
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
-        const a = this.entries[i]!;
-        const b = this.entries[j]!;
-        if (a.car.finished && b.car.finished) continue;
-
-        const lateral = Math.abs(a.car.l - b.car.l);
-        if (lateral >= BALANCE.contactLateral) continue;
-
-        const gapAB = arcGap(a.car, b.car, trackLength);
-        const gapBA = arcGap(b.car, a.car, trackLength);
-
-        let follower: RaceCarEntry | null = null;
-        let leader: RaceCarEntry | null = null;
-
-        if (gapAB > 0 && gapAB < BALANCE.contactGap) {
-          follower = a;
-          leader = b;
-        } else if (gapBA > 0 && gapBA < BALANCE.contactGap) {
-          follower = b;
-          leader = a;
+        if (bodiesOverlap(this.entries[i]!.car, this.entries[j]!.car, trackLength)) {
+          hadOverlap = true;
+          break;
         }
+      }
+      if (hadOverlap) break;
+    }
+    if (hadOverlap) this.overlapFrames += 1;
 
-        if (follower === null || leader === null) continue;
+    for (let iter = 0; iter < iters; iter++) {
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const a = this.entries[i]!;
+          const b = this.entries[j]!;
 
-        follower.car.v = Math.min(follower.car.v, leader.car.v * BALANCE.contactSpeedCap);
-        follower.contactBlocked = true;
+          const dS = raceDistance(b.car, trackLength) - raceDistance(a.car, trackLength);
+          const absS = Math.abs(dS);
+          const dL = b.car.l - a.car.l;
+          const absL = Math.abs(dL);
 
-        const sign = a.car.l >= b.car.l ? 1 : -1;
-        a.car.l += sign * BALANCE.contactNudge * dt;
-        b.car.l -= sign * BALANCE.contactNudge * dt;
+          let leader: RaceCarEntry;
+          let follower: RaceCarEntry;
+          if (dS > 0) {
+            leader = b;
+            follower = a;
+          } else if (dS < 0) {
+            leader = a;
+            follower = b;
+          } else {
+            leader = a;
+            follower = b;
+          }
+
+          // Soft bumper match — same lane only, never marks blocked (draft glue killer).
+          // Skip when already offset for a pass or harvesting a strong tow.
+          if (
+            absS < proxS &&
+            absS >= minS &&
+            absL < proxL &&
+            follower.draft < BALANCE.overtakeDraftThreshold * 0.85 &&
+            !follower.car.isPlayerControlled
+          ) {
+            const gap = absS - minS;
+            const closing = follower.car.v - leader.car.v;
+            if (closing > 1.0 && gap < BALANCE.followMinGap * 0.75) {
+              const cap =
+                gap < BALANCE.followMinGap * 0.25
+                  ? BALANCE.contactSpeedCap
+                  : Math.min(1, BALANCE.contactSpeedCap + 0.08);
+              follower.car.v = Math.min(follower.car.v, leader.car.v * cap);
+            }
+          }
+
+          if (absS >= minS || absL >= minL) continue;
+
+          const penS = minS - absS;
+          const penL = minL - absL;
+          // Prefer peel when abreast / already offset so packs can run side-by-side.
+          const abreast = absS < PHYSICS.carLength * 0.85;
+          const alreadyOffset = absL > PHYSICS.carWidth * 0.18;
+          const separateLateral = abreast || alreadyOffset || penL <= penS * 1.15;
+          const closing = follower.car.v - leader.car.v;
+
+          if (separateLateral) {
+            // Geometric peel + tiny epsilon so float residual cannot re-overlap.
+            const push = penL * 0.5 + 1e-3;
+            const sign = absL < 1e-6 ? 1 : Math.sign(dL);
+            a.car.l -= sign * push;
+            b.car.l += sign * push;
+            clampLateralToTrack(a.car, this.track);
+            clampLateralToTrack(b.car, this.track);
+            a.car.lTarget = a.car.l;
+            b.car.lTarget = b.car.l;
+            a.brainOut = { ...a.brainOut, lTarget: a.car.l };
+            b.brainOut = { ...b.brainOut, lTarget: b.car.l };
+
+            // Lateral impulse from relative long speed + penetration — keep dl alive
+            // on mild rubs so side-by-side racing doesn't feel sticky/teleported.
+            const sideRel = Math.abs(closing);
+            const sideSeverity = Math.max(
+              0,
+              Math.min(1, sideRel / BALANCE.contactDeslotClosing + penL / 2.2),
+            );
+            const latImpulse = (0.35 + 1.8 * sideSeverity) * Math.sign(sign);
+            if (a.car.slotMode === 'deslot') a.car.dl -= latImpulse * 0.55;
+            if (b.car.slotMode === 'deslot') b.car.dl += latImpulse * 0.55;
+            // Groove cars: damp only hard slams; mild peel keeps natural lateral rate.
+            if (sideSeverity > 0.45) {
+              if (a.car.slotMode === 'groove') a.car.dl *= 0.35;
+              if (b.car.slotMode === 'groove') b.car.dl *= 0.35;
+            }
+
+            if (sideSeverity > 0.25) {
+              // Partial momentum share — not a full stop for both.
+              const avgV = 0.5 * (a.car.v + b.car.v);
+              const scrub = 1 - 0.1 * sideSeverity * (launchSoft ? 0.35 : 1);
+              a.car.v = (a.car.v * 0.55 + avgV * 0.45) * scrub;
+              b.car.v = (b.car.v * 0.55 + avgV * 0.45) * scrub;
+              a.car.stunRemaining = Math.max(
+                a.car.stunRemaining,
+                0.1 * sideSeverity * launchStunScale,
+              );
+              b.car.stunRemaining = Math.max(
+                b.car.stunRemaining,
+                0.1 * sideSeverity * launchStunScale,
+              );
+              // Only hard side hits block AI drive — clean side-by-side must race.
+              if (sideSeverity > launchBlockThresh) {
+                a.contactBlocked = true;
+                b.contactBlocked = true;
+              }
+              if (
+                !launchSoft &&
+                sideSeverity > 0.55 &&
+                sideRel > BALANCE.contactCrashClosing * 0.6
+              ) {
+                const victim = a.car.v <= b.car.v ? a : b;
+                const pushDir = victim === a ? -sign : sign;
+                contactDeslot(victim.car, pushDir * (1.2 + sideSeverity), sideSeverity);
+                if (victim.car.isPlayerControlled) {
+                  victim.car.condition = Math.max(
+                    BALANCE.conditionMin,
+                    victim.car.condition - BALANCE.contactCrashConditionLoss * sideSeverity,
+                  );
+                }
+              }
+            }
+            // Mild peel: geometry only — keep both cars driving side-by-side.
+          } else {
+            // Rear-end: separate along track, then inelastic-ish momentum transfer.
+            const pushBack = penS * 0.85;
+            const pushFwd = penS * 0.15;
+            displaceAlongTrack(follower.car, -pushBack, trackLength);
+            displaceAlongTrack(leader.car, pushFwd, trackLength);
+
+            if (closing > 0) {
+              const severity = Math.max(
+                0,
+                Math.min(1, (closing - 0.5) / BALANCE.contactCrashClosing),
+              );
+              // Follower dumps closing speed; leader gets a fraction (inelastic bump).
+              const transfer = closing * (BALANCE.contactBounce + 0.4 * severity);
+              const followerDrop = closing * (0.5 + 0.4 * severity) * (launchSoft ? 0.45 : 1);
+              follower.car.v = Math.max(0, follower.car.v - followerDrop);
+              leader.car.v += transfer * (launchSoft ? 0.5 : 1);
+              // Cap residual tunnel — soft follow only after the bump.
+              follower.car.v = Math.min(
+                follower.car.v,
+                Math.max(0, leader.car.v * (BALANCE.contactSpeedCap + 0.04 * (1 - severity))),
+              );
+
+              if (severity > 0.28) {
+                follower.car.stunRemaining = Math.max(
+                  follower.car.stunRemaining,
+                  (0.18 + 0.4 * severity) * launchStunScale,
+                );
+                leader.car.stunRemaining = Math.max(
+                  leader.car.stunRemaining,
+                  (0.08 + 0.18 * severity) * launchStunScale,
+                );
+                const node = interpolateAtS(this.track.nodes, trackLength, follower.car.s);
+                const curved =
+                  Math.abs(node.kappaLine) >= PHYSICS.grooveKappaMin * 0.7;
+                // Hard rear-end can scrub/deslot — bends easier, straights need more.
+                if (!launchSoft && severity > (curved ? 0.5 : 0.72)) {
+                  contactDeslot(
+                    follower.car,
+                    Math.sign(follower.car.l || 1) * (0.7 + 0.6 * severity),
+                    severity,
+                  );
+                }
+                if (follower.car.isPlayerControlled) {
+                  follower.car.condition = Math.max(
+                    BALANCE.conditionMin,
+                    follower.car.condition - BALANCE.contactCrashConditionLoss * severity,
+                  );
+                }
+              }
+              // Only mark blocked when actually stacked (not a draft kiss / launch rub).
+              if (!launchSoft && (severity > 0.15 || penS > PHYSICS.carLength * 0.12)) {
+                follower.contactBlocked = true;
+              }
+            } else {
+              follower.car.v = Math.min(follower.car.v, leader.car.v * BALANCE.contactSpeedCap);
+              if (!launchSoft && penS > PHYSICS.carLength * 0.08) follower.contactBlocked = true;
+            }
+          }
+
+          // Residual lateral nudge while still overlapping in L after peel/stack.
+          if (Math.abs(b.car.l - a.car.l) < minL) {
+            const sign = a.car.l >= b.car.l ? 1 : -1;
+            const nudge = BALANCE.contactNudge * dt;
+            a.car.l += sign * nudge;
+            b.car.l -= sign * nudge;
+            clampLateralToTrack(a.car, this.track);
+            clampLateralToTrack(b.car, this.track);
+            a.car.lTarget = a.car.l;
+            b.car.lTarget = b.car.l;
+            a.brainOut = { ...a.brainOut, lTarget: a.car.l };
+            b.brainOut = { ...b.brainOut, lTarget: b.car.l };
+          }
+        }
       }
     }
+
+    let residual = false;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (bodiesOverlap(this.entries[i]!.car, this.entries[j]!.car, trackLength)) {
+          residual = true;
+          break;
+        }
+      }
+      if (residual) break;
+    }
+    if (residual) this.residualOverlapFrames += 1;
   }
 
   private detectCarEvents(entry: RaceCarEntry): void {
     const car = entry.car;
     const name = entry.driver.name;
+
+    if (car.deslotCount > entry.prevDeslotCount) {
+      this.pushEvent('deslot', car, name);
+    }
 
     if (car.spinCount > entry.prevSpinCount) {
       this.pushEvent('spin', car, name);
@@ -845,16 +1167,26 @@ export class RaceDirector {
     }
     entry.prevMistakeActive = mistakeActive;
 
+    entry.prevDeslotCount = car.deslotCount;
     entry.prevSpinCount = car.spinCount;
     entry.prevWallHits = car.wallHits;
     entry.prevDrift = car.driftState;
   }
 
   private refreshStandings(force: boolean): void {
-    const sorted = [...this.entries].sort(
-      (a, b) =>
-        raceDistance(b.car, this.track.length) - raceDistance(a.car, this.track.length),
-    );
+    // Finishers rank by finishTime; everyone else by race distance.
+    // (Finished cars still roll — distance sort alone inverted true results.)
+    const sorted = [...this.entries].sort((a, b) => {
+      if (a.car.finished && b.car.finished) {
+        return a.car.finishTime - b.car.finishTime;
+      }
+      if (a.car.finished !== b.car.finished) {
+        return a.car.finished ? -1 : 1;
+      }
+      return (
+        raceDistance(b.car, this.track.length) - raceDistance(a.car, this.track.length)
+      );
+    });
 
     this.standings = sorted.map((entry, idx) => ({
       carId: entry.car.id,
@@ -876,7 +1208,13 @@ export class RaceDirector {
       if (entry.prevPosition > st.position && st.position <= 3) {
         this.pushEvent('overtake', entry.car, entry.driver.name, `P${st.position}`);
       }
-      if (entry.draft > BALANCE.overtakeDraftThreshold && entry.prevPosition > st.position) {
+      // Draft often drops as the car pulls out — credit a tow pass if wake was
+      // held recently or still partially aligned at the moment of the pass.
+      if (
+        entry.prevPosition > st.position &&
+        (entry.draft > BALANCE.overtakeDraftThreshold * 0.45 ||
+          entry.brain.draftHoldTime >= BALANCE.overtakeHoldSec * 0.4)
+      ) {
         this.pushEvent('draftPass', entry.car, entry.driver.name);
       }
       entry.prevPosition = st.position;

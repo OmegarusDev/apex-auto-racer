@@ -3,7 +3,7 @@ import { FIRST_NAMES, LAST_NAMES } from '../data/names';
 import { TRAITS } from '../data/traits';
 import type { TraitId } from '../data/traits';
 import type { RankId } from '../data/balance';
-import { randInt, pick } from './rng';
+import { randInt, pick, shuffleInPlace } from './rng';
 import type { Rng } from './rng';
 import type { Driver } from './types';
 
@@ -72,7 +72,31 @@ export function generateDriver(
   usedNames: Set<string>,
 ): Driver {
   const total = randInt(rng, budgetMin, budgetMax);
-  const [skill, bravery, focus, determination] = distributeBudget(rng, total).map(clampStat);
+  // Per-stat floor scales with band — no skill-11 "dead" cars in mid budgets.
+  const statFloor = Math.max(16, Math.min(40, Math.round(budgetMin / 9)));
+  let [skill, bravery, focus, determination] = distributeBudget(rng, total).map(clampStat);
+  const stats = [skill, bravery, focus, determination];
+  let deficit = 0;
+  for (let i = 0; i < 4; i++) {
+    if (stats[i]! < statFloor) {
+      deficit += statFloor - stats[i]!;
+      stats[i] = statFloor;
+    }
+  }
+  // Steal overflow from the highest stats so totals stay near budget.
+  while (deficit > 0) {
+    let hi = 0;
+    for (let i = 1; i < 4; i++) {
+      if (stats[i]! > stats[hi]!) hi = i;
+    }
+    if (stats[hi]! <= statFloor) break;
+    stats[hi]! -= 1;
+    deficit -= 1;
+  }
+  skill = clampStat(stats[0]!);
+  bravery = clampStat(stats[1]!);
+  focus = clampStat(stats[2]!);
+  determination = clampStat(stats[3]!);
   const trait = pick(rng, TRAITS).id as TraitId;
 
   return {
@@ -89,26 +113,63 @@ export function generateDriver(
   };
 }
 
+/**
+ * Spread a field across [budgetMin, budgetMax] so races have backmarkers,
+ * midfield, and standouts — not a flat random pack clustered in the middle.
+ */
+export function generateFieldDrivers(
+  rng: Rng,
+  count: number,
+  budgetMin: number,
+  budgetMax: number,
+  usedNames?: Set<string>,
+): Driver[] {
+  const used = usedNames ?? new Set<string>();
+  if (count <= 0) return [];
+
+  const span = Math.max(0, budgetMax - budgetMin);
+  const drivers: Driver[] = [];
+  for (let i = 0; i < count; i++) {
+    // Even percentiles + jitter; shuffle later so grid order ≠ strength order.
+    const t = count === 1 ? rng() : i / (count - 1);
+    // Mild curve: slightly more midfield mass, still hits both extremes.
+    const shaped = t * t * (3 - 2 * t);
+    const center = budgetMin + span * shaped;
+    const jitter = Math.max(8, span * 0.14);
+    const lo = Math.round(Math.max(budgetMin, center - jitter));
+    const hi = Math.round(Math.min(budgetMax, center + jitter));
+    drivers.push(generateDriver(rng, Math.min(lo, hi), Math.max(lo, hi), used));
+  }
+  shuffleInPlace(rng, drivers);
+  return drivers;
+}
+
 export function generateRoster(
   rng: Rng,
   count: number,
   budgetMin: number,
   budgetMax: number,
 ): Driver[] {
-  const usedNames = new Set<string>();
-  const roster: Driver[] = [];
-  for (let i = 0; i < count; i++) {
-    roster.push(generateDriver(rng, budgetMin, budgetMax, usedNames));
-  }
-  return roster;
+  return generateFieldDrivers(rng, count, budgetMin, budgetMax);
 }
 
-/** Opponents scaled to rank tier stat budgets (plan 8.4). */
+/** Opponents scaled to rank tier — full within-band variance (plan 8.4). */
 export function generateOpponents(rng: Rng, count: number, rank: RankId): Driver[] {
   const [statMin, statMax] = BALANCE.opponentStatRanges[rank] ?? BALANCE.opponentStatRanges[0]!;
   const budgetMin = statMin * 4;
   const budgetMax = statMax * 4;
-  return generateRoster(rng, count, budgetMin, budgetMax);
+  return generateFieldDrivers(rng, count, budgetMin, budgetMax);
+}
+
+/** 0..1 field strength from total budget vs rank band (for part loadout bias). */
+export function driverStrength01(
+  driver: Driver,
+  budgetMin: number,
+  budgetMax: number,
+): number {
+  const total = driver.skill + driver.bravery + driver.focus + driver.determination;
+  if (budgetMax <= budgetMin) return 0.5;
+  return Math.max(0, Math.min(1, (total - budgetMin) / (budgetMax - budgetMin)));
 }
 
 export function hireCost(driver: Driver): number {

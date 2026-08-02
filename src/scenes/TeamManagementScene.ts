@@ -62,9 +62,23 @@ export class TeamManagementScene implements Scene {
     this.toasts.update(dt);
   }
 
+  private isTournamentLocked(driverId: string): boolean {
+    const g = getGameContext();
+    if (g.state === null) return false;
+    for (const key of ['track', 'street', 'rally'] as const) {
+      const t = g.state.inProgressTournaments[key];
+      if (t !== null && t.playerLineup.includes(driverId)) return true;
+    }
+    return false;
+  }
+
   private releaseDriver(driver: Driver): void {
     const g = getGameContext();
     if (g.state === null) return;
+    if (this.isTournamentLocked(driver.id)) {
+      this.toasts.push('Driver locked in a tournament', '#f87171');
+      return;
+    }
     if (g.state.roster.length <= 1) {
       this.toasts.push('Need at least one driver', '#f87171');
       return;

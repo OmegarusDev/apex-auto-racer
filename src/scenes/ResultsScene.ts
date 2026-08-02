@@ -1,5 +1,6 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
+import { refillObjectives } from '../engine/SaveManager';
 import { RANK_NAMES } from '../data/balance';
 import type { ResultsPayload } from '../engine/raceTypes';
 import type { DriverStatKey } from '../ui/components';
@@ -33,9 +34,9 @@ import {
   repairVehicle,
   launchRace,
   findDriver,
+  makeQuickRaceConfig,
 } from './sceneUtils';
 import { CampaignScene } from './CampaignScene';
-import { GarageScene } from './GarageScene';
 
 type ResultsPhase = 'podium' | 'standings' | 'payout' | 'xp' | 'done';
 
@@ -104,6 +105,7 @@ export class ResultsScene implements Scene {
       }
       state.objectives.active = state.objectives.active.filter((a) => a !== obj);
     }
+    refillObjectives(state);
 
     if (this.payload.rankUnlocked !== undefined) {
       const next = this.payload.rankUnlocked;
@@ -168,11 +170,7 @@ export class ResultsScene implements Scene {
 
   private navigateBack(): void {
     const g = getGameContext();
-    if (this.tournamentMode) {
-      g.scenes.replace(new CampaignScene(this.payload.discipline));
-    } else {
-      g.scenes.replace(new GarageScene());
-    }
+    g.scenes.replace(new CampaignScene(this.payload.discipline));
   }
 
   private raceAgain(): void {
@@ -181,15 +179,20 @@ export class ResultsScene implements Scene {
       again: true,
       raceSeed: (this.payload.config.raceSeed + 1) >>> 0,
     };
-    void launchRace(config, this.toasts);
+    launchRace(config, this.toasts);
   }
 
   private nextRace(): void {
     if (this.payload.nextRaceConfig !== undefined) {
-      void launchRace(this.payload.nextRaceConfig, this.toasts);
-    } else {
-      this.navigateBack();
+      launchRace(this.payload.nextRaceConfig, this.toasts);
+      return;
     }
+    const g = getGameContext();
+    if (g.state !== null && this.payload.config.mode === 'quick') {
+      launchRace(makeQuickRaceConfig(g.state, this.payload.discipline), this.toasts);
+      return;
+    }
+    this.navigateBack();
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -238,33 +241,52 @@ export class ResultsScene implements Scene {
     if (this.phase === 'done') {
       const btnH = ensureMinTouch(pad(token, 5.5), token);
       const btnGap = pad(token, 0.75);
-      const btnW = (contentW - btnGap) / 2;
       let btnY = h - token.safe.bottom - pad(token, 2) - btnH;
+      const hasSeriesNext = this.payload.nextRaceConfig !== undefined;
+      const isQuick = this.payload.config.mode === 'quick';
+      const showNext = hasSeriesNext || isQuick;
+      const btnCount = showNext ? 3 : 2;
+      const btnW = (contentW - btnGap * (btnCount - 1)) / btnCount;
+      let btnX = contentX;
 
       const againBtn: ButtonDef = {
-        x: contentX,
+        x: btnX,
         y: btnY,
         w: btnW,
         h: btnH,
         label: 'Race Again',
         onClick: () => this.raceAgain(),
       };
-      const nextBtn: ButtonDef = {
-        x: contentX + btnW + btnGap,
+      btnX += btnW + btnGap;
+      drawButton(ctx, againBtn, ui);
+      handleButton(againBtn, ui);
+
+      if (showNext) {
+        const nextBtn: ButtonDef = {
+          x: btnX,
+          y: btnY,
+          w: btnW,
+          h: btnH,
+          label: 'Next Race',
+          primary: true,
+          onClick: () => this.nextRace(),
+        };
+        btnX += btnW + btnGap;
+        drawButton(ctx, nextBtn, ui);
+        handleButton(nextBtn, ui);
+      }
+
+      const backBtn: ButtonDef = {
+        x: btnX,
         y: btnY,
         w: btnW,
         h: btnH,
-        label: this.payload.nextRaceConfig !== undefined ? 'Next Race' : 'Back',
-        primary: true,
-        onClick: () => {
-          if (this.payload.nextRaceConfig !== undefined) this.nextRace();
-          else this.navigateBack();
-        },
+        label: 'Back',
+        primary: !showNext,
+        onClick: () => this.navigateBack(),
       };
-      drawButton(ctx, againBtn, ui);
-      drawButton(ctx, nextBtn, ui);
-      handleButton(againBtn, ui);
-      handleButton(nextBtn, ui);
+      drawButton(ctx, backBtn, ui);
+      handleButton(backBtn, ui);
     }
 
     if (this.phase !== 'done') {

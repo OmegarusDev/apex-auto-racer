@@ -46,7 +46,7 @@ function makeSeries(
 const DISCIPLINES: DisciplineId[] = ['track', 'street', 'rally'];
 const TEAM_SIZES = [1, 2, 3, 4, 5, 6];
 const RACE_COUNTS = [3, 3, 4, 4, 5, 5];
-const FORMAT_BY_SIZE = ['1v1', '2v2', '3v3', '4v4', '6v6', '6v6'];
+const FORMAT_BY_SIZE = ['1v1', '2v2', '3v3', '4v4', '5v5', '6v6'];
 
 export const TOURNAMENTS: TournamentDef[] = [];
 for (const d of DISCIPLINES) {

@@ -258,13 +258,20 @@ export function buildSpeedProfiles(
   return { vSafe, vProfile: vProfileExt.slice(0, n) };
 }
 
-/** Driver confidence scaling for vDriver profile (plan 5.3). */
+/**
+ * Driver target speed under the Scalextric deslot limit.
+ * Skill raises the ceiling; Bravery pushes the target closer to it.
+ * Physical v_deslot uses Skill/Focus/Bravery in Vehicle.computeVDeslot.
+ */
 export function buildVDriverProfile(
   vProfile: readonly number[],
   skill: number,
   bravery: number,
 ): number[] {
-  const confidence = 0.8 + 0.15 * (skill / 100) + 0.1 * (bravery / 100);
+  // Wide RPG span: low Skill crawls under the peg; elites + bravery flirt with it.
+  const skillCeil = 0.38 + 0.58 * (skill / 100);
+  const braveryPush = 0.58 + 0.42 * (bravery / 100);
+  const confidence = Math.min(0.98, skillCeil * braveryPush);
   return vProfile.map((v) => v * confidence);
 }
 

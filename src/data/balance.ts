@@ -1,23 +1,27 @@
 /** Centralized gameplay balance tunables — mutated by debug overlay. */
 
 export const BALANCE = {
-  startingCash: 1200,
+  startingCash: 1100,
   rosterCap: 6,
   freeAgentPoolSize: 4,
   freeAgentRerollCost: 250,
   repairCostPerPoint: 10,
   conditionMin: 0.6,
   conditionMax: 1.0,
-  wallCrashConditionLoss: 0.02,
+  wallCrashConditionLoss: 0.035,
   hireCostMultiplier: 12,
-  startingDriverStatMin: 35,
-  startingDriverStatMax: 55,
+  /** Early roster sits under mid-pack so default careers are challenges, not stomps. */
+  startingDriverStatMin: 22,
+  startingDriverStatMax: 40,
   startingRosterSize: 3,
   startingPartTier: 1,
   maxPartTier: 5,
+  /** Player vDriver pace trim — unupgraded careers should lose to a clean field. */
+  playerPaceMult: 0.75,
   rainChance: 0.1,
-  rainMuMult: 0.75,
-  rainMistakeMult: 1.5,
+  /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
+  rainMuMult: 0.82,
+  rainMistakeMult: 1.35,
   handsOffBonusMax: 0.5,
   pointsPerPosition: [12, 9, 7, 5, 4, 3, 2, 1] as number[],
   rankBasePayout: [200, 400, 800, 1600, 2800, 4500] as number[],
@@ -35,35 +39,59 @@ export const BALANCE = {
   quickRaceDurationMax: 150,
   maxLaps: 9,
   minLaps: 1,
+  /**
+   * Per-rank average-stat band. Floors stay high enough that no AI is a
+   * dead stall-car; ceilings keep standouts. Variance lives inside the band.
+   */
   opponentStatRanges: [
-    [20, 45],
-    [30, 60],
-    [45, 70],
-    [55, 80],
-    [65, 90],
-    [75, 98],
+    [44, 78],
+    [52, 84],
+    [62, 90],
+    [72, 95],
+    [80, 98],
+    [86, 99],
   ] as [number, number][],
+  /** Part tier band per rank — standouts can sit at the top of the band. */
   opponentPartTiers: [
-    [0, 1],
-    [1, 2],
     [2, 3],
-    [3, 4],
+    [2, 3],
+    [2, 4],
+    [3, 5],
+    [3, 5],
     [4, 5],
-    [5, 5],
   ] as [number, number][],
-  freeAgentStatBase: [30, 60] as [number, number],
+  freeAgentStatBase: [26, 55] as [number, number],
   freeAgentStatPerRank: 8,
   freeAgentStatCap: 98,
-  draftGapMax: 25,
-  draftLateralMax: 1.5,
-  overtakeDraftThreshold: 0.5,
-  overtakeHoldSec: 1.5,
-  overtakeDurationSec: 4,
-  overtakeLateralShift: 2.5,
+  draftGapMax: 28,
+  draftLateralMax: 1.8,
+  overtakeDraftThreshold: 0.36,
+  overtakeHoldSec: 0.85,
+  overtakeDurationSec: 3.5,
+  /** Lateral offset onto a clear lane — sized for ~27–36 m asphalt. */
+  overtakeLateralShift: 3.4,
+  /** Bumper clearance used by AI sensing (matches PHYSICS.carLength). */
   contactGap: 4.5,
-  contactLateral: 1.8,
-  contactSpeedCap: 0.98,
-  contactNudge: 1.5,
+  /** Follower speed cap vs leader on longitudinal contact. */
+  contactSpeedCap: 0.92,
+  /** Extra lateral separation rate (m/s) while bodies overlap. */
+  contactNudge: 4.8,
+  /** Iterative pack resolve passes per physics step. */
+  contactIters: 4,
+  /** Fraction of closing speed transferred as a leader bump. */
+  contactBounce: 0.32,
+  /** Closing speed (m/s) that counts as a hard car-car hit. */
+  contactCrashClosing: 7.5,
+  /** Side-impact |Δl| rate / overlap that can pop a peg. */
+  contactDeslotClosing: 9,
+  /** Condition loss scale on hard car contact (player). */
+  contactCrashConditionLoss: 0.018,
+  /** AI target time gap (s) to the car ahead in the same lane. */
+  followTimeGap: 0.38,
+  /** AI starts lifting/braking inside this bumper gap (m). */
+  followMinGap: 2.4,
+  /** Low-skill AI brakes earlier for traffic (extra time-gap mult). */
+  followSkillGapSpan: 0.72,
   finishWindowSec: 10,
   standingsInterval: 0.25,
   ghostSampleEveryN: 4,

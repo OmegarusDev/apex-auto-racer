@@ -57,6 +57,8 @@ export interface EffectiveStats {
   condTop: number;
 }
 
+export type SlotMode = 'groove' | 'deslot';
+
 export interface VehicleState {
   id: string;
   driverId: string;
@@ -69,6 +71,11 @@ export interface VehicleState {
   tyreTemp: number;
   balanceB: number;
   driftState: boolean;
+  /** Scalextric: slotted on racing line, or off-slot after overspeed. */
+  slotMode: SlotMode;
+  deslotRemaining: number;
+  /** Seconds of deslot immunity after rejoining the groove. */
+  deslotImmunity: number;
   stunRemaining: number;
   spinRemaining: number;
   throttle: number;
@@ -79,6 +86,7 @@ export interface VehicleState {
   finishTime: number;
   wallHits: number;
   spinCount: number;
+  deslotCount: number;
   overtakeCount: number;
 }
 
@@ -86,6 +94,7 @@ export type RaceEventKind =
   | 'overtake'
   | 'mistake'
   | 'spin'
+  | 'deslot'
   | 'crash'
   | 'driftEntry'
   | 'draftPass'

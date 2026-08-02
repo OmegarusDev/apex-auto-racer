@@ -78,8 +78,11 @@ function createDriver(rng: Rng, usedNames: Set<string>): Driver {
   };
 }
 
-function drawObjectives(rng: Rng, count: number): ObjectiveKind[] {
-  const pool = OBJECTIVES.map((o) => o.id);
+function drawObjectives(rng: Rng, count: number, exclude: ReadonlySet<string> = new Set()): ObjectiveKind[] {
+  let pool = OBJECTIVES.map((o) => o.id).filter((id) => !exclude.has(id));
+  if (pool.length < count) {
+    pool = OBJECTIVES.map((o) => o.id);
+  }
   shuffleInPlace(rng, pool);
   return pool.slice(0, count);
 }
@@ -90,6 +93,32 @@ function defaultObjectives(rng: Rng): ObjectivesState {
     completed: [],
     cycleSeed: randInt(rng, 1, 0x7fffffff),
   };
+}
+
+/** Refill active slots after completions; avoid repeats until the pool cycles. */
+export function refillObjectives(state: GameState): void {
+  const needed = BALANCE.activeObjectives - state.objectives.active.length;
+  if (needed <= 0) return;
+
+  const exclude = new Set<string>([
+    ...state.objectives.active,
+    ...state.objectives.completed,
+  ]);
+  const rng = mulberry32((state.objectives.cycleSeed + state.objectives.completed.length * 1337) >>> 0);
+  let drawn = drawObjectives(rng, needed, exclude);
+
+  if (drawn.length < needed) {
+    state.objectives.completed = [];
+    const retryExclude = new Set<string>(state.objectives.active);
+    drawn = drawObjectives(
+      mulberry32((state.objectives.cycleSeed + 99991) >>> 0),
+      needed,
+      retryExclude,
+    );
+  }
+
+  state.objectives.active.push(...drawn);
+  state.objectives.cycleSeed = randInt(rng, 1, 0x7fffffff);
 }
 
 function createDisciplineVehicles() {

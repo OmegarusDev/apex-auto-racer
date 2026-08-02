@@ -16,6 +16,7 @@ export const FORMATS: RaceFormat[] = [
   { id: '3v3', label: '3v3', teamSize: 3, teamCount: 2, weight: 2, minRoster: 3 },
   { id: '3v3v3v3', label: '3v3v3v3', teamSize: 3, teamCount: 4, weight: 1, minRoster: 3 },
   { id: '4v4', label: '4v4', teamSize: 4, teamCount: 2, weight: 1, minRoster: 4 },
+  { id: '5v5', label: '5v5', teamSize: 5, teamCount: 2, weight: 1, minRoster: 5 },
   { id: '2x5', label: '2v2v2v2v2', teamSize: 2, teamCount: 5, weight: 1, minRoster: 2 },
   { id: '6v6', label: '6v6', teamSize: 6, teamCount: 2, weight: 1, minRoster: 6 },
 ];

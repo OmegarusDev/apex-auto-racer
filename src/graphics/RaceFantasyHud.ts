@@ -23,7 +23,13 @@ export function playerGearBand(car: CarSimState, discipline: DisciplineId): numb
 export function wantsShiftCue(car: CarSimState, discipline: DisciplineId): boolean {
   const box = gearboxFor(discipline);
   if (car.gear >= box.gearCount) return false;
-  return playerGearBand(car, discipline) >= 0.88 && car.throttle > 0.35;
+  const band = playerGearBand(car, discipline);
+  // Optional early-nudge window — not a mandatory shift alarm.
+  return (
+    band >= box.earlyUpshiftBand &&
+    band < box.autoUpshiftBand &&
+    car.throttle > 0.45
+  );
 }
 
 /** Draw compact v / v_deslot peg bar under speed. Returns height used. */
@@ -118,7 +124,7 @@ export function drawPreRaceCard(
   const bits = [opts.traitName];
   if (opts.rain) bits.push('Rain');
   if (opts.night) bits.push('Night');
-  bits.push('Shift near redline');
+  bits.push('Gears auto · Shift early optional');
   ctx.fillText(bits.join(' · '), x + cardW * 0.5, y + cardH - pad(token, 2) - token.fontCaption);
   ctx.restore();
 }

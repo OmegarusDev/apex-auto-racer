@@ -8,7 +8,7 @@
 
 # Apex Auto-Racer
 
-Idle / Scalextric-style autobattler. You hold throttle and brake; steering is automatic. Drivers are fallible autopilots — upgrades push the game toward hands-off watching.
+Idle / Scalextric-style autobattler. You hold throttle and brake; steering is automatic. Gears shift themselves (Shift is an optional early nudge). Drivers are fallible autopilots — upgrades push the game toward hands-off watching.
 
 ## How to run
 

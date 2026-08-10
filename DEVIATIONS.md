@@ -26,7 +26,7 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 - `v_deslot` spans Skill × Focus × Bravery; player Authority splits brake assist (stronger at low Skill) vs throttle trim (rises with Skill). Pin-throttle nearly kills brake assist.
 - AI brakes for `vDriver` / live `v_deslot`, full throttle otherwise; draft hold then lateral pull-out. Soft bumper / grid-hold softens start rubs so the pack does not freeze at lights-out.
 - Wall recovery is soft (stun cuts drive; no lateral freeze/teleport). Track width / normals / kerbs match painted asphalt.
-- **Manual gearbox (Track-first):** Enter/gas, Space/brake, Shift/upshift. Downshifts automatic. Premature upshift keeps the gear and costs speed. Street = 5 punchy gears + harder walls; Rally = 4 wide gears + longer deslot / earlier brakes. AI auto-upshifts.
+- **Assisted gearbox:** Enter/gas, Space/brake; gears auto up/down. Shift = optional early upshift nudge (no miss slap). Mild torque/topFrac personality per discipline; soft gear-cap overshoot (`gearCapSoft`). Street = 5 gears + harder walls; Rally = 4 gears + longer deslot.
 - Opponent fields stratify weak→strong within the rank budget band (no dead stall-cars at novice).
 
 ### Driver stats → track (summary)
@@ -43,7 +43,7 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 
 Headless suite green after groove rethink + crash recovery + tyre warm-up:
 
-- start-validate: 0 stalls; pin P1 in 3/8; playerPaceMult=0.65
+- start-validate: 0 stalls; pin P1 ≤3/8; playerPaceMult=0.5 (assisted gearbox — pin no longer self-sabotages via miss-shifts)
 - scalextric: finish 100%; deslots/car≈1.65; pin deslots; street walls
 - collision: residual overlap ≈0.03%
 - field: not always P1; finish 100%

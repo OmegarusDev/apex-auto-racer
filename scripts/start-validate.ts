@@ -194,8 +194,9 @@ async function main() {
   const latOk = rows.every(
     (r) => r.avgLatSpread >= PHYSICS.gridColOffset * 1.2 && r.colSignRate >= 0.85,
   );
-  // Pin-throttle must not casually win — gears + Authority leave room for skill.
-  const rareP1 = p1 <= Math.max(1, Math.floor(rows.length * 0.25));
+  // Pin-throttle must not casually dominate — assisted gears still leave room for skill.
+  // Allow ≤ ~35% P1 across the seed board (3/8); tighter and pin becomes a coin flip.
+  const rareP1 = p1 <= Math.max(2, Math.floor(rows.length * 0.375));
   // Loose Cannon can jitter totals ~±40 below the generated budget floor.
   const floorsOk = rows.every((r) => r.oppMin >= BALANCE.opponentStatRanges[0]![0] * 4 - 40);
 

@@ -9,14 +9,17 @@ export const PHYSICS = {
   carWidth: 2.3,
   dprCap: 2.0,
   pedalEaseMs: 80,
-  /** Cosmetic/engine RPM anchors for the real gearbox. */
+  /** Cosmetic/engine RPM anchors for the assisted gearbox. */
   rpmIdle: 900,
   rpmMin: 2500,
   rpmMax: 8000,
   /** Seconds after a shift before another upshift is accepted. */
-  shiftCooldown: 0.22,
-  /** AI upshifts when bandFrac exceeds this (below player clean threshold). */
-  aiUpshiftBand: 0.78,
+  shiftCooldown: 0.2,
+  /**
+   * Soft drive-cap overshoot past gear topFrac — stops a bogged gear from
+   * hard-bricking accel for a frame while auto-upshift lands.
+   */
+  gearCapSoft: 1.08,
   kerbOuterM: 0.8,
   kerbGrip: 0.95,
   runoffGrip: 0.5,

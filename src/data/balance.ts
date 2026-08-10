@@ -18,7 +18,7 @@ export const BALANCE = {
   startingPartTier: 1,
   maxPartTier: 5,
   /** Player vDriver pace trim — unupgraded careers should lose to a clean field. */
-  playerPaceMult: 0.55,
+  playerPaceMult: 0.5,
   rainChance: 0.1,
   /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
   rainMuMult: 0.82,

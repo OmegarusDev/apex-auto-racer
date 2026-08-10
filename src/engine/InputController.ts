@@ -6,7 +6,7 @@ export type InputMode = 'menu' | 'race';
 const THROTTLE_KEYS = new Set(['Enter', 'ArrowRight', 'ArrowUp', 'KeyW']);
 /** Space = brake (primary). */
 const BRAKE_KEYS = new Set(['Space', 'ArrowLeft', 'ArrowDown', 'KeyS']);
-/** Shift = upshift (clutch / gear change). */
+/** Shift = optional early upshift nudge (gears auto otherwise). */
 const UPSHIFT_KEYS = new Set(['ShiftLeft', 'ShiftRight']);
 
 export interface PointerSample {

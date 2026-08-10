@@ -252,8 +252,9 @@ export function personalLineAt(car: CarSimState, track: TrackData, s: number): n
 }
 
 /**
- * Real gearbox: player upshifts on request; AI auto-upshifts near redline;
- * downshifts are automatic. Premature upshifts bounce with a speed penalty.
+ * Assisted gearbox: auto up/down for all cars; player Shift = early upshift nudge.
+ * No miss slap — refused early requests are ignored.
+ * @returns always 0 (legacy scrub hook removed).
  */
 function updateGearbox(
   car: CarSimState,
@@ -262,7 +263,7 @@ function updateGearbox(
   throttle: number,
   wantUpshift: boolean,
   discipline: DisciplineId,
-  isPlayer: boolean,
+  _isPlayer: boolean,
 ): number {
   const box = gearboxFor(discipline);
   car.gear = Math.max(1, Math.min(box.gearCount, car.gear || 1));
@@ -270,7 +271,6 @@ function updateGearbox(
     car.shiftCooldown = Math.max(0, car.shiftCooldown - dt);
   }
 
-  let missScrub = 0;
   const band = gearBandFrac(car.v, vMaxEff, car.gear, box);
   car.lastShiftKind = null;
 
@@ -280,41 +280,30 @@ function updateGearbox(
     car.lastShiftKind = 'down';
   }
 
-  const upshiftOk =
-    wantUpshift &&
+  const canUp =
     car.gear < box.gearCount &&
     car.shiftCooldown <= 0 &&
     car.slotMode === 'groove' &&
     car.spinRemaining <= 0;
 
-  if (upshiftOk) {
-    if (band >= box.upshiftBand) {
+  if (canUp) {
+    // Player early nudge (optional skill) — no speed penalty if too early.
+    if (wantUpshift && band >= box.earlyUpshiftBand) {
       car.gear += 1;
       car.shiftCooldown = PHYSICS.shiftCooldown;
       car.lastShiftKind = 'up';
-    } else {
-      car.v *= box.missSpeedMult;
-      missScrub = box.missScrub;
-      car.shiftCooldown = PHYSICS.shiftCooldown * 1.35;
-      car.lastShiftKind = 'miss';
+    } else if (band >= box.autoUpshiftBand && throttle > 0.35) {
+      // Assisted auto for player and AI alike.
+      car.gear += 1;
+      car.shiftCooldown = PHYSICS.shiftCooldown * 0.9;
+      car.lastShiftKind = 'up';
     }
-  } else if (
-    !isPlayer &&
-    car.gear < box.gearCount &&
-    car.shiftCooldown <= 0 &&
-    band >= PHYSICS.aiUpshiftBand &&
-    throttle > 0.35 &&
-    car.slotMode === 'groove'
-  ) {
-    car.gear += 1;
-    car.shiftCooldown = PHYSICS.shiftCooldown * 0.85;
-    car.lastShiftKind = 'up';
   }
 
   const bandNow = gearBandFrac(car.v, vMaxEff, car.gear, box);
   const targetRpm = rpmFromBand(bandNow, throttle);
   car.rpm += (targetRpm - car.rpm) * (1 - Math.exp(-10 * dt));
-  return missScrub;
+  return 0;
 }
 
 function assertFinite(car: CarSimState, debug: boolean): void {
@@ -674,7 +663,7 @@ export function updateVehicle(
 
   // Step 4: longitudinal — gear caps top speed and scales torque.
   const vMaxEff = car.stats.vMax * condTop * (1 + PHYSICS.draftSpeedBonus * draft);
-  const missScrub = updateGearbox(
+  updateGearbox(
     car,
     dt,
     vMaxEff,
@@ -684,7 +673,7 @@ export function updateVehicle(
     car.isPlayerControlled,
   );
   const box = gearboxFor(ctx.discipline);
-  const vGearMax = gearTopSpeed(vMaxEff, car.gear, box);
+  const vGearMax = gearTopSpeed(vMaxEff, car.gear, box) * PHYSICS.gearCapSoft;
   const torque = gearTorque(car.gear, box);
   const sDet = ctx.sDet;
   const aDriveUncapped =
@@ -721,9 +710,6 @@ export function updateVehicle(
 
   const aBrakeApplied = Math.min(aBrakeAppliedUncapped, aBudget);
   let aLong = aDrive - aBrakeApplied - aCoast;
-  if (missScrub > 0) {
-    aLong -= missScrub;
-  }
   if (recovering) {
     aLong -=
       car.slotMode === 'deslot'

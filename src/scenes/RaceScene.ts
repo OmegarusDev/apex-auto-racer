@@ -724,7 +724,7 @@ export class RaceScene implements Scene {
         !this.g.state!.onboarding.shownShiftCue &&
         this.hintText === null
       ) {
-        this.showHint('SHIFT near redline to climb gears', 'shownShiftCue');
+        this.showHint('SHIFT optional — tap early to pull a gear sooner', 'shownShiftCue');
       }
 
       this.stats.playerWallHits = player.wallHits;
@@ -852,9 +852,9 @@ export class RaceScene implements Scene {
     if (state === null) return;
 
     if (!state.onboarding.shownPedalControls) {
-      this.showHint('Enter = gas · Space = brake · Shift = upshift', 'shownPedalControls');
+      this.showHint('Enter = gas · Space = brake · gears shift themselves', 'shownPedalControls');
     } else if (!state.onboarding.shownBrakeHint) {
-      this.showHint('Touch: right = gas, left = brake, bottom SHIFT = upshift', 'shownBrakeHint');
+      this.showHint('Touch: right = gas, left = brake · SHIFT = early up (optional)', 'shownBrakeHint');
     }
   }
 
@@ -935,12 +935,7 @@ export class RaceScene implements Scene {
       const speedKmh = Math.round(player.v * 3.6);
       ctx.fillStyle = accent;
       ctx.fillText(`${speedKmh} km/h`, hudX, hudY);
-      ctx.fillStyle = token.textDim;
-      const box = gearboxFor(this.launch.discipline);
-      const rpmN = Math.round(player.rpm);
-      const shiftMark = this.shiftCueArmed ? ' ▲' : '';
-      ctx.fillText(`G${player.gear}/${box.gearCount} · ${rpmN} RPM${shiftMark}`, hudX, hudY + token.fontBody);
-      hudY += token.fontBody * 2 + pad(token, 0.35);
+      hudY += token.fontBody + pad(token, 0.35);
       hudY += drawPegMeter(
         ctx,
         hudX,
@@ -950,7 +945,19 @@ export class RaceScene implements Scene {
         token,
         accent,
       );
+      // Gear ambient — assist owns shifting; RPM is flavour.
+      ctx.fillStyle = token.textDim;
+      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+      const box = gearboxFor(this.launch.discipline);
+      const early = this.shiftCueArmed ? ' · early OK' : '';
+      ctx.fillText(
+        `G${player.gear}/${box.gearCount} auto · ${Math.round(player.rpm)} rpm${early}`,
+        hudX,
+        hudY,
+      );
+      hudY += token.fontCaption + pad(token, 0.5);
 
+      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.textMuted;
       const cond = `Cond ${Math.round(player.condition * 100)}%`;
       const tyre = `Tyre ${Math.round(player.tyreTemp * 100)}%`;
@@ -1048,13 +1055,13 @@ export class RaceScene implements Scene {
     const sy = h * 0.78;
     const sw = w * 0.28;
     const sh = h * 0.22;
-    const shiftPulse = this.shiftCueArmed ? 0.18 + 0.12 * Math.sin(this.animTime * 12) : 0;
+    const shiftPulse = this.shiftCueArmed ? 0.12 + 0.08 * Math.sin(this.animTime * 10) : 0;
     ctx.fillStyle = shifting
-      ? 'rgba(250,204,21,0.28)'
-      : `rgba(250,204,21,${0.1 + shiftPulse})`;
+      ? 'rgba(250,204,21,0.22)'
+      : `rgba(250,204,21,${0.06 + shiftPulse})`;
     ctx.fillRect(sx, sy, sw, sh);
-    ctx.strokeStyle = this.shiftCueArmed ? 'rgba(250,204,21,0.85)' : 'rgba(250,204,21,0.45)';
-    ctx.lineWidth = this.shiftCueArmed ? 3 : 2;
+    ctx.strokeStyle = this.shiftCueArmed ? 'rgba(250,204,21,0.7)' : 'rgba(250,204,21,0.28)';
+    ctx.lineWidth = this.shiftCueArmed ? 2.5 : 1.5;
     ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
 
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
@@ -1064,11 +1071,9 @@ export class RaceScene implements Scene {
     ctx.fillText('BRAKE', w * 0.25, h - token.safe.bottom - pad(token, 0.5));
     ctx.fillText('GO', w * 0.75, h - token.safe.bottom - pad(token, 0.5));
     ctx.fillStyle = shifting || this.shiftCueArmed ? '#facc15' : token.textDim;
-    ctx.font = this.shiftCueArmed
-      ? `700 ${token.fontBody}px ${token.fontDisplayFamily}`
-      : `${token.fontCaption}px ${token.fontFamily}`;
+    ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
     ctx.textBaseline = 'middle';
-    ctx.fillText(this.shiftCueArmed ? 'SHIFT!' : 'SHIFT', w * 0.5, sy + sh * 0.55);
+    ctx.fillText(this.shiftCueArmed ? 'EARLY' : 'AUTO', w * 0.5, sy + sh * 0.55);
     ctx.restore();
   }
 

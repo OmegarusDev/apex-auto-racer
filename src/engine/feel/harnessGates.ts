@@ -205,8 +205,75 @@ export function runDraftTowGate(): FeelGateResult {
   };
 }
 
+/** Player pin-throttle without Shift must still climb gears (assisted auto). */
+export function runGearAssistGate(): FeelGateResult {
+  const director = new RaceDirector(baseConfig(77_010));
+  skipCountdown(director);
+  const player = director.cars.find((c) => c.isPlayerControlled);
+  if (!player) {
+    return { id: 'GEAR_ASSIST', ok: false, detail: 'no player' };
+  }
+  player.gear = 1;
+  player.v = 6;
+  player.slotMode = 'groove';
+  // Park on the lowest-kappa stretch so Authority corners don't eat the pull.
+  let bestS = player.s;
+  let bestK = 99;
+  for (const n of director.track.nodes) {
+    const k = Math.abs(n.kappaLine);
+    if (k < bestK) {
+      bestK = k;
+      bestS = n.s;
+    }
+  }
+  player.s = bestS;
+  player.l = 0;
+  const startGear = player.gear;
+  for (let i = 0; i < 480; i++) {
+    director.setPlayerPedals(1, 0, false);
+    director.update(PHYSICS.dt);
+  }
+  const ok = player.gear >= 3;
+  return {
+    id: 'GEAR_ASSIST',
+    ok,
+    detail: `gear ${startGear}→${player.gear} v=${player.v.toFixed(1)} kappaMin=${bestK.toFixed(4)}`,
+  };
+}
+
+/** Early Shift must not slap speed (no miss penalty). */
+export function runGearNoMissGate(): FeelGateResult {
+  const director = new RaceDirector(baseConfig(77_011));
+  skipCountdown(director);
+  const player = director.cars.find((c) => c.isPlayerControlled);
+  if (!player) {
+    return { id: 'GEAR_NO_MISS', ok: false, detail: 'no player' };
+  }
+  player.gear = 2;
+  player.v = 10;
+  player.slotMode = 'groove';
+  player.shiftCooldown = 0;
+  const v0 = player.v;
+  // Spam early upshift while still low in the band.
+  for (let i = 0; i < 30; i++) {
+    director.setPlayerPedals(0.6, 0, true);
+    director.update(PHYSICS.dt);
+  }
+  const ok = player.v >= v0 * 0.97 && player.lastShiftKind !== 'miss';
+  return {
+    id: 'GEAR_NO_MISS',
+    ok,
+    detail: `v0=${v0.toFixed(2)} v=${player.v.toFixed(2)} gear=${player.gear}`,
+  };
+}
+
 export function runHarnessGates(): FeelGateResult[] {
-  // Avoid mulberry noise in gate identity
   void mulberry32;
-  return [runRejoinGate(), runCrashStunGate(), runDraftTowGate()];
+  return [
+    runRejoinGate(),
+    runCrashStunGate(),
+    runDraftTowGate(),
+    runGearAssistGate(),
+    runGearNoMissGate(),
+  ];
 }

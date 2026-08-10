@@ -20,6 +20,8 @@ export type FeelGateId =
   | 'REJOIN_NO_PARK'
   | 'CRASH_STUN_SOFT'
   | 'DRAFT_TOW'
+  | 'GEAR_ASSIST'
+  | 'GEAR_NO_MISS'
   | 'STORY_INTENT_DENSITY'
   | 'STREET_WALL_BITE'
   | 'RALLY_DESLOT_LONG'

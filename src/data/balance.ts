@@ -18,12 +18,16 @@ export const BALANCE = {
   startingPartTier: 1,
   maxPartTier: 5,
   /** Player vDriver pace trim — unupgraded careers should lose to a clean field. */
-  playerPaceMult: 0.65,
+  playerPaceMult: 0.55,
   rainChance: 0.1,
   /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
   rainMuMult: 0.82,
   rainMistakeMult: 1.35,
   handsOffBonusMax: 0.5,
+  /** Max entertainment cash as fraction of rank base payout. */
+  entertainmentBonusMax: 0.35,
+  /** Entertainment score threshold for crowd_pleaser objective. */
+  crowdPleaserScore: 45,
   pointsPerPosition: [12, 9, 7, 5, 4, 3, 2, 1] as number[],
   rankBasePayout: [200, 400, 800, 1600, 2800, 4500] as number[],
   placementMult: [1.0, 0.55, 0.30, 0.15] as number[],
@@ -45,20 +49,20 @@ export const BALANCE = {
    * dead stall-car; ceilings keep standouts. Variance lives inside the band.
    */
   opponentStatRanges: [
-    [44, 78],
-    [52, 84],
-    [62, 90],
-    [72, 95],
-    [80, 98],
-    [86, 99],
+    [52, 82],
+    [58, 86],
+    [66, 92],
+    [74, 96],
+    [82, 98],
+    [88, 99],
   ] as [number, number][],
   /** Part tier band per rank — standouts can sit at the top of the band. */
   opponentPartTiers: [
-    [2, 3],
-    [2, 3],
     [2, 4],
+    [2, 4],
+    [3, 4],
     [3, 5],
-    [3, 5],
+    [4, 5],
     [4, 5],
   ] as [number, number][],
   freeAgentStatBase: [26, 55] as [number, number],
@@ -90,9 +94,9 @@ export const BALANCE = {
   /** Min rear-end severity before condition is charged (kiss bumps are free). */
   contactConditionSeverityMin: 0.55,
   /** AI target time gap (s) to the car ahead in the same lane. */
-  followTimeGap: 0.38,
+  followTimeGap: 0.32,
   /** AI starts lifting/braking inside this bumper gap (m). */
-  followMinGap: 2.6,
+  followMinGap: 2.2,
   /** Low-skill AI brakes earlier for traffic (extra time-gap mult). */
   followSkillGapSpan: 0.72,
   finishWindowSec: 10,

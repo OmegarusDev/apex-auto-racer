@@ -26,6 +26,7 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 - `v_deslot` spans Skill × Focus × Bravery; player Authority splits brake assist (stronger at low Skill) vs throttle trim (rises with Skill). Pin-throttle nearly kills brake assist.
 - AI brakes for `vDriver` / live `v_deslot`, full throttle otherwise; draft hold then lateral pull-out. Soft bumper / grid-hold softens start rubs so the pack does not freeze at lights-out.
 - Wall recovery is soft (stun cuts drive; no lateral freeze/teleport). Track width / normals / kerbs match painted asphalt.
+- **Manual gearbox (Track-first):** Enter/gas, Space/brake, Shift/upshift. Downshifts automatic. Premature upshift keeps the gear and costs speed. Street = 5 punchy gears + harder walls; Rally = 4 wide gears + longer deslot / earlier brakes. AI auto-upshifts.
 - Opponent fields stratify weak→strong within the rank budget band (no dead stall-cars at novice).
 
 ### Driver stats → track (summary)
@@ -64,6 +65,18 @@ Change protocol:
 ### BALANCE (freeze-critical)
 
 `playerPaceMult`, `opponentStatRanges`, `opponentPartTiers`, `contactGap`, `contactSpeedCap`, `contactNudge`, `contactIters`, `contactBounce`, `contactCrashClosing`, `contactDeslotClosing`, `contactConditionSeverityMin`, `followTimeGap`, `followMinGap`, `followSkillGapSpan`, `draftGapMax`, `draftLateralMax`, `overtakeDraftThreshold`, `overtakeHoldSec`, `overtakeDurationSec`, `overtakeLateralShift`, `rainMuMult`, `finishWindowSec`, `wallCrashConditionLoss`, `contactCrashConditionLoss`
+
+## Custom engines (layer map)
+
+Three layers — keep new work in the right one:
+
+1. **Race sim** (seeded, headless) — `RaceDirector` facade composing Physics (`Vehicle`), Gearbox, Brain, Track, Modifiers, **EntertainmentMeter**, and the event ring. No Web Audio / DOM on the hot path.
+2. **Presentation** — `AudioEngine`, Render (Camera/VectorRenderer/Particles), UITheme, Race HUD. Consume a per-frame snapshot (`AudioTelemetry` + event cursor + hype). Never write into physics except via Input pedals.
+3. **Career** (between races) — payouts/XP/objectives/tournaments/garage mutate `GameState` only after the flag.
+
+**Presentation bus:** RaceScene builds telemetry + hype from the director; audio/HUD/particles read only that.
+
+**Deferred extracts:** full `race/*` split; Economy / Tournament / Garage domain modules; DisciplineProfiles; CameraDirector; NativeShell. Audio/Entertainment land first along these seams.
 
 ## Deferred
 

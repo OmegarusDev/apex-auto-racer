@@ -9,6 +9,14 @@ export const PHYSICS = {
   carWidth: 2.3,
   dprCap: 2.0,
   pedalEaseMs: 80,
+  /** Cosmetic/engine RPM anchors for the real gearbox. */
+  rpmIdle: 900,
+  rpmMin: 2500,
+  rpmMax: 8000,
+  /** Seconds after a shift before another upshift is accepted. */
+  shiftCooldown: 0.22,
+  /** AI upshifts when bandFrac exceeds this (below player clean threshold). */
+  aiUpshiftBand: 0.78,
   kerbOuterM: 0.8,
   kerbGrip: 0.95,
   runoffGrip: 0.5,
@@ -33,7 +41,7 @@ export const PHYSICS = {
    */
   crashStun: 0.38,
   /** Street discipline: harder wall stun (discipline mult — not a groove base retune). */
-  streetWallStunMult: 1.2,
+  streetWallStunMult: 1.45,
   scrapeSpeedMultPerSec: 0.55,
   /** Fraction of inbound lateral velocity reflected on wall contact. */
   wallRestitution: 0.18,
@@ -178,10 +186,10 @@ export const PHYSICS = {
    * - Throttle trim rises with Skill (elites self-manage pin-throttle).
    * Pin-throttle overrule nearly kills brake assist (see Vehicle).
    */
-  brakeAuthorityBase: 0.38,
-  brakeAuthoritySpan: -0.22,
-  throttleAuthorityBase: 0.1,
-  throttleAuthoritySpan: 0.72,
+  brakeAuthorityBase: 0.28,
+  brakeAuthoritySpan: -0.16,
+  throttleAuthorityBase: 0.08,
+  throttleAuthoritySpan: 0.75,
   horizonSec: 8,
   /** Mild launch caution — cold adhesion already lowers v_deslot. */
   aiLaunchSec: 1.6,

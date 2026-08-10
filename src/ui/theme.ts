@@ -91,7 +91,7 @@ export function createTheme(w: number, h: number): ThemeTokens {
   }
 
   const min = Math.min(w, h);
-  const scale = min / BASE_MIN;
+  const scale = Math.max(0.75, Math.min(1.25, min / BASE_MIN));
 
   cachedTheme = {
     scale,

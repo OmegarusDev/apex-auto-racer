@@ -2,15 +2,19 @@ import { PHYSICS } from '../data/physics';
 
 export type InputMode = 'menu' | 'race';
 
-const THROTTLE_KEYS = new Set(['ArrowRight', 'ArrowUp', 'Enter', 'KeyW']);
-const BRAKE_KEYS = new Set(['ArrowLeft', 'ArrowDown', 'Space', 'KeyS']);
+/** Enter = gas (primary). WASD/arrows kept as aliases. */
+const THROTTLE_KEYS = new Set(['Enter', 'ArrowRight', 'ArrowUp', 'KeyW']);
+/** Space = brake (primary). */
+const BRAKE_KEYS = new Set(['Space', 'ArrowLeft', 'ArrowDown', 'KeyS']);
+/** Shift = upshift (clutch / gear change). */
+const UPSHIFT_KEYS = new Set(['ShiftLeft', 'ShiftRight']);
 
 export interface PointerSample {
   id: number;
   x: number;
   y: number;
   active: boolean;
-  side: 'left' | 'right' | 'none';
+  side: 'left' | 'right' | 'shift' | 'none';
 }
 
 export interface ClickEvent {
@@ -24,6 +28,8 @@ export class InputController {
 
   throttle = 0;
   brake = 0;
+  /** Edge-triggered: true for one update after Shift / SHIFT pad press. */
+  upshiftPulse = false;
 
   /** Accumulated seconds with either pedal above 0.1 (race input tracking). */
   inputTime = 0;
@@ -39,6 +45,9 @@ export class InputController {
   private targetBrake = 0;
   private pendingClick: ClickEvent | null = null;
   private bound = false;
+  private shiftKeysHeld = new Set<string>();
+  private touchShiftHeld = false;
+  private prevTouchShift = false;
 
   private onPointerDown = (ev: PointerEvent): void => {
     if (!this.canvas) return;
@@ -54,7 +63,7 @@ export class InputController {
       return;
     }
 
-    const side = this.sideForX(x);
+    const side = this.sideForPoint(x, y);
     this.pointers.set(ev.pointerId, { id: ev.pointerId, x, y, active: true, side });
     this.syncPedalTargets();
   };
@@ -71,7 +80,7 @@ export class InputController {
     if (p !== undefined) {
       p.x = x;
       p.y = y;
-      p.side = this.sideForX(x);
+      p.side = this.sideForPoint(x, y);
     }
   };
 
@@ -91,12 +100,20 @@ export class InputController {
   private onKeyDown = (ev: KeyboardEvent): void => {
     this.keysDown.add(ev.code);
     if (this.mode === 'race') {
+      if (UPSHIFT_KEYS.has(ev.code) && !this.shiftKeysHeld.has(ev.code)) {
+        this.shiftKeysHeld.add(ev.code);
+        this.upshiftPulse = true;
+      }
       this.syncPedalTargets();
+      if (THROTTLE_KEYS.has(ev.code) || BRAKE_KEYS.has(ev.code) || UPSHIFT_KEYS.has(ev.code)) {
+        ev.preventDefault();
+      }
     }
   };
 
   private onKeyUp = (ev: KeyboardEvent): void => {
     this.keysDown.delete(ev.code);
+    this.shiftKeysHeld.delete(ev.code);
     if (this.mode === 'race') {
       this.syncPedalTargets();
     }
@@ -132,6 +149,8 @@ export class InputController {
       this.targetThrottle = 0;
       this.targetBrake = 0;
       this.pointers.clear();
+      this.upshiftPulse = false;
+      this.shiftKeysHeld.clear();
     }
     this.syncPedalTargets();
   }
@@ -142,13 +161,30 @@ export class InputController {
     this.targetBrake = 0;
     this.throttle = 0;
     this.brake = 0;
+    this.upshiftPulse = false;
+    this.shiftKeysHeld.clear();
+    this.touchShiftHeld = false;
+    this.prevTouchShift = false;
     this.pointers.clear();
+  }
+
+  /** Consume the one-frame upshift edge. */
+  consumeUpshift(): boolean {
+    const v = this.upshiftPulse;
+    this.upshiftPulse = false;
+    return v;
   }
 
   update(dt: number): void {
     const ease = this.pedalEaseRate(dt);
     this.throttle = this.easeToward(this.throttle, this.targetThrottle, ease);
     this.brake = this.easeToward(this.brake, this.targetBrake, ease);
+
+    // Touch SHIFT pad: rising edge → pulse.
+    if (this.touchShiftHeld && !this.prevTouchShift) {
+      this.upshiftPulse = true;
+    }
+    this.prevTouchShift = this.touchShiftHeld;
 
     if (this.mode === 'race' && (this.throttle > 0.1 || this.brake > 0.1)) {
       this.inputTime += dt;
@@ -175,10 +211,18 @@ export class InputController {
     return [...this.pointers.values()];
   }
 
-  private sideForX(x: number): 'left' | 'right' | 'none' {
+  /**
+   * Layout: left half = brake, right half = gas, bottom-center strip = SHIFT.
+   * SHIFT zone is the middle 28% width in the bottom 22% height.
+   */
+  private sideForPoint(x: number, y: number): 'left' | 'right' | 'shift' | 'none' {
     if (!this.canvas) return 'none';
     const w = this.canvas.clientWidth;
-    if (w <= 0) return 'none';
+    const h = this.canvas.clientHeight;
+    if (w <= 0 || h <= 0) return 'none';
+    const inShiftY = y > h * 0.78;
+    const inShiftX = x > w * 0.36 && x < w * 0.64;
+    if (inShiftY && inShiftX) return 'shift';
     return x < w * 0.5 ? 'left' : 'right';
   }
 
@@ -186,16 +230,20 @@ export class InputController {
     if (this.mode !== 'race') {
       this.targetThrottle = 0;
       this.targetBrake = 0;
+      this.touchShiftHeld = false;
       return;
     }
 
     let ptrThrottle = 0;
     let ptrBrake = 0;
+    let ptrShift = false;
     for (const p of this.pointers.values()) {
       if (!p.active) continue;
       if (p.side === 'right') ptrThrottle = 1;
       if (p.side === 'left') ptrBrake = 1;
+      if (p.side === 'shift') ptrShift = true;
     }
+    this.touchShiftHeld = ptrShift;
 
     let keyThrottle = 0;
     let keyBrake = 0;

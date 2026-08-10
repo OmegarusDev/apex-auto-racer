@@ -554,7 +554,7 @@ export function tickDriverBrain(
   }
   // Rally: earlier brake perception — loose surface punishes late arrivals.
   if (ctx.discipline === 'rally') {
-    kBrake *= 1.08;
+    kBrake *= 1.12;
   }
 
   const req = computeRequiredDecel(car, ctx.track, kBrake, tempGrip);
@@ -571,9 +571,9 @@ export function tickDriverBrain(
     tempGrip,
     ctx.driver.bravery,
   );
-  // Low Skill brakes well before the peg; Bravery delays onset (risk).
+  // AI rides closer to the peg — early field must look committed, not timid.
   const slotOnset =
-    0.74 + 0.18 * (ctx.driver.skill / 100) + 0.08 * (ctx.driver.bravery / 100);
+    0.82 + 0.14 * (ctx.driver.skill / 100) + 0.1 * (ctx.driver.bravery / 100);
   let cornerBrake = false;
   if (
     Math.abs(nodeKappa) >= PHYSICS.grooveKappaMin &&

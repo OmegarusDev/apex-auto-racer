@@ -114,6 +114,7 @@ function isValidGameState(obj: Record<string, unknown>): boolean {
     !isFiniteNumber(vols.master) ||
     !isFiniteNumber(vols.engine) ||
     !isFiniteNumber(vols.fx) ||
+    !isFiniteNumber(vols.crowd) ||
     !isFiniteNumber(vols.ui)
   ) {
     return false;
@@ -264,6 +265,13 @@ function migrate(raw: unknown): GameState | null {
     }
     if (typeof obj.onboarding.shownAuthorityHint !== 'boolean') {
       obj.onboarding.shownAuthorityHint = false;
+    }
+  }
+
+  if (isRecord(obj.options) && isRecord(obj.options.volumes)) {
+    const vols = obj.options.volumes as Record<string, unknown>;
+    if (typeof vols.crowd !== 'number' || !Number.isFinite(vols.crowd)) {
+      vols.crowd = DEFAULT_VOLUMES.crowd;
     }
   }
 

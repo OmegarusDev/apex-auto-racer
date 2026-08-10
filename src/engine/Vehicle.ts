@@ -8,6 +8,13 @@ import { conditionLiveMods } from './stats';
 import type { TrackData } from './TrackGenerator';
 import { interpolateAtSInto, outwardSign, type InterpolatedNode } from './RacingLine';
 import type { BrainIntent } from './BrainIntent';
+import {
+  gearboxFor,
+  gearBandFrac,
+  gearTopSpeed,
+  gearTorque,
+  rpmFromBand,
+} from './Gearbox';
 
 const nodeScratch: InterpolatedNode = {
   pos: { x: 0, y: 0 },
@@ -33,6 +40,8 @@ export interface VehicleInputs {
   /** Player pedal 0-1 (eased externally or here). */
   throttle: number;
   brake: number;
+  /** Edge-triggered upshift request (player Shift / touch SHIFT). */
+  upshift?: boolean;
 }
 
 export interface VehicleUpdateContext {
@@ -69,6 +78,10 @@ export interface CarSimState extends VehicleState {
   throttleDropTime: number;
   gear: number;
   rpm: number;
+  /** Cooldown after shift before another upshift lands. */
+  shiftCooldown: number;
+  /** Cached zone flag for presentation bus. */
+  onKerb: boolean;
   easedThrottle: number;
   easedBrake: number;
   vProfile: number[];
@@ -89,10 +102,6 @@ export interface ZoneModifiers {
 
 /** Match VectorRenderer kerb kappa gate so zones align with painted stripes. */
 const KERB_KAPPA_THRESHOLD = 0.012;
-const GEAR_COUNT = 5;
-const RPM_IDLE = 900;
-const RPM_MIN = 2500;
-const RPM_MAX = 8000;
 
 /** Tyre temperature grip multiplier (plan 4.1; cold floor from PHYSICS.tyreColdGrip). */
 export function computeTempGrip(T: number): number {
@@ -242,21 +251,70 @@ export function personalLineAt(car: CarSimState, track: TrackData, s: number): n
   return interpolateProfile(car.lineO, track, s);
 }
 
-function easePedal(current: number, target: number, dt: number): number {
-  const rate = 1 / (PHYSICS.pedalEaseMs / 1000);
-  if (target > current) return Math.min(target, current + rate * dt);
-  if (target < current) return Math.max(target, current - rate * dt);
-  return current;
-}
+/**
+ * Real gearbox: player upshifts on request; AI auto-upshifts near redline;
+ * downshifts are automatic. Premature upshifts bounce with a speed penalty.
+ */
+function updateGearbox(
+  car: CarSimState,
+  dt: number,
+  vMaxEff: number,
+  throttle: number,
+  wantUpshift: boolean,
+  discipline: DisciplineId,
+  isPlayer: boolean,
+): number {
+  const box = gearboxFor(discipline);
+  car.gear = Math.max(1, Math.min(box.gearCount, car.gear || 1));
+  if (car.shiftCooldown > 0) {
+    car.shiftCooldown = Math.max(0, car.shiftCooldown - dt);
+  }
 
-function updateCosmeticRpm(car: CarSimState, dt: number): void {
-  const band = car.stats.vMax / GEAR_COUNT;
-  const gear = Math.min(GEAR_COUNT, Math.max(1, Math.floor(car.v / band) + 1));
-  car.gear = gear;
-  const bandStart = (gear - 1) * band;
-  const bandFrac = band > 0 ? (car.v - bandStart) / band : 0;
-  const targetRpm = RPM_IDLE + (RPM_MAX - RPM_MIN) * Math.max(0, Math.min(1, bandFrac));
-  car.rpm += (targetRpm - car.rpm) * (1 - Math.exp(-8 * dt));
+  let missScrub = 0;
+  const band = gearBandFrac(car.v, vMaxEff, car.gear, box);
+  car.lastShiftKind = null;
+
+  if (car.gear > 1 && band < box.downshiftBand && car.shiftCooldown <= 0) {
+    car.gear -= 1;
+    car.shiftCooldown = PHYSICS.shiftCooldown * 0.55;
+    car.lastShiftKind = 'down';
+  }
+
+  const upshiftOk =
+    wantUpshift &&
+    car.gear < box.gearCount &&
+    car.shiftCooldown <= 0 &&
+    car.slotMode === 'groove' &&
+    car.spinRemaining <= 0;
+
+  if (upshiftOk) {
+    if (band >= box.upshiftBand) {
+      car.gear += 1;
+      car.shiftCooldown = PHYSICS.shiftCooldown;
+      car.lastShiftKind = 'up';
+    } else {
+      car.v *= box.missSpeedMult;
+      missScrub = box.missScrub;
+      car.shiftCooldown = PHYSICS.shiftCooldown * 1.35;
+      car.lastShiftKind = 'miss';
+    }
+  } else if (
+    !isPlayer &&
+    car.gear < box.gearCount &&
+    car.shiftCooldown <= 0 &&
+    band >= PHYSICS.aiUpshiftBand &&
+    throttle > 0.35 &&
+    car.slotMode === 'groove'
+  ) {
+    car.gear += 1;
+    car.shiftCooldown = PHYSICS.shiftCooldown * 0.85;
+    car.lastShiftKind = 'up';
+  }
+
+  const bandNow = gearBandFrac(car.v, vMaxEff, car.gear, box);
+  const targetRpm = rpmFromBand(bandNow, throttle);
+  car.rpm += (targetRpm - car.rpm) * (1 - Math.exp(-10 * dt));
+  return missScrub;
 }
 
 function assertFinite(car: CarSimState, debug: boolean): void {
@@ -350,6 +408,9 @@ export function createCarState(
     spinCount: 0,
     deslotCount: 0,
     overtakeCount: 0,
+    contactHits: 0,
+    lastShiftKind: null,
+    onKerb: false,
     stats,
     lTarget: gridL,
     gridL,
@@ -360,7 +421,8 @@ export function createCarState(
     prevThrottle: 0,
     throttleDropTime: -1,
     gear: 1,
-    rpm: RPM_IDLE,
+    rpm: PHYSICS.rpmIdle,
+    shiftCooldown: 0,
     easedThrottle: 0,
     easedBrake: 0,
     vProfile,
@@ -525,9 +587,9 @@ export function updateVehicle(
   const kappaUse = node.kappaLine;
   const curved = Math.abs(kappaUse) >= PHYSICS.grooveKappaMin;
 
-  // Step 3: input blend (player authority vs brain)
-  car.easedThrottle = easePedal(car.easedThrottle, inputs.throttle, dt);
-  car.easedBrake = easePedal(car.easedBrake, inputs.brake, dt);
+  // Step 3: input blend — pedals already eased in InputController (single ease path).
+  car.easedThrottle = inputs.throttle;
+  car.easedBrake = inputs.brake;
 
   let throttle: number;
   let brake: number;
@@ -610,12 +672,24 @@ export function updateVehicle(
   );
   const driftCfg = DRIFT_CFG[ctx.discipline] ?? DRIFT_CFG.track!;
 
-  // Step 4: longitudinal
+  // Step 4: longitudinal — gear caps top speed and scales torque.
   const vMaxEff = car.stats.vMax * condTop * (1 + PHYSICS.draftSpeedBonus * draft);
+  const missScrub = updateGearbox(
+    car,
+    dt,
+    vMaxEff,
+    throttle,
+    inputs.upshift === true,
+    ctx.discipline,
+    car.isPlayerControlled,
+  );
+  const box = gearboxFor(ctx.discipline);
+  const vGearMax = gearTopSpeed(vMaxEff, car.gear, box);
+  const torque = gearTorque(car.gear, box);
   const sDet = ctx.sDet;
   const aDriveUncapped =
-    throttle * car.stats.aAccel * sDet * (1 + PHYSICS.draftAccelBonus * draft) *
-    (1 - (car.v / Math.max(vMaxEff, 0.1)) ** 2);
+    throttle * car.stats.aAccel * sDet * torque * (1 + PHYSICS.draftAccelBonus * draft) *
+    (1 - (car.v / Math.max(vGearMax, 0.1)) ** 2);
   const aCoast = (1 - throttle) * (PHYSICS.coastBase + PHYSICS.coastVel * car.v);
   const aBrakeAppliedUncapped = brake * car.stats.aBrake;
 
@@ -623,7 +697,7 @@ export function updateVehicle(
   // Pin-throttle commitment: low-Skill cars lose adhesion margin (no nanny grip).
   const pinGrip =
     pinOverrule && car.isPlayerControlled
-      ? 0.7 + 0.18 * Math.min(1, ctx.skill / 75)
+      ? 0.62 + 0.2 * Math.min(1, ctx.skill / 75)
       : 1;
   const muEff =
     muSurface * gripFactor * condGrip * tempGrip * pinGrip *
@@ -647,6 +721,9 @@ export function updateVehicle(
 
   const aBrakeApplied = Math.min(aBrakeAppliedUncapped, aBudget);
   let aLong = aDrive - aBrakeApplied - aCoast;
+  if (missScrub > 0) {
+    aLong -= missScrub;
+  }
   if (recovering) {
     aLong -=
       car.slotMode === 'deslot'
@@ -848,6 +925,7 @@ export function updateVehicle(
     node.kappa,
     ctx.discipline,
   );
+  car.onKerb = zone.onKerb;
   if (zone.inRunoff) {
     car.v = Math.max(0, car.v - zone.dragDecel * dt);
     // Low-μ runoff bleeds lateral speed gently — still carry into the wall if hot.
@@ -928,7 +1006,7 @@ export function updateVehicle(
     car.dl += -into * PHYSICS.deslotWallPush * 0.4 * dt;
   }
 
-  updateCosmeticRpm(car, dt);
+  // Gearbox already updated RPM this tick.
   assertFinite(car, ctx.debug === true);
 }
 

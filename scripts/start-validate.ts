@@ -194,8 +194,8 @@ async function main() {
   const latOk = rows.every(
     (r) => r.avgLatSpread >= PHYSICS.gridColOffset * 1.2 && r.colSignRate >= 0.85,
   );
-  // Pin-throttle must not casually win — Authority + pace leave room for lift/brake.
-  const rareP1 = p1 <= Math.max(2, Math.floor(rows.length * 0.375));
+  // Pin-throttle must not casually win — gears + Authority leave room for skill.
+  const rareP1 = p1 <= Math.max(1, Math.floor(rows.length * 0.25));
   // Loose Cannon can jitter totals ~±40 below the generated budget floor.
   const floorsOk = rows.every((r) => r.oppMin >= BALANCE.opponentStatRanges[0]![0] * 4 - 40);
 

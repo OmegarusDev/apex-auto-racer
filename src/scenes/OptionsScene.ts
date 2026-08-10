@@ -58,7 +58,7 @@ export class OptionsScene implements Scene {
   private volumes(): VolumeOptions {
     const g = getGameContext();
     if (g.state !== null) return g.state.options.volumes;
-    return { master: 0.8, engine: 0.25, fx: 0.5, ui: 0.6 };
+    return { master: 0.8, engine: 0.28, fx: 0.5, crowd: 0.45, ui: 0.6 };
   }
 
   private setVolume(key: keyof VolumeOptions, value: number): void {
@@ -197,6 +197,15 @@ export class OptionsScene implements Scene {
         y: y + sliderGap * 3,
         w: contentW,
         h: sliderH,
+        label: 'Crowd Volume',
+        value: vols.crowd,
+        onChange: (v) => this.setVolume('crowd', v),
+      },
+      {
+        x: contentX,
+        y: y + sliderGap * 4,
+        w: contentW,
+        h: sliderH,
         label: 'UI Volume',
         value: vols.ui,
         onChange: (v) => this.setVolume('ui', v),
@@ -208,7 +217,7 @@ export class OptionsScene implements Scene {
       handleSlider(slider, ui);
     }
 
-    y += sliderGap * 4 + pad(token, 3);
+    y += sliderGap * 5 + pad(token, 3);
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const resetBtn: ButtonDef = {
       x: contentX,

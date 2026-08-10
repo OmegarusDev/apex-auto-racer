@@ -87,6 +87,10 @@ export interface VehicleState {
   spinCount: number;
   deslotCount: number;
   overtakeCount: number;
+  /** Pack contact dings that cost condition (player). */
+  contactHits: number;
+  /** Cleared by RaceDirector after emitting shift audio/events. */
+  lastShiftKind: 'up' | 'down' | 'miss' | null;
 }
 
 export type RaceEventKind =
@@ -101,7 +105,8 @@ export type RaceEventKind =
   | 'finish'
   | 'lap'
   | 'intent'
-  | 'rejoin';
+  | 'rejoin'
+  | 'shift';
 
 export interface RaceEvent {
   kind: RaceEventKind;
@@ -117,6 +122,7 @@ export interface VolumeOptions {
   master: number;
   engine: number;
   fx: number;
+  crowd: number;
   ui: number;
 }
 
@@ -182,8 +188,9 @@ export const SAVE_VERSION = 1;
 
 export const DEFAULT_VOLUMES: VolumeOptions = {
   master: 0.8,
-  engine: 0.25,
+  engine: 0.28,
   fx: 0.5,
+  crowd: 0.45,
   ui: 0.6,
 };
 

@@ -35,6 +35,7 @@ export interface PayoutBreakdown {
   placement: number;
   objective: number;
   handsOff: number;
+  entertainment: number;
   tournament: number;
   total: number;
 }
@@ -59,6 +60,8 @@ export interface ResultsPayload {
   objectivesCompleted: ObjectiveKind[];
   handsOffRatio: number;
   handsOffBonus: number;
+  entertainmentScore: number;
+  entertainmentBonus: number;
   rankUnlocked?: RankId;
   tournamentComplete?: boolean;
   tournamentRaceIndex?: number;
@@ -84,6 +87,7 @@ export interface RaceObjectiveStats {
   playerSpinCount: number;
   playerDeslotCount: number;
   playerOvertakes: number;
+  entertainmentScore: number;
   startGridPosition: number;
   vehicleConditionAtStart: number;
   vehicleRepairedBeforeRace: boolean;
@@ -223,6 +227,9 @@ function evaluateObjectives(
       case 'max_two_deslots':
         met = playerFinished && stats.playerDeslotCount <= 2;
         break;
+      case 'crowd_pleaser':
+        met = playerFinished && stats.entertainmentScore >= BALANCE.crowdPleaserScore;
+        break;
       default:
         break;
     }
@@ -240,6 +247,7 @@ function computePayout(
   totalCars: number,
   laps: number,
   handsOffRatio: number,
+  entertainmentScore: number,
   objectivesCompleted: ObjectiveKind[],
   isTournament: boolean,
   tournamentBonus: number,
@@ -266,6 +274,10 @@ function computePayout(
   const handsOff = playerTeamWon
     ? Math.round(rankBase * BALANCE.handsOffBonusMax * handsOffRatio)
     : 0;
+  const entertainmentFrac = Math.min(1, Math.max(0, entertainmentScore / 80));
+  const entertainment = Math.round(
+    rankBase * BALANCE.entertainmentBonusMax * entertainmentFrac,
+  );
   const tournament =
     tournamentBonus > 0
       ? tournamentBonus
@@ -278,8 +290,9 @@ function computePayout(
     placement,
     objective,
     handsOff,
+    entertainment,
     tournament,
-    total: placement + objective + handsOff + tournament,
+    total: placement + objective + handsOff + entertainment + tournament,
   };
 }
 
@@ -289,6 +302,7 @@ function computeDriverXp(
   teamPoints: number,
   rank: RankId,
   finishers: readonly RaceResultEntry[],
+  entertainmentScore: number,
 ): DriverXpGrant[] {
   const baseXp =
     (BALANCE.xpBase + BALANCE.xpPerPoint * teamPoints) * (BALANCE.rankXpMult[rank] ?? 1);
@@ -303,6 +317,7 @@ function computeDriverXp(
     if (driver.trait === 'showboat') {
       const pos = finishers.find((f) => f.driverId === driverId)?.position ?? 99;
       if (pos <= 3) xpMult *= 1.3;
+      if (entertainmentScore >= BALANCE.crowdPleaserScore * 0.6) xpMult *= 1.15;
     }
     const xpEarned = Math.round(baseXp * xpMult);
     const needed = xpToNextLevel(driver.level);
@@ -430,6 +445,7 @@ export function buildResultsPayload(
     finishers.length,
     launch.laps,
     handsOffRatio,
+    stats.entertainmentScore,
     objectivesCompleted,
     launch.mode === 'tournament',
     tournamentBonus,
@@ -437,7 +453,14 @@ export function buildResultsPayload(
     playerPosition <= 3,
   );
 
-  const driverXp = computeDriverXp(state, launch, playerTeamPoints, rank, finishers);
+  const driverXp = computeDriverXp(
+    state,
+    launch,
+    playerTeamPoints,
+    rank,
+    finishers,
+    stats.entertainmentScore,
+  );
 
   if (playerCarCondition !== undefined) {
     state.vehicles[launch.discipline].condition = playerCarCondition;
@@ -456,6 +479,8 @@ export function buildResultsPayload(
     objectivesCompleted,
     handsOffRatio,
     handsOffBonus: payout.handsOff,
+    entertainmentScore: stats.entertainmentScore,
+    entertainmentBonus: payout.entertainment,
     rankUnlocked,
     tournamentComplete,
     tournamentRaceIndex,

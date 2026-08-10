@@ -3,6 +3,7 @@ import { mulberry32 } from './rng';
 import { SaveManager } from './SaveManager';
 import { SceneManager } from './SceneManager';
 import type { GameState, VolumeOptions } from './types';
+import type { AudioTelemetry, ShiftKind } from './AudioTelemetry';
 
 /** Audio surface used by scenes — satisfied by `AudioEngine`. */
 export interface AudioEngine {
@@ -10,16 +11,24 @@ export interface AudioEngine {
   suspend(): Promise<void>;
   resume(): Promise<void>;
   setVolumes(volumes: VolumeOptions): void;
+  setDiscipline?(id: import('../data/disciplines').DisciplineId): void;
+  updateVehicleAudio(t: AudioTelemetry): void;
+  /** @deprecated prefer updateVehicleAudio */
   updateEngine(rpm: number, throttle: number): void;
   setScreech(amount: number, drifting: boolean): void;
+  setCrowd(hype: number): void;
+  crowdRoar(intensity?: number): void;
+  playShift(kind: ShiftKind): void;
   playCountdown(n: number): void;
   playGo(): void;
   playCrash(): void;
+  playSoftContact(): void;
   playSpin(): void;
   playDeslot(): void;
   setKerb(on: boolean): void;
   setRain(on: boolean): void;
   click(): void;
+  silenceRace?(): void;
 }
 
 class NullAudioEngine implements AudioEngine {
@@ -33,16 +42,22 @@ class NullAudioEngine implements AudioEngine {
     return Promise.resolve();
   }
   setVolumes(_volumes: VolumeOptions): void {}
+  updateVehicleAudio(_t: AudioTelemetry): void {}
   updateEngine(_rpm: number, _throttle: number): void {}
   setScreech(_amount: number, _drifting: boolean): void {}
+  setCrowd(_hype: number): void {}
+  crowdRoar(_intensity?: number): void {}
+  playShift(_kind: ShiftKind): void {}
   playCountdown(_n: number): void {}
   playGo(): void {}
   playCrash(): void {}
+  playSoftContact(): void {}
   playSpin(): void {}
   playDeslot(): void {}
   setKerb(_on: boolean): void {}
   setRain(_on: boolean): void {}
   click(): void {}
+  silenceRace(): void {}
 }
 
 function readDebugFlag(): boolean {

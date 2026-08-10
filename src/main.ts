@@ -4,6 +4,7 @@ import { initGameContext } from './engine/GameContext';
 import { TitleScene } from './scenes/TitleScene';
 import { validateRegistry } from './data/validate';
 import { bootDeterminismCheck } from './engine/determinismBoot';
+import { invalidateSafeArea } from './ui/theme';
 
 function setupCanvas(canvas: HTMLCanvasElement): { w: number; h: number; dpr: number } {
   const dpr = Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap);
@@ -43,6 +44,7 @@ function main(): void {
   let lastTs = 0;
 
   const resize = (): void => {
+    invalidateSafeArea();
     const dims = setupCanvas(canvas);
     game.scenes.onResize(dims.w, dims.h);
   };

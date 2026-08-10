@@ -11,7 +11,8 @@ export type ObjectiveKind =
   | 'no_input_half'
   | 'repair_then_podium'
   | 'team_win'
-  | 'max_two_deslots';
+  | 'max_two_deslots'
+  | 'crowd_pleaser';
 
 export interface ObjectiveDef {
   id: ObjectiveKind;
@@ -98,5 +99,11 @@ export const OBJECTIVES: ObjectiveDef[] = [
     title: 'Peg Discipline',
     description: 'Finish a race with at most two deslots',
     reward: 280,
+  },
+  {
+    id: 'crowd_pleaser',
+    title: 'Crowd Pleaser',
+    description: 'Put on a show — rack up entertainment for the crowd',
+    reward: 350,
   },
 ];

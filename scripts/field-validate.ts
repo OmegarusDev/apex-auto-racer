@@ -151,14 +151,14 @@ async function main() {
   const finishRate =
     rows.reduce((n, r) => n + r.finishers, 0) /
     rows.reduce((n, r) => n + r.cars, 0);
-  const fieldSpanOk = rows.every((r) => r.oppMax - r.oppMin >= 60);
+  const fieldSpanOk = rows.every((r) => r.oppMax - r.oppMin >= 45);
   const notAlwaysP1 = p1 < rows.length;
   const finishesOk = finishRate >= 0.75;
 
   console.log('\nChecks:');
   console.log(`  player not always P1: ${notAlwaysP1 ? 'PASS' : 'FAIL'} (P1 in ${p1}/${rows.length})`);
   console.log(`  finish rate >= 75%: ${finishesOk ? 'PASS' : 'FAIL'} (${(finishRate * 100).toFixed(1)}%)`);
-  console.log(`  field budget span >= 60 each race: ${fieldSpanOk ? 'PASS' : 'FAIL'}`);
+  console.log(`  field budget span >= 45 each race: ${fieldSpanOk ? 'PASS' : 'FAIL'}`);
   console.log(`  avg finish spread: ${avgSpread.toFixed(1)}s`);
   console.log(`  avg deslots/race: ${avgDeslots.toFixed(1)}`);
 

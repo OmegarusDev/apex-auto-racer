@@ -357,6 +357,14 @@ export class ResultsScene implements Scene {
         x + w * 0.5,
         y + pad(token, 1.5) + token.fontTitle + pad(token, 0.5),
       );
+    } else if (this.payload.entertainmentBonus > 0) {
+      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.success;
+      ctx.fillText(
+        `Crowd bonus: +$${this.payload.entertainmentBonus}`,
+        x + w * 0.5,
+        y + pad(token, 1.5) + token.fontTitle + pad(token, 0.5),
+      );
     }
     ctx.restore();
     return h;
@@ -408,6 +416,7 @@ export class ResultsScene implements Scene {
       { label: 'Placement', value: p.placement },
       { label: 'Objectives', value: p.objective },
       { label: 'Hands-off', value: p.handsOff },
+      { label: 'Crowd', value: p.entertainment },
       { label: 'Tournament', value: p.tournament },
     ].filter((row) => row.value > 0);
 

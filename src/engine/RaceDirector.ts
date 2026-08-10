@@ -25,6 +25,8 @@ import {
   interpolateAtSInto,
   type InterpolatedNode,
 } from './RacingLine';
+import { EntertainmentMeter } from './EntertainmentMeter';
+import type { EntertainmentSnapshot } from './EntertainmentMeter';
 import {
   buildVehicleContext,
   computeBrakeAuthority,
@@ -397,6 +399,10 @@ function formatEvent(event: RaceEvent): string {
       return `${event.time.toFixed(1)}s — ${intentTickerPhrase(name, event.detail as BrainIntentTag)}`;
     case 'rejoin':
       return `${event.time.toFixed(1)}s — ${name} finds the peg`;
+    case 'shift':
+      return `${event.time.toFixed(1)}s — ${name} ${
+        event.detail === 'miss' ? 'misses a shift' : event.detail === 'down' ? 'downshifts' : 'upshifts'
+      }`;
     default:
       return `${event.time.toFixed(1)}s — ${name}: ${event.kind}`;
   }
@@ -485,6 +491,7 @@ export class RaceDirector {
   private inputTime = 0;
   private playerThrottle = 0;
   private playerBrake = 0;
+  private playerUpshift = false;
   private paused = false;
   private retired = false;
   private finished = false;
@@ -511,6 +518,8 @@ export class RaceDirector {
   private overlapFrames = 0;
   /** Physics frames that still had a residual overlap after resolve. */
   private residualOverlapFrames = 0;
+  private readonly entertainment = new EntertainmentMeter();
+  private entertainmentEventCursor = 0;
 
   constructor(config: RaceConfig) {
     this.config = config;
@@ -617,6 +626,10 @@ export class RaceDirector {
     return this.events;
   }
 
+  get entertainmentSnapshot(): EntertainmentSnapshot {
+    return this.entertainment.snapshot();
+  }
+
   /** Live brain intent for HUD (player or any car). */
   intentForCar(carId: string): BrainIntent | undefined {
     const entry = this.entries.find((e) => e.car.id === carId);
@@ -635,9 +648,10 @@ export class RaceDirector {
     return this.ghostTrace;
   }
 
-  setPlayerPedals(throttle: number, brake: number): void {
+  setPlayerPedals(throttle: number, brake: number, upshift = false): void {
     this.playerThrottle = Math.max(0, Math.min(1, throttle));
     this.playerBrake = Math.max(0, Math.min(1, brake));
+    this.playerUpshift = upshift;
   }
 
   pause(): void {
@@ -825,6 +839,8 @@ export class RaceDirector {
     this.ghostTrace = this.entries.map((e) => ({ carId: e.car.id, samples: [] }));
     this.ghostSampleCounter = 0;
     this.eventSeq = 0;
+    this.entertainmentEventCursor = 0;
+    this.entertainment.reset();
     this.refreshStandings(true);
   }
 
@@ -955,7 +971,61 @@ export class RaceDirector {
       this.refreshStandings(false);
     }
 
+    this.tickEntertainment(dt);
     this.updateFinishWindow(dt);
+  }
+
+  private tickEntertainment(dt: number): void {
+    const player = this.entries.find((e) => e.car.isPlayerControlled);
+    const newEvents = this.recentEvents.filter((e) => e.seq > this.entertainmentEventCursor);
+    if (newEvents.length > 0) {
+      this.entertainmentEventCursor = this.eventSeq;
+    }
+
+    let kappaAbs = 0;
+    let position = 8;
+    let draft = 0;
+    let nearbyIntent: BrainIntentTag | null = null;
+    let cleanUpshift = false;
+
+    if (player !== undefined) {
+      const node = interpolateAtSInto(
+        this.track.nodes,
+        this.track.length,
+        player.car.s,
+        nodeScratch,
+      );
+      kappaAbs = Math.abs(node.kappaLine);
+      const stIdx = this.standingIndexById.get(player.car.id);
+      position = stIdx !== undefined ? (this.standings[stIdx]?.position ?? 8) : 8;
+      draft = player.draft;
+      cleanUpshift = player.car.lastShiftKind === 'up';
+
+      // Nearby showboat / pull-out intents from rivals within ~25m arc.
+      for (const e of this.entries) {
+        if (e.car.isPlayerControlled) continue;
+        const tag = e.brainOut.intent?.tag ?? null;
+        if (tag !== 'SHOWBOAT_RISK' && tag !== 'PULL_OUT') continue;
+        const gap = Math.abs(arcGap(player.car, e.car, this.track.length));
+        if (gap < 25) {
+          nearbyIntent = tag;
+          break;
+        }
+      }
+    }
+
+    this.entertainment.tick({
+      dt,
+      player: player?.car ?? null,
+      kappaAbs,
+      position,
+      totalCars: this.entries.length,
+      draft,
+      newEvents,
+      nearbyIntent,
+      discipline: this.config.discipline,
+      cleanUpshift,
+    });
   }
 
   private tickBrain(idx: number): BrainOutput {
@@ -992,9 +1062,11 @@ export class RaceDirector {
 
   private buildInputs(entry: RaceCarEntry): VehicleInputs {
     if (entry.car.isPlayerControlled) {
-      return { throttle: this.playerThrottle, brake: this.playerBrake };
+      const up = this.playerUpshift;
+      this.playerUpshift = false;
+      return { throttle: this.playerThrottle, brake: this.playerBrake, upshift: up };
     }
-    return { throttle: 0, brake: 0 };
+    return { throttle: 0, brake: 0, upshift: false };
   }
 
   private handleLapCrossing(entry: RaceCarEntry): void {
@@ -1233,6 +1305,7 @@ export class RaceDirector {
                     BALANCE.conditionMin,
                     follower.car.condition - BALANCE.contactCrashConditionLoss * severity,
                   );
+                  follower.car.contactHits += 1;
                 }
               }
               // Only mark blocked when actually stacked (not a draft kiss / launch rub).
@@ -1298,6 +1371,10 @@ export class RaceDirector {
     if (car.wallHits > entry.prevWallHits) {
       const kind: RaceEventKind = car.v > PHYSICS.crashSpeed * PHYSICS.crashSpeedMult ? 'crash' : 'wallHit';
       this.pushEvent(kind, car, name);
+    }
+
+    if (car.lastShiftKind !== null && car.isPlayerControlled) {
+      this.pushEvent('shift', car, name, car.lastShiftKind);
     }
 
     // Quarantined with DRIFT_CFG — no driftEntry while latch is dormant.
@@ -1371,8 +1448,9 @@ export class RaceDirector {
       const idx = this.standingIndexById.get(entry.car.id);
       if (idx === undefined) continue;
       const st = this.standings[idx]!;
-      if (entry.prevPosition > st.position && st.position <= 3) {
+      if (entry.prevPosition > st.position) {
         this.pushEvent('overtake', entry.car, entry.driver.name, `P${st.position}`);
+        entry.car.overtakeCount += 1;
       }
       // Draft often drops as the car pulls out — credit a tow pass if wake was
       // held recently or still partially aligned at the moment of the pass.

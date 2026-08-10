@@ -109,11 +109,12 @@ export class RaceScene implements Scene {
     playerSpinCount: 0,
     playerDeslotCount: 0,
     playerOvertakes: 0,
+    entertainmentScore: 0,
     startGridPosition: 1,
     vehicleConditionAtStart: 1,
     vehicleRepairedBeforeRace: false,
   };
-
+  private prevPlayerContactHits = 0;
   constructor(ctx: GameContext, config: RaceLaunchConfig) {
     this.g = ctx;
     this.launch = config;
@@ -137,6 +138,7 @@ export class RaceScene implements Scene {
       this.prevPlayerWallHits = 0;
       this.prevPlayerSpins = 0;
       this.prevPlayerDeslots = 0;
+      this.prevPlayerContactHits = 0;
       this.prevCarSamples.clear();
       this.prevCarDeslots.clear();
       this.ticker = [];
@@ -155,6 +157,7 @@ export class RaceScene implements Scene {
         playerSpinCount: 0,
         playerDeslotCount: 0,
         playerOvertakes: 0,
+        entertainmentScore: 0,
         startGridPosition: 1,
         vehicleConditionAtStart: vehicle.condition,
         vehicleRepairedBeforeRace: vehicle.condition >= BALANCE.conditionMax - 0.001,
@@ -164,6 +167,7 @@ export class RaceScene implements Scene {
       this.director = new RaceDirector(raceConfig);
       this.renderer.bakeTrack(this.director.track, this.launch.discipline);
       this.particles.setRaining(this.director.rain);
+      this.g.audio.setDiscipline?.(this.launch.discipline);
       this.g.audio.setRain(this.director.rain);
 
       if (this.launch.again) {
@@ -192,13 +196,20 @@ export class RaceScene implements Scene {
 
   exit(): void {
     this.g.input.setMode('menu');
-    this.g.audio.setRain(false);
-    this.g.audio.setKerb(false);
-    this.g.audio.setScreech(0, false);
-    this.g.audio.updateEngine(0, 0);
+    if (this.g.audio.silenceRace) {
+      this.g.audio.silenceRace();
+    } else {
+      this.g.audio.setRain(false);
+      this.g.audio.setKerb(false);
+      this.g.audio.setScreech(0, false);
+      this.g.audio.setCrowd(0);
+      this.g.audio.updateEngine(0, 0);
+    }
   }
 
-  onResize(_w: number, _h: number): void {}
+  onResize(_w: number, _h: number): void {
+    // Theme cache refreshed via main.ts invalidateSafeArea on window resize.
+  }
 
   handleBack(): boolean {
     if (this.resultsImportFailed) {
@@ -252,7 +263,11 @@ export class RaceScene implements Scene {
 
     if (this.g.input.brake > 0.1) this.stats.playerBrakeUsed = true;
 
-    director.setPlayerPedals(this.g.input.throttle, this.g.input.brake);
+    director.setPlayerPedals(
+      this.g.input.throttle,
+      this.g.input.brake,
+      this.g.input.consumeUpshift(),
+    );
     director.update(dt);
 
     this.updateCountdownAudio(director.countdown);
@@ -411,7 +426,9 @@ export class RaceScene implements Scene {
     const playerCar = director.cars.find((c) => c.isPlayerControlled);
     if (playerCar !== undefined) {
       storeGhostTrace(result.ghostTrace, playerCar.id);
+      this.stats.playerOvertakes = playerCar.overtakeCount;
     }
+    this.stats.entertainmentScore = director.entertainmentSnapshot.entertainmentScore;
 
     const payload = buildResultsPayload(
       state,
@@ -576,18 +593,37 @@ export class RaceScene implements Scene {
     if (track === null) return;
 
     const player = director.cars.find((c) => c.isPlayerControlled);
+    const ent = director.entertainmentSnapshot;
+    this.stats.entertainmentScore = ent.entertainmentScore;
+    this.g.audio.setCrowd(ent.hype);
+
     if (player !== undefined) {
-      this.g.audio.updateEngine(player.rpm, player.throttle);
-      this.g.audio.setScreech(
-        player.slotMode === 'deslot' ? Math.max(player.gripUsage, 1.15) : player.gripUsage,
-        player.driftState || player.slotMode === 'deslot',
-      );
+      this.g.audio.updateVehicleAudio({
+        rpm: player.rpm,
+        throttle: player.throttle,
+        brake: player.brake,
+        gear: player.gear,
+        speed: player.v,
+        gripUsage: player.gripUsage,
+        slotMode: player.slotMode,
+        onKerb: player.onKerb,
+        discipline: this.launch.discipline,
+        active: true,
+      });
+
+      if (player.lastShiftKind !== null) {
+        this.g.audio.playShift(player.lastShiftKind);
+        player.lastShiftKind = null;
+      }
 
       if (player.wallHits > this.prevPlayerWallHits) {
         this.g.audio.playCrash();
         if (!this.g.state!.onboarding.shownCrashHint) {
           this.showHint('Wall contact reduces condition — brake earlier!', 'shownCrashHint');
         }
+      }
+      if (player.contactHits > this.prevPlayerContactHits) {
+        this.g.audio.playSoftContact();
       }
       if (player.deslotCount > this.prevPlayerDeslots) {
         this.g.audio.playDeslot();
@@ -604,7 +640,6 @@ export class RaceScene implements Scene {
         player.throttle > 0.85 &&
         player.brake < 0.08
       ) {
-        // First curved pin: teach lift before the peg pops.
         let kappa = 0;
         for (const n of director.track.nodes) {
           if (n.s <= player.s) kappa = n.kappaLine;
@@ -622,16 +657,11 @@ export class RaceScene implements Scene {
       this.stats.playerWallHits = player.wallHits;
       this.stats.playerSpinCount = player.spinCount;
       this.stats.playerDeslotCount = player.deslotCount;
+      this.stats.playerOvertakes = player.overtakeCount;
       this.prevPlayerWallHits = player.wallHits;
       this.prevPlayerSpins = player.spinCount;
       this.prevPlayerDeslots = player.deslotCount;
-
-      const sample = sampleTrack(track, player.s);
-      const halfW = sample.width * 0.5;
-      const absL = Math.abs(player.l);
-      // Kerbs sit outside asphalt (matches VectorRenderer + physics zones).
-      const onKerb = absL > halfW && absL <= halfW + PHYSICS.kerbOuterM;
-      this.g.audio.setKerb(onKerb);
+      this.prevPlayerContactHits = player.contactHits;
     }
 
     let tick = 0;
@@ -681,7 +711,7 @@ export class RaceScene implements Scene {
         switch (ev.kind) {
           case 'overtake':
             text = `${ev.time.toFixed(1)}s — ${name} overtakes${ev.detail ? ` ${ev.detail}` : ''}`;
-            if (this.isPlayerEvent(ev, name)) this.stats.playerOvertakes += 1;
+            if (this.isPlayerEvent(ev, name)) this.g.audio.crowdRoar(0.75);
             break;
           case 'spin':
             text = `${ev.time.toFixed(1)}s — ${name} spins!`;
@@ -712,6 +742,11 @@ export class RaceScene implements Scene {
             break;
           case 'rejoin':
             text = `${ev.time.toFixed(1)}s — ${name} finds the peg`;
+            break;
+          case 'shift':
+            if (ev.detail === 'miss') text = `${ev.time.toFixed(1)}s — ${name} misses a shift`;
+            else if (ev.detail === 'down') text = `${ev.time.toFixed(1)}s — ${name} downshifts`;
+            else text = `${ev.time.toFixed(1)}s — ${name} upshifts`;
             break;
           case 'driftEntry':
             text = `${ev.time.toFixed(1)}s — ${name} slides`;
@@ -744,9 +779,9 @@ export class RaceScene implements Scene {
     if (state === null) return;
 
     if (!state.onboarding.shownPedalControls) {
-      this.showHint('Hold the right side to accelerate', 'shownPedalControls');
+      this.showHint('Enter = gas · Space = brake · Shift = upshift', 'shownPedalControls');
     } else if (!state.onboarding.shownBrakeHint) {
-      this.showHint('Tap the left side to brake', 'shownBrakeHint');
+      this.showHint('Touch: right = gas, left = brake, bottom SHIFT = upshift', 'shownBrakeHint');
     }
   }
 
@@ -821,7 +856,20 @@ export class RaceScene implements Scene {
 
       ctx.fillStyle = token.textMuted;
       ctx.fillText(`Cond ${Math.round(player.condition * 100)}%`, hudX, hudY);
-      ctx.fillText(`Tyre ${Math.round(player.tyreTemp * 100)}%`, hudX + pad(token, 8), hudY);
+      ctx.fillText(`Tyre ${Math.round(player.tyreTemp * 100)}%`, hudX + pad(token, 7), hudY);
+      hudY += token.fontBody + pad(token, 0.6);
+
+      // Crowd / entertainment meter — under telemetry, clear of trait chip / pause.
+      const barW = pad(token, 12);
+      const barH = Math.max(4, pad(token, 0.45));
+      const hype = this.director?.entertainmentSnapshot.hype ?? 0;
+      ctx.fillStyle = token.card;
+      ctx.fillRect(hudX, hudY, barW, barH);
+      ctx.fillStyle = accent;
+      ctx.fillRect(hudX, hudY, barW * Math.max(0.02, hype), barH);
+      ctx.fillStyle = token.textDim;
+      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillText('Crowd', hudX + barW + pad(token, 0.5), hudY + barH);
     }
 
     if (leadDriver !== undefined) {
@@ -884,7 +932,7 @@ export class RaceScene implements Scene {
   private drawPedalTints(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
     const throttle = this.g.input.throttle;
     const brake = this.g.input.brake;
-    if (throttle <= 0 && brake <= 0) return;
+    const shifting = this.g.input.isKeyDown('ShiftLeft') || this.g.input.isKeyDown('ShiftRight');
 
     ctx.save();
     if (brake > 0) {
@@ -895,12 +943,26 @@ export class RaceScene implements Scene {
       ctx.fillStyle = `rgba(74,222,128,${0.08 + throttle * 0.12})`;
       ctx.fillRect(w * 0.5, 0, w * 0.5, h);
     }
+    // Bottom-center SHIFT pad.
+    const sx = w * 0.36;
+    const sy = h * 0.78;
+    const sw = w * 0.28;
+    const sh = h * 0.22;
+    ctx.fillStyle = shifting ? 'rgba(250,204,21,0.28)' : 'rgba(250,204,21,0.1)';
+    ctx.fillRect(sx, sy, sw, sh);
+    ctx.strokeStyle = 'rgba(250,204,21,0.45)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
+
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
     ctx.fillStyle = token.textDim;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillText('BRAKE', w * 0.25, h - token.safe.bottom - pad(token, 0.5));
     ctx.fillText('GO', w * 0.75, h - token.safe.bottom - pad(token, 0.5));
+    ctx.fillStyle = shifting ? '#facc15' : token.textDim;
+    ctx.textBaseline = 'middle';
+    ctx.fillText('SHIFT', w * 0.5, sy + sh * 0.55);
     ctx.restore();
   }
 

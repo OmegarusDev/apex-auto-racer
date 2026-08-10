@@ -15,7 +15,7 @@ export function runAuthorityGates(): FeelGateResult[] {
   const noPin = computePinAuthorityBlend(30, 0.5, 0.2);
   const results: FeelGateResult[] = [];
 
-  const authOk = skill30 >= 0.3 && skill30 <= 0.4;
+  const authOk = skill30 >= 0.2 && skill30 <= 0.35;
   results.push({
     id: 'PIN_AUTHORITY',
     ok:

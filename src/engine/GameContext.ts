@@ -78,7 +78,8 @@ export class GameContext {
 
   constructor(canvas: HTMLCanvasElement, audio?: AudioEngine) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d');
+    // alpha:true so the WebGL world canvas can show through during races.
+    const ctx = canvas.getContext('2d', { alpha: true });
     if (ctx === null) {
       throw new Error('2D canvas context unavailable');
     }

@@ -40,7 +40,7 @@
           radial-gradient(ellipse 50% 40% at 90% 90%, rgba(18, 40, 48, 0.35), transparent 50%),
           #0b0d0c;
         color: #f2efe6;
-        z-index: 2;
+        z-index: 3;
         pointer-events: none;
         transition: opacity 0.35s ease;
       }
@@ -58,6 +58,24 @@
         text-indent: 0.42em;
         margin-top: 0.55rem;
       }
+      /* WebGL world under HUD */
+      #world {
+        position: fixed;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+        max-height: -webkit-fill-available;
+        z-index: 0;
+        background: #0b0d0c;
+        pointer-events: none;
+        visibility: hidden;
+      }
+      #world.is-live {
+        visibility: visible;
+      }
+      /* Canvas2D HUD / menus — transparent so the GL world shows through in race */
       #game {
         position: fixed;
         inset: 0;
@@ -67,7 +85,7 @@
         height: 100dvh;
         max-height: -webkit-fill-available;
         z-index: 1;
-        background: #0b0d0c;
+        background: transparent;
       }
     </style>
   </head>
@@ -76,6 +94,7 @@
       <span class="mark">APEX</span>
       <span class="sub">AUTO-RACER</span>
     </div>
+    <canvas id="world" aria-hidden="true"></canvas>
     <canvas id="game"></canvas>
     <script type="module" src="/src/main.ts"></script>
   </body>

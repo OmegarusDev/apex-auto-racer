@@ -197,12 +197,24 @@ export class RaceScene implements Scene {
 
       const raceConfig = buildRaceConfig(state, this.launch);
       this.director = new RaceDirector(raceConfig);
+      const worldEl = document.querySelector<HTMLCanvasElement>('#world');
+      if (worldEl !== null) {
+        worldEl.classList.add('is-live');
+        this.view.attachWorldCanvas(worldEl);
+      }
       this.view.prepare({
         track: this.director.track,
         discipline: this.launch.discipline,
         night: this.director.night,
         rain: this.director.rain,
       });
+      if (worldEl !== null) {
+        this.view.resizeWorld(
+          this.g.canvas.clientWidth,
+          this.g.canvas.clientHeight,
+          Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap),
+        );
+      }
       this.g.audio.setDiscipline?.(this.launch.discipline);
       this.g.audio.setRain(this.director.rain);
 
@@ -233,6 +245,8 @@ export class RaceScene implements Scene {
     this.g.input.setMode('menu');
     this.g.input.setUiCapture(false);
     this.g.input.setRaceChrome(null);
+    this.view.clearWorld();
+    document.querySelector<HTMLCanvasElement>('#world')?.classList.remove('is-live');
     if (this.g.audio.silenceRace) {
       this.g.audio.silenceRace();
     } else {

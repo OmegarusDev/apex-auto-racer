@@ -71,12 +71,12 @@ Change protocol:
 Three layers — keep new work in the right one:
 
 1. **Race sim** (seeded, headless) — `RaceDirector` facade composing Physics (`Vehicle`), Gearbox, Brain, Track, Modifiers, **EntertainmentMeter**, and the event ring. No Web Audio / DOM on the hot path.
-2. **Presentation** — `AudioEngine`, Render (Camera/VectorRenderer/Particles), **menu shell** (`layoutShell` / `ContentScroller` / safe `drawHeader` across Garage/Campaign/Team/Tuning/Options/Results), Race HUD + fantasy chrome (`RaceFantasyHud`). Consume a per-frame snapshot (`AudioTelemetry` + event cursor + hype). Never write into physics except via Input pedals.
+2. **Presentation** — `AudioEngine`, **Apex WebGL engine** (`src/graphics/engine/*` via `RaceView`), Canvas2D HUD/menus, Race fantasy chrome (`RaceFantasyHud`). Dual canvas: `#world` (WebGL) under `#game` (HUD). Consume a per-frame snapshot (`RaceFrameView` / `AudioTelemetry`). Never write into physics except via Input pedals. Canvas2D blit path remains as WebGL fallback.
 3. **Career** (between races) — payouts/XP/objectives/tournaments/garage mutate `GameState` only after the flag.
 
-**Presentation bus:** RaceScene builds telemetry + hype from the director; audio/HUD/particles read only that.
+**Presentation bus:** RaceScene builds telemetry + hype from the director; audio/HUD/engine read only that.
 
-**Deferred extracts:** full `race/*` split; Economy / Tournament / Garage domain modules; DisciplineProfiles; CameraDirector; NativeShell. Audio/Entertainment land first along these seams.
+**Deferred extracts:** full `race/*` split; Economy / Tournament / Garage domain modules; DisciplineProfiles; CameraDirector; NativeShell; menu GL theatre. Audio/Entertainment land first along these seams.
 
 ## Deferred
 

@@ -1,3 +1,8 @@
+/**
+ * Race presentation facade.
+ * Prefers the Apex WebGL engine for the world pass; Canvas2D remains HUD + fallback.
+ */
+
 import { PHYSICS } from '../data/physics';
 import type { DisciplineId } from '../data/disciplines';
 import type { VehicleParts } from '../engine/types';
@@ -5,8 +10,10 @@ import { emptyVehicleParts } from '../engine/types';
 import { Camera, type CameraTransform } from './Camera';
 import { PX_PER_M, writeWorldToScreen } from './coords';
 import { drawSlotCarMesh, drawSlotCarShadow } from './car/CarPainter';
+import { ApexRenderer } from './engine/ApexRenderer';
 import { ParticleSystem } from './fx/ParticleSystem';
 import type { TrackPalette } from './materials';
+import { buildTrackPalette } from './materials';
 import { bakeTrack, type BakeMeta, type MinimapPoint } from './track/TrackBaker';
 import { blitNightVignette, blitTrack, buildNightVignette } from './track/TrackBlit';
 import { writeCarWorld } from './TrackSampler';
@@ -27,6 +34,9 @@ export class RaceView {
   readonly camera = new Camera();
   readonly particles = new ParticleSystem();
 
+  private engine: ApexRenderer | null = null;
+  private useEngine = false;
+
   private baked: HTMLCanvasElement | null = null;
   private bakeMeta: BakeMeta | null = null;
   private minimapPoints: MinimapPoint[] = [];
@@ -36,17 +46,56 @@ export class RaceView {
   private discipline: DisciplineId | null = null;
   private palette: TrackPalette | null = null;
 
+  /** Bind / create the WebGL world engine on the #world canvas. */
+  attachWorldCanvas(canvas: HTMLCanvasElement | null): void {
+    if (this.engine !== null) return;
+    this.engine = ApexRenderer.tryCreate(canvas);
+  }
+
   prepare(opts: RaceViewPrepareOpts): void {
     this.track = opts.track;
     this.discipline = opts.discipline;
-    const result = bakeTrack(opts.track, opts.discipline, opts.night, opts.rain);
-    this.baked = result.canvas;
-    this.bakeMeta = result.meta;
-    this.minimapPoints = result.minimap;
-    this.palette = result.palette;
+    this.palette = buildTrackPalette(opts.discipline, opts.night, opts.rain);
+
+    if (this.engine === null) {
+      const el = typeof document !== 'undefined'
+        ? document.querySelector<HTMLCanvasElement>('#world')
+        : null;
+      this.attachWorldCanvas(el);
+    }
+
+    this.useEngine = this.engine !== null;
+    if (this.engine !== null) {
+      this.engine.prepare({
+        track: opts.track,
+        palette: this.palette,
+        night: opts.night,
+        rain: opts.rain,
+      });
+      this.minimapPoints = this.engine.getMinimapPoints();
+      this.baked = null;
+      this.bakeMeta = null;
+    } else {
+      const result = bakeTrack(opts.track, opts.discipline, opts.night, opts.rain);
+      this.baked = result.canvas;
+      this.bakeMeta = result.meta;
+      this.minimapPoints = result.minimap;
+      this.palette = result.palette;
+    }
+
     this.nightScreenOverlay = null;
     this.nightScreenKey = '';
     this.particles.setRaining(opts.rain);
+  }
+
+  /** Resize the GL surface (CSS pixels + DPR). */
+  resizeWorld(cssW: number, cssH: number, dpr: number): void {
+    this.engine?.resize(cssW, cssH, dpr);
+  }
+
+  /** Clear the world canvas when leaving race (menus own the HUD canvas). */
+  clearWorld(): void {
+    this.engine?.clear();
   }
 
   getTrack(): TrackView | null {
@@ -55,6 +104,11 @@ export class RaceView {
 
   getPalette(): TrackPalette | null {
     return this.palette;
+  }
+
+  /** True when the WebGL engine is driving the race world. */
+  get usingEngine(): boolean {
+    return this.useEngine;
   }
 
   writeCamera(out: CameraTransform = camScratch): CameraTransform {
@@ -81,6 +135,10 @@ export class RaceView {
   }
 
   applyFx(impulses: readonly FxImpulse[]): void {
+    if (this.useEngine && this.engine !== null) {
+      this.engine.applyFx(impulses);
+      return;
+    }
     for (const fx of impulses) {
       switch (fx.kind) {
         case 'skid':
@@ -100,10 +158,22 @@ export class RaceView {
   }
 
   updateFx(dt: number): void {
+    if (this.useEngine && this.engine !== null) {
+      this.engine.updateFx(dt);
+      return;
+    }
     this.particles.update(dt);
   }
 
   draw(ctx: CanvasRenderingContext2D, frame: RaceFrameView): void {
+    if (this.useEngine && this.engine !== null) {
+      this.engine.resize(frame.screenW, frame.screenH, Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap));
+      this.engine.render(frame);
+      // HUD canvas stays transparent over the GL world.
+      ctx.clearRect(0, 0, frame.screenW, frame.screenH);
+      return;
+    }
+
     if (!this.baked || !this.bakeMeta) return;
     const { camera, screenW, screenH } = frame;
 
@@ -141,10 +211,10 @@ export class RaceView {
     if (this.minimapPoints.length < 2 || !this.track) return;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(10,10,12,0.78)';
-    ctx.strokeStyle = 'rgba(42,42,50,0.95)';
-    ctx.lineWidth = 1;
-    roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, 6);
+    ctx.fillStyle = 'rgba(11,13,12,0.82)';
+    ctx.strokeStyle = 'rgba(46,54,48,0.95)';
+    ctx.lineWidth = 1.5;
+    roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, 4);
     ctx.fill();
     ctx.stroke();
 
@@ -154,7 +224,6 @@ export class RaceView {
     const iw = rect.w - pad * 2;
     const ih = rect.h - pad * 2;
 
-    // Letterbox aspect-correct polyline into the square panel.
     const b = this.track.bounds;
     const spanX = Math.max(b.maxX - b.minX, 1);
     const spanY = Math.max(b.maxY - b.minY, 1);
@@ -181,7 +250,7 @@ export class RaceView {
     ctx.closePath();
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fill();
-    ctx.strokeStyle = this.palette?.accentDim ?? '#0e7490';
+    ctx.strokeStyle = this.palette?.accentDim ?? '#a88410';
     ctx.lineWidth = 2;
     ctx.stroke();
 
@@ -199,7 +268,6 @@ export class RaceView {
     ctx.restore();
   }
 
-  /** Sample car world pose onto track (for FX that need live positions). */
   sampleCarWorld(
     s: number,
     l: number,

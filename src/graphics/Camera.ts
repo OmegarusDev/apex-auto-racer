@@ -75,7 +75,7 @@ export class Camera {
       this.targetX = worldPos.x;
       this.targetY = worldPos.y;
     }
-    this.targetZoom = clamp(0.78 - 0.16 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
+    this.targetZoom = clamp(0.68 - 0.18 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
   }
 
   update(dt: number): void {

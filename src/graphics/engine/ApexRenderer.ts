@@ -334,9 +334,9 @@ export class ApexRenderer {
 
     const zoom = Math.max(0.35, cam.zoom);
     const countdown = frame.countdown !== null;
-    // Closer tabletop than the original pull-back — phones need readable slot cars.
-    const elev = (58 / zoom) * (countdown ? 1.18 : 1);
-    const dist = (42 / zoom) * (countdown ? 1.12 : 1);
+    // Tabletop pull-back — keep the track readable; car scale handles phone size.
+    const elev = (82 / zoom) * (countdown ? 1.2 : 1);
+    const dist = (58 / zoom) * (countdown ? 1.15 : 1);
 
     // Fixed SE tabletop azimuth in engine XZ (never follows car tangent).
     const azX = 0.58;
@@ -348,7 +348,7 @@ export class ApexRenderer {
       look[2] + (azZ / azLen) * dist,
     ];
 
-    mat4Perspective(this.proj, (44 * Math.PI) / 180, aspect, 0.8, 560);
+    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.0, 560);
     mat4LookAt(this.view, eye, look, [0, 1, 0]);
     mat4Multiply(this.viewProj, this.proj, this.view);
 
@@ -387,9 +387,9 @@ export class ApexRenderer {
   private placeCar(worldX: number, worldY: number, heading: number, lift: number): void {
     // Engine Z = -worldY, so yaw must match Canvas2D's rotate(-heading).
     // Local +X is car forward (same as CarPainter length axis).
-    // Presentation scale: physics boxes are true-to-meter but too small under
-    // the tabletop camera (esp. phones) — boost so slot cars read as toys.
-    const s = 2.75;
+    // Mild presentation scale so true-meter boxes still read as slot toys
+    // after color fix (was 2.75 — far too large with a closer cam).
+    const s = 1.35;
     mat4Identity(this.tmp);
     mat4RotateY(this.model, this.tmp, -heading);
     mat4Scale(this.tmp, this.model, s, s, s);

@@ -92,12 +92,12 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
   const mb = new MeshBuilder();
   const samples = sampleClosed(track, Math.max(120, track.nodes.length * 2));
 
-  // Neutral bases — shader noise owns the look.
-  const tarmacBase = [0.16, 0.16, 0.17] as const;
-  const dirtBase = [0.3, 0.24, 0.16] as const;
-  const grassBase = [0.2, 0.32, 0.14] as const;
-  const grooveBase = [0.08, 0.08, 0.09] as const;
-  const concreteBase = [0.4, 0.39, 0.36] as const;
+  // Brighter mesh bases (shader fuzz owns detail; these help fallback tinting).
+  const tarmacBase = [0.4, 0.4, 0.42] as const;
+  const dirtBase = [0.7, 0.58, 0.38] as const;
+  const grassBase = [0.35, 0.62, 0.28] as const;
+  const grooveBase = [0.25, 0.25, 0.26] as const;
+  const concreteBase = [0.65, 0.64, 0.6] as const;
 
   const leftAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const rightAsphalt: Array<{ x: number; y: number; z: number }> = [];
@@ -111,10 +111,10 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
   const rightGrassOuter: Array<{ x: number; y: number; z: number }> = [];
 
   const grooveHalf = 0.55;
-  const grassExtra = 14;
+  const grassExtra = 18;
 
   for (const s of samples) {
-    const dirtW = Math.max(s.runoff, 2.2);
+    const dirtW = Math.max(s.runoff * 1.15, 3.2);
     leftAsphalt.push({
       x: s.x + s.nx * s.halfW,
       y: 0.02,

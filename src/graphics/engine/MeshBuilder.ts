@@ -146,8 +146,8 @@ export class MeshBuilder {
   ): void {
     const n = Math.min(left.length, right.length);
     if (n < 2) return;
-    const red = [0.72, 0.12, 0.1];
-    const white = [0.9, 0.88, 0.82];
+    const red = [0.85, 0.18, 0.14];
+    const white = [0.96, 0.94, 0.9];
     for (let i = 0; i < n - 1; i++) {
       const stripe = i % 2 === 0 ? red : white;
       const l0 = left[i]!;

@@ -136,7 +136,7 @@ export class ApexRenderer {
   clear(): void {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.42, 0.48, 0.42, 1);
+    gl.clearColor(0.62, 0.72, 0.78, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   }
 
@@ -246,7 +246,7 @@ export class ApexRenderer {
     const h = this.canvas.height;
     if (w < 2 || h < 2 || !this.trackMesh || !this.carMesh) return;
 
-    const bg = this.night ? [0.04, 0.045, 0.06] : [0.42, 0.48, 0.42];
+    const bg = this.night ? [0.08, 0.1, 0.14] : [0.62, 0.72, 0.78];
     gl.viewport(0, 0, w, h);
     gl.clearColor(bg[0]!, bg[1]!, bg[2]!, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -276,13 +276,15 @@ export class ApexRenderer {
       this.placeCar(car.worldX, car.worldY, car.heading, lift);
       const tint = hexToRgb(car.color);
       if (car.isPlayer) {
-        tint[0] = Math.min(1, tint[0]! * 1.08 + 0.05);
-        tint[1] = Math.min(1, tint[1]! * 1.05 + 0.04);
+        tint[0] = Math.min(1, tint[0]! * 1.12 + 0.06);
+        tint[1] = Math.min(1, tint[1]! * 1.08 + 0.05);
+        tint[2] = Math.min(1, tint[2]! * 1.05 + 0.04);
       }
-      const cond = Math.max(0.45, car.condition);
-      tint[0]! *= 0.55 + cond * 0.45;
-      tint[1]! *= 0.55 + cond * 0.45;
-      tint[2]! *= 0.55 + cond * 0.45;
+      // Keep cars colourful — condition only gently desaturates
+      const cond = Math.max(0.65, car.condition);
+      tint[0]! = tint[0]! * (0.7 + cond * 0.35);
+      tint[1]! = tint[1]! * (0.7 + cond * 0.35);
+      tint[2]! = tint[2]! * (0.7 + cond * 0.35);
       this.drawMesh(this.carMesh, tint, 1);
     }
 
@@ -335,18 +337,20 @@ export class ApexRenderer {
     const gl = this.gl;
     const p = this.litProg;
     const night = frame.night ? 1 : 0;
-    // Soft late-afternoon sun — warm, not neon
-    gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.35, 0.88, 0.28);
+    // High noon-ish fill — bright tabletop, not a cave
+    gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.25, 0.95, 0.2);
     if (frame.night) {
-      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.42, 0.48, 0.62);
-      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.1, 0.12, 0.16);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.05, 0.06, 0.09);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 1.1);
+      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.7, 0.78, 0.95);
+      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.28, 0.32, 0.4);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.1, 0.12, 0.18);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.55);
+      gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.15);
     } else {
-      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.92, 0.88, 0.78);
-      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.28, 0.3, 0.26);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.55, 0.6, 0.52);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.45);
+      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 1.15, 1.1, 1.0);
+      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.48, 0.5, 0.46);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.72, 0.8, 0.85);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.22);
+      gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.25);
     }
     gl.uniform1f(gl.getUniformLocation(p, 'uNight'), night);
     gl.uniform3f(gl.getUniformLocation(p, 'uCameraPos'), this.eyeX, this.eyeY, this.eyeZ);

@@ -407,18 +407,8 @@ export class RaceScene implements Scene {
     }
 
     if (this.paused) {
-      layoutModalButtons(this.pauseModal, {
-        pointerX: this.g.input.pointerX,
-        pointerY: this.g.input.pointerY,
-        pointerDown: this.g.input.peekClick() !== null,
-        pointerClicked: this.g.input.consumeClick() !== null,
-        dt: 0,
-        w,
-        h,
-        token,
-        accent,
-      });
-      drawModal(ctx, this.pauseModal, {
+      // Draw-only — handlePauseInput consumes clicks in update().
+      const pauseUi = {
         pointerX: this.g.input.pointerX,
         pointerY: this.g.input.pointerY,
         pointerDown: false,
@@ -426,6 +416,12 @@ export class RaceScene implements Scene {
         dt: 0,
         w,
         h,
+        token,
+        accent,
+      };
+      layoutModalButtons(this.pauseModal, pauseUi);
+      drawModal(ctx, this.pauseModal, {
+        ...pauseUi,
         token,
         accent,
       });
@@ -936,8 +932,11 @@ export class RaceScene implements Scene {
 
     if (!state.onboarding.shownPedalControls) {
       this.showHint('Enter = gas · Space = brake · SHIFT = upshift', 'shownPedalControls');
-    } else if (!state.onboarding.shownBrakeHint) {
-      this.showHint('Touch: right = gas, left = brake · SHIFT = up · lift to downshift', 'shownBrakeHint');
+    } else if (!state.onboarding.shownTouchControls) {
+      this.showHint(
+        'Touch: right = gas, left = brake · SHIFT = up · lift to downshift',
+        'shownTouchControls',
+      );
     }
   }
 
@@ -1210,7 +1209,7 @@ export class RaceScene implements Scene {
       `rgba(36,30,10,${0.7 + shiftPulse})`,
       '240,196,26',
       shiftAmt,
-      this.shiftCueArmed ? 'SHIFT' : 'SHIFT',
+      this.shiftCueArmed ? 'SHIFT!' : 'SHIFT',
       shifting || this.shiftCueArmed ? '#f0c41a' : token.textMuted,
     );
   }
@@ -1317,7 +1316,9 @@ export class RaceScene implements Scene {
     const boxW = Math.min(w - pad(token, 4), pad(token, 36));
     const boxH = pad(token, 4);
     const x = (w - boxW) * 0.5;
-    const y = h * 0.72;
+    // Sit above the pedal deck (and driver chip), not on top of BRAKE/GAS/SHIFT.
+    const deckTop = this.chrome?.deckTop ?? h * 0.74;
+    const y = Math.max(token.safe.top + pad(token, 8), deckTop - boxH - pad(token, 1.5));
     ctx.fillStyle = token.overlay;
     ctx.beginPath();
     ctx.roundRect(x, y, boxW, boxH, pad(token, 0.75));

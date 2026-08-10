@@ -235,10 +235,12 @@ export class TitleScene implements Scene {
     drawButton(ctx, quickRaceBtn, ui);
     drawButton(ctx, optionsBtn, ui);
 
-    handleButton(continueBtn, ui);
-    handleButton(newGameBtn, ui);
-    handleButton(quickRaceBtn, ui);
-    handleButton(optionsBtn, ui);
+    if (!this.modal.open) {
+      handleButton(continueBtn, ui);
+      handleButton(newGameBtn, ui);
+      handleButton(quickRaceBtn, ui);
+      handleButton(optionsBtn, ui);
+    }
 
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);

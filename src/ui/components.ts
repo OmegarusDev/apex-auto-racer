@@ -976,14 +976,7 @@ export function drawDriverSpendPanel(
   const plusSize = ensureMinTouch(pad(token, 4.5), token);
   const rowGap = pad(token, 0.5);
   const stats: DriverStatKey[] = ['skill', 'bravery', 'focus', 'determination'];
-  const contentH =
-    pad(token, 2) +
-    token.fontTitle +
-    pad(token, 0.5) +
-    token.fontCaption +
-    pad(token) +
-    stats.length * (barH + rowGap) +
-    pad(token);
+  const contentH = driverSpendPanelHeight(panel, token);
 
   drawCard(ctx, { x: panel.x, y: panel.y, w: panel.w, h: contentH }, ui);
 

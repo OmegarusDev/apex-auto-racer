@@ -169,6 +169,8 @@ export interface OnboardingFlags {
   shownAuthorityHint?: boolean;
   shownShiftCue?: boolean;
   shownPegHint?: boolean;
+  /** Touch pedal deck tip — separate from corner brake coaching. */
+  shownTouchControls?: boolean;
 }
 
 export interface GameState {

@@ -197,12 +197,12 @@ export class TuningScene implements Scene {
       const atMax = tier >= BALANCE.maxPartTier;
 
       drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui);
-      const localY = y + view.y - this.scroller.scroll.offset;
+      // lui is content-local (0..view.w, content y) — don't mix with view screen coords.
       if (
-        lui.pointerX >= view.x &&
-        lui.pointerX <= view.x + view.w &&
-        lui.pointerY >= localY &&
-        lui.pointerY <= localY + rowH
+        lui.pointerX >= 0 &&
+        lui.pointerX <= view.w &&
+        lui.pointerY >= y &&
+        lui.pointerY <= y + rowH
       ) {
         this.previewPart = part.id;
       }

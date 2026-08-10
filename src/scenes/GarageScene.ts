@@ -40,6 +40,9 @@ export class GarageScene implements Scene {
   private disciplineIndex = 0;
   private scroller = new ContentScroller();
   private detachWheel: (() => void) | null = null;
+  private swipeStartX: number | null = null;
+  private swipeStartY: number | null = null;
+  private swipeArmed = false;
 
   enter(): void {
     onSceneEnter();
@@ -81,14 +84,25 @@ export class GarageScene implements Scene {
     const state = g.state;
     if (state === null) return;
 
-    const preClick = g.input.peekClick();
     let discipline = this.currentDiscipline();
     let accent = disciplineAccent(discipline);
     const { ui, token } = buildUi(w, h, 0, accent);
     let swipeHandled = false;
-    if (preClick !== null && ui.pointerClicked) {
-      const dx = g.input.pointerX - preClick.x;
-      if (Math.abs(dx) > Math.max(48, token.touchMin)) {
+    // Horizontal swipe — track press→release (same-frame dx was always ~0).
+    if (ui.pointerDown) {
+      if (this.swipeStartX === null) {
+        this.swipeStartX = ui.pointerX;
+        this.swipeStartY = ui.pointerY;
+        this.swipeArmed = true;
+      }
+    } else if (this.swipeArmed && this.swipeStartX !== null && this.swipeStartY !== null) {
+      const dx = ui.pointerX - this.swipeStartX;
+      const dy = ui.pointerY - this.swipeStartY;
+      if (
+        Math.abs(dx) > Math.max(48, token.touchMin) &&
+        Math.abs(dx) > Math.abs(dy) * 1.25 &&
+        !this.scroller.isScrolling
+      ) {
         if (dx < 0) this.nextDiscipline();
         else this.prevDiscipline();
         swipeHandled = true;
@@ -96,6 +110,9 @@ export class GarageScene implements Scene {
         accent = disciplineAccent(discipline);
         ui.accent = accent;
       }
+      this.swipeStartX = null;
+      this.swipeStartY = null;
+      this.swipeArmed = false;
     }
 
     const vehicle = state.vehicles[discipline];

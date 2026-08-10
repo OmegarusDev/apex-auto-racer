@@ -83,6 +83,9 @@ export class InputController {
 
     if (this.mode === 'menu' || this.uiCapture) {
       this.pendingClick = { x, y, consumed: false };
+      // Keep the pointer active so sliders / drag-scroll see pointerDown
+      // across frames (pendingClick alone is edge-consumed in buildUi).
+      this.pointers.set(ev.pointerId, { id: ev.pointerId, x, y, active: true, side: 'none' });
       return;
     }
 
@@ -109,12 +112,14 @@ export class InputController {
     if (p !== undefined) {
       p.x = x;
       p.y = y;
-      if (this.hitDeadZone(x, y)) {
-        p.side = 'none';
-      } else {
-        p.side = this.sideForPoint(x, y);
+      if (this.mode === 'race' && !this.uiCapture) {
+        if (this.hitDeadZone(x, y)) {
+          p.side = 'none';
+        } else {
+          p.side = this.sideForPoint(x, y);
+        }
+        this.syncPedalTargets();
       }
-      this.syncPedalTargets();
     }
   };
 
@@ -245,6 +250,11 @@ export class InputController {
 
   getActivePointers(): PointerSample[] {
     return [...this.pointers.values()];
+  }
+
+  /** True while any pointer is held (menus need this for sliders / scroll). */
+  isPointerDown(): boolean {
+    return this.pointers.size > 0;
   }
 
   private hitDeadZone(x: number, y: number): boolean {

@@ -10,6 +10,8 @@ import {
   handleHeader,
   drawRow,
   drawSectionTitle,
+  drawButton,
+  handleButton,
   drawDriverSpendPanel,
   handleDriverSpendPanel,
   drawUpgradePanel,
@@ -21,6 +23,7 @@ import {
   drawFooterActions,
   handleFooterActions,
   pad,
+  ensureMinTouch,
   ToastManager,
   type ButtonDef,
   type UiContext,
@@ -283,6 +286,10 @@ export class ResultsScene implements Scene {
     if (grant === undefined) return 0;
     const driver = findDriver(state, grant.driverId);
     if (driver === undefined) return 0;
+    const navH =
+      grants.length > 1
+        ? ensureMinTouch(pad(ui.token, 4.5), ui.token) + pad(ui.token, 0.75)
+        : 0;
     const spendH = driverSpendPanelHeight(
       { x: 0, y: 0, w: 100, driver: driverSpendData(driver) },
       ui.token,
@@ -300,7 +307,7 @@ export class ResultsScene implements Scene {
       },
       ui.token,
     );
-    return spendH + pad(ui.token, 1.5) + upgradeH;
+    return navH + spendH + pad(ui.token, 1.5) + upgradeH;
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -351,7 +358,7 @@ export class ResultsScene implements Scene {
       y = this.drawPayout(ctx, 0, y, view.w, lui);
       y += drawSectionTitle(ctx, 0, y, 'Invest', lui);
       y += pad(token, 0.5);
-      y = this.drawXpSection(ctx, 0, y, view.w, lui, state);
+      y = this.drawXpSection(ctx, 0, y, view.w, lui, state, true);
       this.scroller.end(ctx);
 
       const hasSeriesNext = this.payload.nextRaceConfig !== undefined;
@@ -417,7 +424,8 @@ export class ResultsScene implements Scene {
       } else if (this.phase === 'payout') {
         y = this.drawPayout(ctx, contentX, y, contentW, ui);
       } else if (this.phase === 'xp') {
-        y = this.drawXpSection(ctx, contentX, y, contentW, ui, state);
+        // Theatre beat — draw invest summary read-only; taps advance the phase.
+        y = this.drawXpSection(ctx, contentX, y, contentW, ui, state, false);
       }
 
       ctx.save();
@@ -595,6 +603,7 @@ export class ResultsScene implements Scene {
     w: number,
     ui: UiContext,
     state: NonNullable<ReturnType<typeof getGameContext>['state']>,
+    interactive: boolean,
   ): number {
     const grants = this.payload.driverXp;
     if (grants.length === 0) return y;
@@ -602,6 +611,51 @@ export class ResultsScene implements Scene {
     if (grant === undefined) return y;
     const driver = findDriver(state, grant.driverId);
     if (driver === undefined) return y;
+
+    const { token } = ui;
+    if (grants.length > 1) {
+      const navH = ensureMinTouch(pad(token, 4.5), token);
+      const navW = pad(token, 5);
+      const prevBtn: ButtonDef = {
+        x,
+        y,
+        w: navW,
+        h: navH,
+        label: '‹',
+        onClick: () => {
+          this.selectedDriverIdx =
+            (this.selectedDriverIdx - 1 + grants.length) % grants.length;
+        },
+      };
+      const nextBtn: ButtonDef = {
+        x: x + w - navW,
+        y,
+        w: navW,
+        h: navH,
+        label: '›',
+        onClick: () => {
+          this.selectedDriverIdx = (this.selectedDriverIdx + 1) % grants.length;
+        },
+      };
+      ctx.save();
+      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.textMuted;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        `${this.selectedDriverIdx + 1} / ${grants.length}`,
+        x + w * 0.5,
+        y + navH * 0.5,
+      );
+      ctx.restore();
+      drawButton(ctx, prevBtn, ui);
+      drawButton(ctx, nextBtn, ui);
+      if (interactive) {
+        handleButton(prevBtn, ui);
+        handleButton(nextBtn, ui);
+      }
+      y += navH + pad(token, 0.75);
+    }
 
     const spendPanel = {
       x,
@@ -613,7 +667,7 @@ export class ResultsScene implements Scene {
       },
     };
     drawDriverSpendPanel(ctx, spendPanel, ui);
-    handleDriverSpendPanel(spendPanel, ui);
+    if (interactive) handleDriverSpendPanel(spendPanel, ui);
     y += driverSpendPanelHeight(spendPanel, ui.token) + pad(ui.token, 1.5);
 
     const vehicle = state.vehicles[this.payload.discipline];
@@ -662,7 +716,7 @@ export class ResultsScene implements Scene {
       },
     };
     drawUpgradePanel(ctx, upgradePanel, ui);
-    handleUpgradePanel(upgradePanel, ui);
+    if (interactive) handleUpgradePanel(upgradePanel, ui);
     return y + upgradePanelHeight(upgradePanel, ui.token);
   }
 }

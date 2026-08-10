@@ -573,6 +573,15 @@ export class CampaignScene implements Scene {
         };
         drawButton(ctx, enterBtn, lui);
         if (interactive) handleButton(enterBtn, lui);
+      } else if (!isActive && progress !== null) {
+        // Another series is already underway — don't leave a blank action strip.
+        ctx.save();
+        ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+        ctx.fillStyle = token.textDim;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Finish current series', view.w - pad(token, 1.5), actionY + btnH * 0.5);
+        ctx.restore();
       }
 
       y += cardH + objGap;

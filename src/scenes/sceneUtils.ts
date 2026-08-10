@@ -195,7 +195,9 @@ export function buildUi(
     ui: {
       pointerX: g.input.pointerX,
       pointerY: g.input.pointerY,
-      pointerDown: g.input.peekClick() !== null || g.input.getActivePointers().length > 0,
+      // Held pointers only — peekClick is edge-consumed above and must not
+      // be the sole source of pointerDown (breaks sliders + drag-scroll).
+      pointerDown: g.input.isPointerDown(),
       pointerClicked: click !== null,
       dt,
       w,

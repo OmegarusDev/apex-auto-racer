@@ -245,6 +245,7 @@ export function createNewGame(rng: Rng, seed: number): GameState {
       shownAuthorityHint: false,
       shownShiftCue: false,
       shownPegHint: false,
+      shownTouchControls: false,
     },
     options: {
       volumes: { ...DEFAULT_VOLUMES },
@@ -279,6 +280,9 @@ function migrate(raw: unknown): GameState | null {
     }
     if (typeof obj.onboarding.shownPegHint !== 'boolean') {
       obj.onboarding.shownPegHint = false;
+    }
+    if (typeof obj.onboarding.shownTouchControls !== 'boolean') {
+      obj.onboarding.shownTouchControls = false;
     }
   }
 

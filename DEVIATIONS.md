@@ -25,9 +25,11 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 - `v_deslot` spans Skill × Focus × Bravery; player Authority splits brake assist (stronger at low Skill) vs throttle trim (rises with Skill). Pin-throttle nearly kills brake assist.
 - AI brakes for `vDriver` / live `v_deslot`, full throttle otherwise; draft hold then lateral pull-out. Soft bumper / grid-hold softens start rubs so the pack does not freeze at lights-out.
 - Wall recovery is soft (stun cuts drive; no lateral freeze/teleport). Track width / normals / kerbs match painted asphalt.
-- **Assisted gearbox:** Enter/gas, Space/brake; gears auto up/down. Shift = optional early upshift nudge (no miss slap). Mild torque/topFrac personality per discipline; soft gear-cap overshoot (`gearCapSoft`). Street = 5 gears + harder walls; Rally = 4 gears + longer deslot.
+- **Manual upshift gearbox:** Enter/gas, Space/brake; player Shift/tap upshifts (no miss slap). Auto downshift when off throttle in a low band. AI keeps assisted auto up/down. Mild torque/topFrac personality per discipline; soft gear-cap overshoot (`gearCapSoft`). Street = 5 gears + harder walls; Rally = 4 gears + longer deslot.
 - Opponent fields stratify weak→strong within the rank budget band (no dead stall-cars at novice).
-- **Quick Race challenge floor** — Quick Race uses `max(unlocked+1, 2)` into existing opponentStatRanges / opponentPartTiers (tournament keeps true rank). Field traits are cycled for style variety; part roll biases upgraded. Freeze arrays untouched.
+- **Quick Race challenge floor** — Quick Race uses `max(unlocked+1, 2)` into existing opponentStatRanges / opponentPartTiers (tournament keeps true rank). Field traits are cycled for style variety; part roll biases upgraded.
+- **Player pace (2026-08-10)** — `playerPaceMult` (0.5) scales live `vMax`/`aAccel` as well as `vDriver` (was targets-only, so pin-throttle still felt overpowered). Gate: `PLAYER_PACE_PHYS`. Opponent early bands + part tiers raised; field budget distribute no longer clamps away standout totals. `GEAR_ASSIST` asserts manual up / auto-down for the player.
+- **Manual upshift** — player must Shift/tap to upshift; auto downshift when throttle is low in the downshift band. AI keeps auto up/down.
 
 ### Driver stats → track (summary)
 
@@ -43,11 +45,12 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 
 Headless suite green after groove rethink + crash recovery + tyre warm-up:
 
-- start-validate: 0 stalls; pin P1 ≤3/8; playerPaceMult=0.5 (assisted gearbox — pin no longer self-sabotages via miss-shifts)
+- start-validate: 0 stalls; pin P1 ≤3/8; playerPaceMult=0.5 on vDriver+vMax+aAccel; manual player upshift
 - scalextric: finish 100%; deslots/car≈1.65; pin deslots; street walls
 - collision: residual overlap ≈0.03%
 - field: not always P1; finish 100%
 - smoke determinism + stack-smoke PASS
+- PLAYER_PACE_PHYS + GEAR_ASSIST (manual up) gates
 
 ## Feel freeze set (do not retune without a failing gate)
 

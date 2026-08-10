@@ -3,6 +3,7 @@ import { FORMATS } from '../../data/formats';
 import { PHYSICS } from '../../data/physics';
 import { RaceDirector, type RaceConfig } from '../RaceDirector';
 import { enterDeslot } from '../Vehicle';
+import { effectiveStats } from '../stats';
 import { interpolateAtSInto, type InterpolatedNode } from '../RacingLine';
 import { defaultVehicleSave, type Driver } from '../types';
 import { mulberry32 } from '../rng';
@@ -205,7 +206,7 @@ export function runDraftTowGate(): FeelGateResult {
   };
 }
 
-/** Player pin-throttle without Shift must still climb gears (assisted auto). */
+/** Player must Shift to climb gears; pin-throttle alone stays gear-capped. */
 export function runGearAssistGate(): FeelGateResult {
   const director = new RaceDirector(baseConfig(77_010));
   skipCountdown(director);
@@ -213,9 +214,6 @@ export function runGearAssistGate(): FeelGateResult {
   if (!player) {
     return { id: 'GEAR_ASSIST', ok: false, detail: 'no player' };
   }
-  player.gear = 1;
-  player.v = 6;
-  player.slotMode = 'groove';
   // Park on the lowest-kappa stretch so Authority corners don't eat the pull.
   let bestS = player.s;
   let bestK = 99;
@@ -226,18 +224,35 @@ export function runGearAssistGate(): FeelGateResult {
       bestS = n.s;
     }
   }
+
+  player.gear = 1;
+  player.v = 6;
+  player.slotMode = 'groove';
   player.s = bestS;
   player.l = 0;
-  const startGear = player.gear;
+  player.shiftCooldown = 0;
   for (let i = 0; i < 480; i++) {
     director.setPlayerPedals(1, 0, false);
     director.update(PHYSICS.dt);
   }
-  const ok = player.gear >= 3;
+  const noAutoUp = player.gear <= 2;
+
+  player.gear = 1;
+  player.v = 8;
+  player.s = bestS;
+  player.l = 0;
+  player.shiftCooldown = 0;
+  for (let i = 0; i < 480; i++) {
+    // Hold throttle and request upshift every step once band allows.
+    director.setPlayerPedals(1, 0, true);
+    director.update(PHYSICS.dt);
+  }
+  const manualClimb = player.gear >= 3;
+  const ok = noAutoUp && manualClimb;
   return {
     id: 'GEAR_ASSIST',
     ok,
-    detail: `gear ${startGear}→${player.gear} v=${player.v.toFixed(1)} kappaMin=${bestK.toFixed(4)}`,
+    detail: `noAuto=${noAutoUp} manualClimb=${manualClimb} gear=${player.gear} v=${player.v.toFixed(1)} kappaMin=${bestK.toFixed(4)}`,
   };
 }
 
@@ -267,6 +282,31 @@ export function runGearNoMissGate(): FeelGateResult {
   };
 }
 
+/** Player live vMax/aAccel must be paced — not only vDriver targets. */
+export function runPlayerPacePhysGate(): FeelGateResult {
+  const director = new RaceDirector(baseConfig(77_012));
+  const player = director.cars.find((c) => c.isPlayerControlled);
+  if (!player) {
+    return { id: 'PLAYER_PACE_PHYS', ok: false, detail: 'no player' };
+  }
+  const raw = effectiveStats(
+    'track',
+    defaultVehicleSave(BALANCE.startingPartTier).partTiers,
+    BALANCE.conditionMax,
+  );
+  const pace = BALANCE.playerPaceMult;
+  const expectV = raw.vMax * pace;
+  const expectA = raw.aAccel * pace;
+  const vOk = Math.abs(player.stats.vMax - expectV) < 0.05;
+  const aOk = Math.abs(player.stats.aAccel - expectA) < 0.05;
+  const belowRaw = player.stats.vMax < raw.vMax * 0.95;
+  return {
+    id: 'PLAYER_PACE_PHYS',
+    ok: vOk && aOk && belowRaw,
+    detail: `vMax=${player.stats.vMax.toFixed(2)} expect=${expectV.toFixed(2)} aAccel=${player.stats.aAccel.toFixed(2)} pace=${pace}`,
+  };
+}
+
 export function runHarnessGates(): FeelGateResult[] {
   void mulberry32;
   return [
@@ -275,5 +315,6 @@ export function runHarnessGates(): FeelGateResult[] {
     runDraftTowGate(),
     runGearAssistGate(),
     runGearNoMissGate(),
+    runPlayerPacePhysGate(),
   ];
 }

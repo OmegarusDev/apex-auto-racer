@@ -22,6 +22,7 @@ export type FeelGateId =
   | 'DRAFT_TOW'
   | 'GEAR_ASSIST'
   | 'GEAR_NO_MISS'
+  | 'PLAYER_PACE_PHYS'
   | 'STORY_INTENT_DENSITY'
   | 'STREET_WALL_BITE'
   | 'RALLY_DESLOT_LONG'

@@ -59,7 +59,7 @@ function runPackedRace(label: string, raceSeed: number, trackSeed: number) {
       if (pedals[i]!.time <= t) lo = i;
     }
     const sample = pedals[lo]!;
-    director.setPlayerPedals(sample.throttle, sample.brake);
+    director.setPlayerPedals(sample.throttle, sample.brake, sample.throttle >= 0.7);
     director.update(PHYSICS.dt * speedMult);
     simTime += PHYSICS.dt;
   }

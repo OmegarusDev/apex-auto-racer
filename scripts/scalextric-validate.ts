@@ -91,7 +91,10 @@ function runRace(
       if (pedalTrace[i]!.time <= t) lo = i;
     }
     const sample = pedalTrace[lo]!;
-    director.setPlayerPedals(sample.throttle, sample.brake);
+    // Manual gearbox: race traces must keep requesting upshifts or gear-cap
+    // soft-limits top speed (pin deslot / wall gates never fire).
+    const wantUp = sample.throttle >= 0.7;
+    director.setPlayerPedals(sample.throttle, sample.brake, wantUp);
     director.update(PHYSICS.dt * speedMult);
     simTime += PHYSICS.dt;
 

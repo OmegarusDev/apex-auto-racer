@@ -81,7 +81,7 @@ export function runStreetWallBiteGate(): FeelGateResult {
   player.wallHits = 0;
 
   for (let i = 0; i < 60; i++) {
-    director.setPlayerPedals(1, 0);
+    director.setPlayerPedals(1, 0, true);
     director.update(PHYSICS.dt);
   }
 

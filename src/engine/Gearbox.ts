@@ -3,20 +3,22 @@ import type { DisciplineId } from '../data/disciplines';
 
 /**
  * Assisted gearbox — Scalextric-light.
- * Auto up/down for everyone; player Shift is an early-upshift nudge (no miss slap).
+ * AI: auto up/down. Player: manual upshift (Shift/tap); auto downshift when off throttle.
  */
 export interface GearboxProfile {
   gearCount: number;
   /** Peak speed fraction of vMax for each gear (1-indexed arrays padded). */
   topFrac: number[];
-  /** Drive torque multiplier per gear (mild spread — assist keeps you near right gear). */
+  /** Drive torque multiplier per gear. */
   torque: number[];
-  /** BandFrac for assisted auto-upshift (player + AI). */
+  /** BandFrac for AI auto-upshift. */
   autoUpshiftBand: number;
-  /** Player Shift may upshift from this band (below auto). */
+  /** Player Shift may upshift from this band. */
   earlyUpshiftBand: number;
-  /** BandFrac below this → auto downshift. */
+  /** BandFrac below this → auto downshift (player only when throttle is low). */
   downshiftBand: number;
+  /** Player must be below this throttle to auto-downshift. */
+  playerDownshiftThrottle: number;
 }
 
 const TRACK_BOX: GearboxProfile = {
@@ -24,8 +26,9 @@ const TRACK_BOX: GearboxProfile = {
   topFrac: [0, 0.22, 0.38, 0.55, 0.72, 0.88, 1.0],
   torque: [0, 1.18, 1.1, 1.04, 0.98, 0.94, 0.9],
   autoUpshiftBand: 0.76,
-  earlyUpshiftBand: 0.52,
+  earlyUpshiftBand: 0.42,
   downshiftBand: 0.18,
+  playerDownshiftThrottle: 0.28,
 };
 
 const STREET_BOX: GearboxProfile = {
@@ -33,8 +36,9 @@ const STREET_BOX: GearboxProfile = {
   topFrac: [0, 0.28, 0.48, 0.68, 0.86, 1.0],
   torque: [0, 1.22, 1.1, 1.02, 0.94, 0.88],
   autoUpshiftBand: 0.74,
-  earlyUpshiftBand: 0.5,
+  earlyUpshiftBand: 0.4,
   downshiftBand: 0.16,
+  playerDownshiftThrottle: 0.28,
 };
 
 const RALLY_BOX: GearboxProfile = {
@@ -42,8 +46,9 @@ const RALLY_BOX: GearboxProfile = {
   topFrac: [0, 0.32, 0.58, 0.8, 1.0],
   torque: [0, 1.25, 1.08, 0.98, 0.9],
   autoUpshiftBand: 0.72,
-  earlyUpshiftBand: 0.48,
+  earlyUpshiftBand: 0.38,
   downshiftBand: 0.14,
+  playerDownshiftThrottle: 0.3,
 };
 
 export function gearboxFor(discipline: DisciplineId): GearboxProfile {

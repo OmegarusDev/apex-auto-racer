@@ -45,6 +45,9 @@ function pickUniqueName(rng: Rng, used: Set<string>): string {
 }
 
 function distributeBudget(rng: Rng, total: number): [number, number, number, number] {
+  // Cap at 4×100 — without this, uneven weights produce stats >100 that
+  // clampStat later silently shreds, collapsing "standout" field budgets.
+  const target = Math.max(4, Math.min(400, total));
   const weights = [
     rng() + 0.1,
     rng() + 0.1,
@@ -52,16 +55,23 @@ function distributeBudget(rng: Rng, total: number): [number, number, number, num
     rng() + 0.1,
   ];
   const wSum = weights[0]! + weights[1]! + weights[2]! + weights[3]!;
-  const raw = weights.map((w) => Math.round((w / wSum) * total));
+  const raw = weights.map((w) => Math.round((w / wSum) * target));
+  for (let i = 0; i < 4; i++) {
+    raw[i] = Math.max(1, Math.min(100, raw[i]!));
+  }
   let sum = raw[0]! + raw[1]! + raw[2]! + raw[3]!;
-  while (sum < total) {
+  let guard = 0;
+  while (sum < target && guard < 500) {
+    guard += 1;
     const idx = randInt(rng, 0, 3);
     if (raw[idx]! < 100) {
       raw[idx]! += 1;
       sum += 1;
     }
   }
-  while (sum > total) {
+  guard = 0;
+  while (sum > target && guard < 500) {
+    guard += 1;
     const idx = randInt(rng, 0, 3);
     if (raw[idx]! > 1) {
       raw[idx]! -= 1;

@@ -777,7 +777,7 @@ export class RaceScene implements Scene {
         !this.g.state!.onboarding.shownShiftCue &&
         this.hintText === null
       ) {
-        this.showHint('SHIFT optional — tap early to pull a gear sooner', 'shownShiftCue');
+        this.showHint('SHIFT to upshift — hold a gear until you pull the next', 'shownShiftCue');
       }
 
       this.stats.playerWallHits = player.wallHits;
@@ -935,9 +935,9 @@ export class RaceScene implements Scene {
     if (state === null) return;
 
     if (!state.onboarding.shownPedalControls) {
-      this.showHint('Enter = gas · Space = brake · gears shift themselves', 'shownPedalControls');
+      this.showHint('Enter = gas · Space = brake · SHIFT = upshift', 'shownPedalControls');
     } else if (!state.onboarding.shownBrakeHint) {
-      this.showHint('Touch: right = gas, left = brake · SHIFT = early up (optional)', 'shownBrakeHint');
+      this.showHint('Touch: right = gas, left = brake · SHIFT = up · lift to downshift', 'shownBrakeHint');
     }
   }
 
@@ -1210,8 +1210,8 @@ export class RaceScene implements Scene {
       `rgba(36,30,10,${0.7 + shiftPulse})`,
       '240,196,26',
       shiftAmt,
-      this.shiftCueArmed ? 'EARLY' : 'AUTO',
-      shifting || this.shiftCueArmed ? '#f0c41a' : token.textDim,
+      this.shiftCueArmed ? 'SHIFT' : 'SHIFT',
+      shifting || this.shiftCueArmed ? '#f0c41a' : token.textMuted,
     );
   }
 

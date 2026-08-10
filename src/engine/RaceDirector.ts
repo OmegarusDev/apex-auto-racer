@@ -786,12 +786,19 @@ export class RaceDirector {
       const gridS =
         (this.track.length - row * PHYSICS.gridRowSpacing + this.track.length) % this.track.length;
 
-      const stats = effectiveStats(this.config.discipline, plan.parts, plan.condition, plan.driver);
-      const { vProfile, vSafe } = buildSpeedProfiles(this.track, stats, this.muSurface);
+      const rawStats = effectiveStats(this.config.discipline, plan.parts, plan.condition, plan.driver);
+      const { vProfile, vSafe } = buildSpeedProfiles(this.track, rawStats, this.muSurface);
       let vDriver = buildVDriverProfile(vProfile, plan.driver.skill, plan.driver.bravery);
-      // Slight player pace handicap so equal-looking stats still feel contested.
+      // Player pace handicap applies to targets AND live top-speed/accel —
+      // previously only vDriver was trimmed so pin-throttle still felt overpowered.
+      let stats = rawStats;
       if (plan.isPlayer) {
         const pace = BALANCE.playerPaceMult;
+        stats = {
+          ...rawStats,
+          vMax: rawStats.vMax * pace,
+          aAccel: rawStats.aAccel * pace,
+        };
         vDriver = vDriver.map((v) => v * pace);
       }
       const authority = plan.isPlayer ? computeBrakeAuthority(plan.driver.skill) : 1;

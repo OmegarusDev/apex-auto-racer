@@ -137,7 +137,8 @@ function runLaunchProbe(seed: number) {
       if (pedals[i]!.time <= clock) lo = i;
     }
     const sample = pedals[lo]!;
-    director.setPlayerPedals(sample.throttle, sample.brake);
+    // No upshift: this suite asserts pin-throttle alone (gear-capped) rarely wins.
+    director.setPlayerPedals(sample.throttle, sample.brake, false);
     director.update(PHYSICS.dt * speedMult);
     guard += 1;
   }

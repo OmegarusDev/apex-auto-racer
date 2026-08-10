@@ -247,7 +247,8 @@ export function personalLineAt(car: CarSimState, track: TrackData, s: number): n
 }
 
 /**
- * Assisted gearbox: auto up/down for all cars; player Shift = early upshift nudge.
+ * Player: manual upshift; auto downshift only when off the throttle.
+ * AI: assisted auto up/down.
  * No miss slap — refused early requests are ignored.
  * @returns always 0 (legacy scrub hook removed).
  */
@@ -258,7 +259,7 @@ function updateGearbox(
   throttle: number,
   wantUpshift: boolean,
   discipline: DisciplineId,
-  _isPlayer: boolean,
+  isPlayer: boolean,
 ): number {
   const box = gearboxFor(discipline);
   car.gear = Math.max(1, Math.min(box.gearCount, car.gear || 1));
@@ -269,7 +270,9 @@ function updateGearbox(
   const band = gearBandFrac(car.v, vMaxEff, car.gear, box);
   car.lastShiftKind = null;
 
-  if (car.gear > 1 && band < box.downshiftBand && car.shiftCooldown <= 0) {
+  const canDown =
+    car.gear > 1 && band < box.downshiftBand && car.shiftCooldown <= 0;
+  if (canDown && (!isPlayer || throttle < box.playerDownshiftThrottle)) {
     car.gear -= 1;
     car.shiftCooldown = PHYSICS.shiftCooldown * 0.55;
     car.lastShiftKind = 'down';
@@ -282,13 +285,14 @@ function updateGearbox(
     car.spinRemaining <= 0;
 
   if (canUp) {
-    // Player early nudge (optional skill) — no speed penalty if too early.
-    if (wantUpshift && band >= box.earlyUpshiftBand) {
-      car.gear += 1;
-      car.shiftCooldown = PHYSICS.shiftCooldown;
-      car.lastShiftKind = 'up';
+    if (isPlayer) {
+      // Manual upshift only — hold a gear until Shift / pad.
+      if (wantUpshift && band >= box.earlyUpshiftBand) {
+        car.gear += 1;
+        car.shiftCooldown = PHYSICS.shiftCooldown;
+        car.lastShiftKind = 'up';
+      }
     } else if (band >= box.autoUpshiftBand && throttle > 0.35) {
-      // Assisted auto for player and AI alike.
       car.gear += 1;
       car.shiftCooldown = PHYSICS.shiftCooldown * 0.9;
       car.lastShiftKind = 'up';

@@ -17,7 +17,7 @@ export const BALANCE = {
   startingRosterSize: 3,
   startingPartTier: 1,
   maxPartTier: 5,
-  /** Player vDriver pace trim — unupgraded careers should lose to a clean field. */
+  /** Player pace trim on vDriver + vMax/aAccel — early careers must not steamroll. */
   playerPaceMult: 0.5,
   rainChance: 0.1,
   /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
@@ -49,21 +49,21 @@ export const BALANCE = {
    * dead stall-car; ceilings keep standouts. Variance lives inside the band.
    */
   opponentStatRanges: [
-    [52, 82],
-    [58, 86],
-    [66, 92],
-    [74, 96],
+    [68, 90],
+    [72, 93],
+    [76, 96],
     [82, 98],
     [88, 99],
+    [92, 99],
   ] as [number, number][],
   /** Part tier band per rank — standouts can sit at the top of the band. */
   opponentPartTiers: [
-    [2, 4],
-    [2, 4],
-    [3, 4],
-    [3, 5],
     [4, 5],
     [4, 5],
+    [4, 5],
+    [4, 5],
+    [5, 5],
+    [5, 5],
   ] as [number, number][],
   freeAgentStatBase: [26, 55] as [number, number],
   freeAgentStatPerRank: 8,

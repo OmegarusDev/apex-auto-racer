@@ -136,7 +136,7 @@ export class ApexRenderer {
   clear(): void {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.62, 0.72, 0.78, 1);
+    gl.clearColor(0.52, 0.62, 0.68, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   }
 
@@ -246,7 +246,7 @@ export class ApexRenderer {
     const h = this.canvas.height;
     if (w < 2 || h < 2 || !this.trackMesh || !this.carMesh) return;
 
-    const bg = this.night ? [0.08, 0.1, 0.14] : [0.62, 0.72, 0.78];
+    const bg = this.night ? [0.07, 0.09, 0.12] : [0.52, 0.62, 0.68];
     gl.viewport(0, 0, w, h);
     gl.clearColor(bg[0]!, bg[1]!, bg[2]!, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -337,32 +337,33 @@ export class ApexRenderer {
     const gl = this.gl;
     const p = this.litProg;
     const night = frame.night ? 1 : 0;
-    // High noon-ish fill — bright tabletop, not a cave
-    gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.25, 0.95, 0.2);
+    gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.32, 0.9, 0.24);
     if (frame.night) {
-      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.7, 0.78, 0.95);
-      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.28, 0.32, 0.4);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.1, 0.12, 0.18);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.55);
-      gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.15);
+      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.62, 0.7, 0.88);
+      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.2, 0.23, 0.3);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.08, 0.1, 0.14);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.7);
+      gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.05);
     } else {
-      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 1.15, 1.1, 1.0);
-      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.48, 0.5, 0.46);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.72, 0.8, 0.85);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.22);
-      gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.25);
+      // Mid exposure — between cave-dark and washed-out
+      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 1.02, 0.98, 0.9);
+      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.34, 0.36, 0.33);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.58, 0.66, 0.7);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.32);
+      gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.06);
     }
     gl.uniform1f(gl.getUniformLocation(p, 'uNight'), night);
     gl.uniform3f(gl.getUniformLocation(p, 'uCameraPos'), this.eyeX, this.eyeY, this.eyeZ);
   }
 
   private placeCar(worldX: number, worldY: number, heading: number, lift: number): void {
-    // model = T * R — rotate in local space, then translate into world.
+    // Engine Z = -worldY, so yaw must match Canvas2D's rotate(-heading).
+    // Local +X is car forward (same as CarPainter length axis).
     mat4Identity(this.tmp);
-    mat4RotateY(this.model, this.tmp, heading);
+    mat4RotateY(this.model, this.tmp, -heading);
     mat4Identity(this.tmp);
     mat4Translate(this.tmp, this.tmp, worldX, lift, -worldY);
-    mat4Multiply(this.mvp, this.tmp, this.model); // borrow mvp as scratch T*R
+    mat4Multiply(this.mvp, this.tmp, this.model); // T * R
     mat4CopyInPlace(this.model, this.mvp);
     void PHYSICS;
   }

@@ -66,21 +66,22 @@ export class RaceView {
 
     this.useEngine = this.engine !== null;
     if (this.engine !== null) {
-      this.engine.prepare({
-        track: opts.track,
-        palette: this.palette,
-        night: opts.night,
-        rain: opts.rain,
-      });
-      this.minimapPoints = this.engine.getMinimapPoints();
-      this.baked = null;
-      this.bakeMeta = null;
+      try {
+        this.engine.prepare({
+          track: opts.track,
+          palette: this.palette,
+          night: opts.night,
+          rain: opts.rain,
+        });
+        this.minimapPoints = this.engine.getMinimapPoints();
+        this.baked = null;
+        this.bakeMeta = null;
+      } catch (err) {
+        console.warn('[apex] WebGL track prepare failed — Canvas2D fallback', err);
+        this.dropEngineToCanvas2d(opts.night, opts.rain);
+      }
     } else {
-      const result = bakeTrack(opts.track, opts.discipline, opts.night, opts.rain);
-      this.baked = result.canvas;
-      this.bakeMeta = result.meta;
-      this.minimapPoints = result.minimap;
-      this.palette = result.palette;
+      this.bakeCanvas2d(opts.track, opts.discipline, opts.night, opts.rain);
     }
 
     this.nightScreenOverlay = null;
@@ -112,7 +113,7 @@ export class RaceView {
   }
 
   /** Drop a dead GL context and bake a Canvas2D track so cars stay visible. */
-  private dropEngineToCanvas2d(frame: RaceFrameView): void {
+  private dropEngineToCanvas2d(night: boolean, rain: boolean): void {
     if (this.engine !== null) {
       try {
         this.engine.dispose();
@@ -126,15 +127,22 @@ export class RaceView {
       document.querySelector('#world')?.classList.remove('is-live');
     }
     if (this.track !== null && this.discipline !== null) {
-      const night = frame.night;
-      const rain = frame.rain;
-      const result = bakeTrack(this.track, this.discipline, night, rain);
-      this.baked = result.canvas;
-      this.bakeMeta = result.meta;
-      this.minimapPoints = result.minimap;
-      this.palette = result.palette;
-      this.particles.setRaining(rain);
+      this.bakeCanvas2d(this.track, this.discipline, night, rain);
     }
+  }
+
+  private bakeCanvas2d(
+    track: TrackView,
+    discipline: DisciplineId,
+    night: boolean,
+    rain: boolean,
+  ): void {
+    const result = bakeTrack(track, discipline, night, rain);
+    this.baked = result.canvas;
+    this.bakeMeta = result.meta;
+    this.minimapPoints = result.minimap;
+    this.palette = result.palette;
+    this.particles.setRaining(rain);
   }
 
   writeCamera(out: CameraTransform = camScratch): CameraTransform {
@@ -195,7 +203,7 @@ export class RaceView {
     if (this.useEngine && this.engine !== null) {
       if (this.engine.isLost()) {
         console.warn('[apex] WebGL context lost — falling back to Canvas2D');
-        this.dropEngineToCanvas2d(frame);
+        this.dropEngineToCanvas2d(frame.night, frame.rain);
       } else {
         this.engine.resize(
           frame.screenW,

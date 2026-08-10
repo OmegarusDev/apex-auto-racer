@@ -147,8 +147,14 @@ export class ApexRenderer {
 
   prepare(opts: ApexRendererPrepareOpts): void {
     const gl = this.gl;
-    if (this.trackMesh) destroyMesh(gl, this.trackMesh);
-    if (this.carMesh) destroyMesh(gl, this.carMesh);
+    if (this.trackMesh) {
+      destroyMesh(gl, this.trackMesh);
+      this.trackMesh = null;
+    }
+    if (this.carMesh) {
+      destroyMesh(gl, this.carMesh);
+      this.carMesh = null;
+    }
 
     const track = buildTrackGeometry(opts.track, opts.palette);
     this.trackMesh = createMesh(gl, track.vertices, track.indices);
@@ -422,9 +428,10 @@ export class ApexRenderer {
     gl.uniform3f(gl.getUniformLocation(p, 'uTint'), tint[0], tint[1], tint[2]);
     gl.uniform1f(gl.getUniformLocation(p, 'uAlpha'), alpha);
     bindLitAttribs(gl, p, mesh);
-    const useUint = mesh.indexCount > 65535;
-    const type = useUint ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
-    gl.drawElements(gl.TRIANGLES, mesh.indexCount, type, 0);
+    // indexType must match the buffer uploaded in createMesh (Uint16 vs Uint32).
+    // Inferring from indexCount alone drew UNSIGNED_INT into Uint16 meshes when
+    // triangle count crossed 65k — blank / garbled tracks on larger layouts.
+    gl.drawElements(gl.TRIANGLES, mesh.indexCount, mesh.indexType, 0);
   }
 
   private drawFxPoints(frame: RaceFrameView): void {

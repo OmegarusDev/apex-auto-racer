@@ -23,7 +23,8 @@ export function createGL(canvas: HTMLCanvasElement): WebGLRenderingContext | nul
       canvas.getContext('experimental-webgl', attrs);
     if (gl) {
       const ctx = gl as WebGLRenderingContext;
-      // Large tracks may exceed 65k indices — enable when available.
+      // Large tracks may exceed 65k *vertices* — enable when available.
+      // createMesh still checks before uploading Uint32 indices.
       ctx.getExtension('OES_element_index_uint');
       return ctx;
     }
@@ -74,6 +75,8 @@ export interface GpuMesh {
   vbo: WebGLBuffer;
   ibo: WebGLBuffer;
   indexCount: number;
+  /** Must match the typed array uploaded to ibo — not inferred from indexCount. */
+  indexType: number; // gl.UNSIGNED_SHORT | gl.UNSIGNED_INT
   stride: number;
 }
 
@@ -89,6 +92,10 @@ export function createMesh(
   const vbo = gl.createBuffer();
   const ibo = gl.createBuffer();
   if (vbo === null || ibo === null) throw new Error('createBuffer failed');
+  const uint32 = indices instanceof Uint32Array;
+  if (uint32 && gl.getExtension('OES_element_index_uint') === null) {
+    throw new Error('OES_element_index_uint required for large track mesh');
+  }
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
   gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
@@ -97,6 +104,7 @@ export function createMesh(
     vbo,
     ibo,
     indexCount: indices.length,
+    indexType: uint32 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
     stride: VERTEX_BYTES,
   };
 }

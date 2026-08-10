@@ -296,34 +296,32 @@ export class ApexRenderer {
   }
 
   private buildCamera(frame: RaceFrameView, player: CarFrameDto | undefined): void {
+    void player;
     const cam = frame.camera;
     const aspect = frame.screenW / Math.max(1, frame.screenH);
-    const look: Vec3 = [cam.x, 0.0, -cam.y];
-
-    let tx = player?.tangentX ?? 0;
-    let ty = player?.tangentY ?? 1;
-    const tlen = Math.hypot(tx, ty) || 1;
-    tx /= tlen;
-    ty /= tlen;
-    // Engine forward on XZ from world tangent
-    const fX = tx;
-    const fZ = -ty;
+    // Pan target only — viewpoint orientation is fixed in world space
+    // (Scalextric tabletop, not a chase cam behind the car).
+    const look: Vec3 = [cam.x, 0.12, -cam.y];
 
     const zoom = Math.max(0.35, cam.zoom);
-    // Pulled back — tabletop overview, not bumper-cam.
-    const elev = (78 / zoom) * (frame.countdown !== null ? 1.25 : 1);
-    const back = (52 / zoom) * (frame.countdown !== null ? 1.15 : 1);
+    const countdown = frame.countdown !== null;
+    const elev = (88 / zoom) * (countdown ? 1.2 : 1);
+    const dist = (62 / zoom) * (countdown ? 1.15 : 1);
+
+    // Fixed SE tabletop azimuth in engine XZ (never follows car tangent).
+    const azX = 0.58;
+    const azZ = 0.81;
+    const azLen = Math.hypot(azX, azZ);
     const eye: Vec3 = [
-      look[0] - fX * back,
+      look[0] + (azX / azLen) * dist,
       elev,
-      look[2] - fZ * back,
+      look[2] + (azZ / azLen) * dist,
     ];
 
-    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.0, 520);
-    mat4LookAt(this.view, eye, [look[0], 0.15, look[2]], [0, 1, 0]);
+    mat4Perspective(this.proj, (38 * Math.PI) / 180, aspect, 1.0, 560);
+    mat4LookAt(this.view, eye, look, [0, 1, 0]);
     mat4Multiply(this.viewProj, this.proj, this.view);
 
-    // Stash eye for rim/fog in shader via uniform
     this.eyeX = eye[0];
     this.eyeY = eye[1];
     this.eyeZ = eye[2];

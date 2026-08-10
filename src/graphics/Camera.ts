@@ -61,12 +61,12 @@ export class Camera {
   }
 
   /**
-   * Follow a car with look-ahead along track tangent (meters).
-   * Keeps the view oriented toward where the race is going.
+   * Pan the tabletop window onto a car. Mild look-ahead only —
+   * orientation stays fixed in the WebGL pass (not a chase cam).
    */
   setFollowTarget(worldPos: Vec2, speedMs: number, lookAhead?: Vec2): void {
     this.mode = 'follow';
-    const ahead = clamp(speedMs * 0.22, 4, 18);
+    const ahead = clamp(speedMs * 0.08, 1.5, 7);
     if (lookAhead !== undefined) {
       const len = Math.hypot(lookAhead.x, lookAhead.y) || 1;
       this.targetX = worldPos.x + (lookAhead.x / len) * ahead;
@@ -75,7 +75,7 @@ export class Camera {
       this.targetX = worldPos.x;
       this.targetY = worldPos.y;
     }
-    this.targetZoom = clamp(0.7 - 0.22 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
+    this.targetZoom = clamp(0.68 - 0.18 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
   }
 
   update(dt: number): void {

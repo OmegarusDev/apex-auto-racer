@@ -182,11 +182,6 @@ export function computeSDet(determination: number, position: number, totalCars: 
   return 1 + PHYSICS.detBonus * (determination / 100) * ((position - 1) / (totalCars - 1));
 }
 
-/** @deprecated Prefer computeBrakeAuthority / computeThrottleAuthority. */
-export function computeAuthority(skill: number): number {
-  return computeBrakeAuthority(skill);
-}
-
 /** Low Skill → light auto-brake assist; elites manage braking themselves. */
 export function computeBrakeAuthority(skill: number): number {
   return Math.max(

@@ -6,8 +6,7 @@ Short log of where the live build differs from the plan. The plan file remains t
 
 - Built as a Cursor subagent (no `move_agent_to_root`); work tree is `~/cursorthings/ONGOING/apex-auto-racer` with a separate gitdir pointer.
 - Phases landed in fewer commits than one-per-phase; commits still mark known-good points where practical.
-- Capacitor config is present; native Android / `@capacitor/app` were not added — web build is the verification target.
-- Interactive browser play-through is manual (`npm run play`). Headless smoke / determinism checks cover seed reproducibility.
+- Interactive browser play-through is manual (`npm run play`). Headless smoke / determinism checks cover seed reproducibility. Capacitor / native Android are deferred (web + Pages is the verification target).
 
 ## Implementation
 
@@ -71,7 +70,7 @@ Change protocol:
 Three layers — keep new work in the right one:
 
 1. **Race sim** (seeded, headless) — `RaceDirector` facade composing Physics (`Vehicle`), Gearbox, Brain, Track, Modifiers, **EntertainmentMeter**, and the event ring. No Web Audio / DOM on the hot path.
-2. **Presentation** — `AudioEngine`, Render (Camera/VectorRenderer/Particles), UITheme, Race HUD. Consume a per-frame snapshot (`AudioTelemetry` + event cursor + hype). Never write into physics except via Input pedals.
+2. **Presentation** — `AudioEngine`, Render (Camera/VectorRenderer/Particles), **menu shell** (`layoutShell` / `ContentScroller` / safe `drawHeader` across Garage/Campaign/Team/Tuning/Options/Results), Race HUD + fantasy chrome (`RaceFantasyHud`). Consume a per-frame snapshot (`AudioTelemetry` + event cursor + hype). Never write into physics except via Input pedals.
 3. **Career** (between races) — payouts/XP/objectives/tournaments/garage mutate `GameState` only after the flag.
 
 **Presentation bus:** RaceScene builds telemetry + hype from the director; audio/HUD/particles read only that.
@@ -80,5 +79,6 @@ Three layers — keep new work in the right one:
 
 ## Deferred
 
-- On-device Android LAN verify not run here.
+- On-device Android LAN verify not run here (Capacitor scaffolding removed until needed).
 - Exhaustive tier/rank balance matrices and dual-orientation visual QA remain manual.
+- Full visual identity + menu-flow product overhaul deferred until playability soak.

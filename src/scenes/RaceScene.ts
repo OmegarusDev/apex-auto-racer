@@ -817,8 +817,7 @@ export class RaceScene implements Scene {
             text = `${ev.time.toFixed(1)}s — ${name} finds the peg`;
             break;
           case 'shift':
-            if (ev.detail === 'miss') text = `${ev.time.toFixed(1)}s — ${name} misses a shift`;
-            else if (ev.detail === 'down') text = `${ev.time.toFixed(1)}s — ${name} downshifts`;
+            if (ev.detail === 'down') text = `${ev.time.toFixed(1)}s — ${name} downshifts`;
             else text = `${ev.time.toFixed(1)}s — ${name} upshifts`;
             break;
           case 'driftEntry':

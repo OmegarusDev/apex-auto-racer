@@ -1,5 +1,5 @@
-import { PHYSICS } from '../data/physics.ts';
-import type { Vec2 } from '../engine/types.ts';
+import { PHYSICS } from '../data/physics';
+import type { Vec2 } from '../engine/types';
 
 export type CameraMode = 'countdown' | 'follow';
 

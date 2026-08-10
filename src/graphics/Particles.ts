@@ -1,5 +1,5 @@
-import { PHYSICS } from '../data/physics.ts';
-import type { CameraTransform } from './Camera.ts';
+import { PHYSICS } from '../data/physics';
+import type { CameraTransform } from './Camera';
 
 const SKID_CAP = 600;
 const DUST_CAP = 300;

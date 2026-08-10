@@ -1,9 +1,9 @@
-import { PHYSICS } from '../data/physics.ts';
-import { getDiscipline } from '../data/disciplines.ts';
-import type { DisciplineDef, DisciplineId } from '../data/disciplines.ts';
-import type { Vec2 } from '../engine/types.ts';
-import type { CameraTransform } from './Camera.ts';
-import { drawSlotCarMesh, drawSlotCarShadow } from './CarMesh.ts';
+import { PHYSICS } from '../data/physics';
+import { getDiscipline } from '../data/disciplines';
+import type { DisciplineDef, DisciplineId } from '../data/disciplines';
+import type { Vec2 } from '../engine/types';
+import type { CameraTransform } from './Camera';
+import { drawSlotCarMesh, drawSlotCarShadow } from './CarMesh';
 
 export const PX_PER_M = PHYSICS.pxPerM;
 
@@ -599,22 +599,6 @@ export function worldToScreen(
   return {
     x: cx + (wx - camera.x) * scale,
     y: cy - (wy - camera.y) * scale,
-  };
-}
-
-export function screenToWorld(
-  sx: number,
-  sy: number,
-  camera: CameraTransform,
-  screenW: number,
-  screenH: number,
-): { x: number; y: number } {
-  const cx = screenW * 0.5;
-  const cy = screenH * 0.5;
-  const scale = PX_PER_M * camera.zoom;
-  return {
-    x: camera.x + (sx - cx) / scale,
-    y: camera.y - (sy - cy) / scale,
   };
 }
 

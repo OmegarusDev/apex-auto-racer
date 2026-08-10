@@ -28,14 +28,8 @@ import {
   ToastManager,
   hitRect,
   ensureMinTouch,
-  drawSlider,
-  handleSlider,
-  type SliderDef,
 } from '../ui/components';
 import { drawSlotCarMesh } from '../graphics/CarMesh';
-
-export type { SliderDef };
-export { drawSlider, handleSlider };
 
 export const DISCIPLINE_ORDER: DisciplineId[] = ['track', 'street', 'rally'];
 

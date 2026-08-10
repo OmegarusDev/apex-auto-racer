@@ -3,13 +3,13 @@
  * Reads CarSim telemetry; never writes physics.
  */
 
-import { PHYSICS } from '../data/physics.ts';
-import type { DisciplineId } from '../data/disciplines.ts';
-import { getDiscipline } from '../data/disciplines.ts';
-import { gearBandFrac, gearboxFor } from '../engine/Gearbox.ts';
-import type { CarSimState } from '../engine/Vehicle.ts';
-import { computePinAuthorityBlend } from '../engine/Vehicle.ts';
-import { pad, type ThemeTokens } from '../ui/theme.ts';
+import { PHYSICS } from '../data/physics';
+import type { DisciplineId } from '../data/disciplines';
+import { getDiscipline } from '../data/disciplines';
+import { gearBandFrac, gearboxFor } from '../engine/Gearbox';
+import type { CarSimState } from '../engine/Vehicle';
+import { computePinAuthorityBlend } from '../engine/Vehicle';
+import { pad, type ThemeTokens } from '../ui/theme';
 
 export function pegRatio(car: CarSimState): number {
   return car.v / Math.max(car.vDeslot, 1);

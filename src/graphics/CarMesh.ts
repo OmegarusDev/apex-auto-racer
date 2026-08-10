@@ -3,7 +3,7 @@
  * Designed for top-down tabletop read: shadow → extrusion skirt → deck → cabin → wheels.
  */
 
-import type { DisciplineId } from '../data/disciplines.ts';
+import type { DisciplineId } from '../data/disciplines';
 
 function roundRectPath(
   ctx: CanvasRenderingContext2D,

@@ -401,7 +401,7 @@ function formatEvent(event: RaceEvent): string {
       return `${event.time.toFixed(1)}s — ${name} finds the peg`;
     case 'shift':
       return `${event.time.toFixed(1)}s — ${name} ${
-        event.detail === 'miss' ? 'misses a shift' : event.detail === 'down' ? 'downshifts' : 'upshifts'
+        event.detail === 'down' ? 'downshifts' : 'upshifts'
       }`;
     default:
       return `${event.time.toFixed(1)}s — ${name}: ${event.kind}`;

@@ -1,14 +1,25 @@
 {
   "name": "apex-auto-racer",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "Scalextric-style pedal autobattler — groove/deslot physics, assisted gears, career garage.",
+  "homepage": "https://omegarusdev.github.io/apex-auto-racer/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OmegarusDev/apex-auto-racer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OmegarusDev/apex-auto-racer/issues"
+  },
+  "license": "MIT",
+  "author": "OmegarusDev",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "play": "vite --host 127.0.0.1 --port 5173 --open",
-    "start": "vite --host 127.0.0.1 --port 5173 --open",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "validate": "npm run validate:feel",
     "validate:feel": "vite-node scripts/feel-contract.ts",
     "validate:intent": "vite-node scripts/intent-validate.ts",
     "validate:meta": "vite-node scripts/meta-validate.ts",
@@ -18,7 +29,7 @@
     "validate:field": "vite-node scripts/field-validate.ts",
     "validate:smoke": "vite-node scripts/smoke.ts",
     "validate:stack": "vite-node scripts/stack-smoke.ts",
-    "validate": "npm run validate:feel"
+    "validate:title": "vite-node scripts/title-layout-smoke.ts"
   },
   "devDependencies": {
     "terser": "^5.49.0",

@@ -4,23 +4,48 @@
   </a>
 </p>
 
-<p align="center"><sub>Offline shortcut: <a href="PLAY.html"><code>PLAY.html</code></a> opens the hosted game.</sub></p>
+<p align="center">
+  <a href="https://omegarusdev.github.io/apex-auto-racer/"><strong>Play in browser</strong></a>
+  ·
+  <a href="PLAY.html">Quick link</a>
+  ·
+  <a href="LICENSE">MIT License</a>
+</p>
 
 # Apex Auto-Racer
 
-Idle / Scalextric-style autobattler. You hold throttle and brake; steering is automatic. Gears shift themselves (Shift is an optional early nudge). Drivers are fallible autopilots — upgrades push the game toward hands-off watching.
+Scalextric-style pedal autobattler. Hold gas and brake; steering is automatic. Gears shift themselves (Shift is an optional early nudge). Drivers are fallible autopilots — upgrades push the game toward hands-off watching.
 
-## How to run
+**Live fantasy:** groove / deslot peg physics, peg meter on the race HUD, shared menu shell across career screens, zero runtime dependencies.
+
+## Play
+
+| | |
+|---|---|
+| **Browser** | [omegarusdev.github.io/apex-auto-racer](https://omegarusdev.github.io/apex-auto-racer/) |
+| **Local** | `npm install && npm run play` → http://127.0.0.1:5173/ |
+| **Debug** | append `?debug=1` |
+
+`PLAY.html` in this repo is a convenience redirect to the hosted build (requires network).
+
+## Controls
+
+- **Enter / right half** — throttle  
+- **Space / left half** — brake  
+- **Shift / bottom pad** — optional early upshift (auto otherwise)  
+- **Escape** — back / pause  
+
+## Develop
 
 ```bash
 npm install
-npm run play
+npm run play          # local game
+npm run build         # production bundle
+npm run validate      # feel contract (21 gates)
 ```
-
-Serves at http://127.0.0.1:5173/ (`npm run build` / `npm run preview` for production). Debug: `?debug=1`.
 
 ## Stack
 
-Vite + TypeScript (strict), Canvas 2D, Web Audio, localStorage (`apex-save-v1`). Zero runtime dependencies. Deterministic mulberry32 PRNG — no `Math.random`. Bundle target &lt; 1MB.
+Vite + TypeScript (strict), Canvas 2D, Web Audio, `localStorage` (`apex-save-v1`). Race sim uses a seeded mulberry32 PRNG (career/title may use wall-clock seeds). Bundle target &lt; 1MB. MIT licensed.
 
-Maintainer notes: see `DEVIATIONS.md`.
+Maintainer notes: [`DEVIATIONS.md`](DEVIATIONS.md).

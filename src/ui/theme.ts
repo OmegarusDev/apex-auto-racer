@@ -1,4 +1,4 @@
-import type { DisciplineId } from '../data/disciplines.ts';
+import type { DisciplineId } from '../data/disciplines';
 
 /** Reference viewport short edge for token scaling. */
 const BASE_MIN = 720;
@@ -167,11 +167,6 @@ export function headerContentTop(token: ThemeTokens): number {
 /** Full header chrome height including safe inset. */
 export function headerBandH(token: ThemeTokens): number {
   return token.safe.top + headerContentH(token);
-}
-
-/** Content region starts just below the header chrome. */
-export function contentTop(token: ThemeTokens): number {
-  return headerBandH(token);
 }
 
 export function accentForDiscipline(id: DisciplineId): string {

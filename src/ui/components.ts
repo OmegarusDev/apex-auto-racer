@@ -1,13 +1,13 @@
-import { BALANCE } from '../data/balance.ts';
-import { PARTS, partCost } from '../data/parts.ts';
-import type { PartCategory } from '../data/parts.ts';
-import type { ThemeTokens } from './theme.ts';
+import { BALANCE } from '../data/balance';
+import { PARTS, partCost } from '../data/parts';
+import type { PartCategory } from '../data/parts';
+import type { ThemeTokens } from './theme';
 import {
   pad,
   headerContentH,
   headerContentTop,
   headerBandH,
-} from './theme.ts';
+} from './theme';
 
 export type { ThemeTokens };
 export {
@@ -17,8 +17,7 @@ export {
   headerContentH,
   headerContentTop,
   headerBandH,
-  contentTop,
-} from './theme.ts';
+} from './theme';
 
 export interface UiContext {
   pointerX: number;
@@ -77,14 +76,6 @@ export interface RadarChartDef {
     grip: number;
     downforce: number;
   };
-}
-
-export interface ListItem {
-  id: string;
-  label: string;
-  sublabel?: string;
-  disabled?: boolean;
-  onClick?: () => void;
 }
 
 export interface ModalDef {
@@ -164,17 +155,6 @@ const STAT_LABELS: Record<DriverStatKey, string> = {
 
 export function isPortrait(w: number, h: number): boolean {
   return h >= w;
-}
-
-export function panelRect(w: number, h: number, token: ThemeTokens, insetUnits = 2): Rect {
-  const p = pad(token, insetUnits);
-  const safe = token.safe;
-  return {
-    x: p + safe.left,
-    y: p + safe.top,
-    w: w - p * 2 - safe.left - safe.right,
-    h: h - p * 2 - safe.top - safe.bottom,
-  };
 }
 
 // ── Hit-test helpers ────────────────────────────────────────────────────────
@@ -715,125 +695,6 @@ export function drawRadarChart(ctx: CanvasRenderingContext2D, chart: RadarChartD
   ctx.restore();
 }
 
-// ── ListView ────────────────────────────────────────────────────────────────
-
-export class ListView {
-  scrollY = 0;
-  velocity = 0;
-  rowHeight: number;
-  friction: number;
-  private dragging = false;
-  private dragStartY = 0;
-  private scrollStartY = 0;
-  private activePointerId: number | null = null;
-
-  constructor(rowHeight: number, friction = 8) {
-    this.rowHeight = rowHeight;
-    this.friction = friction;
-  }
-
-  update(rect: Rect, ui: UiContext, itemCount: number, pointerId?: number): void {
-    const contentH = itemCount * this.rowHeight;
-    const maxScroll = Math.max(0, contentH - rect.h);
-
-    if (ui.pointerDown && !this.dragging) {
-      if (hitRect(ui.pointerX, ui.pointerY, rect.x, rect.y, rect.w, rect.h)) {
-        this.dragging = true;
-        this.dragStartY = ui.pointerY;
-        this.scrollStartY = this.scrollY;
-        this.activePointerId = pointerId ?? null;
-        this.velocity = 0;
-      }
-    }
-
-    if (this.dragging && ui.pointerDown) {
-      if (this.activePointerId === null || pointerId === undefined || pointerId === this.activePointerId) {
-        this.scrollY = this.scrollStartY - (ui.pointerY - this.dragStartY);
-        this.scrollY = Math.max(0, Math.min(maxScroll, this.scrollY));
-      }
-    }
-
-    if (!ui.pointerDown && this.dragging) {
-      this.dragging = false;
-      this.activePointerId = null;
-    }
-
-    if (!this.dragging && Math.abs(this.velocity) > 1) {
-      this.scrollY += this.velocity * ui.dt;
-      this.scrollY = Math.max(0, Math.min(maxScroll, this.scrollY));
-      this.velocity *= Math.exp(-this.friction * ui.dt);
-      if (this.scrollY <= 0 || this.scrollY >= maxScroll) this.velocity *= 0.35;
-    }
-  }
-
-  recordDragVelocity(deltaY: number, dt: number): void {
-    if (dt > 0) this.velocity = -deltaY / dt;
-  }
-
-  draw(
-    ctx: CanvasRenderingContext2D,
-    rect: Rect,
-    items: ListItem[],
-    ui: UiContext,
-  ): void {
-    const { token } = ui;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(rect.x, rect.y, rect.w, rect.h);
-    ctx.clip();
-
-    const first = Math.floor(this.scrollY / this.rowHeight);
-    const last = Math.min(items.length, first + Math.ceil(rect.h / this.rowHeight) + 1);
-
-    for (let i = first; i < last; i++) {
-      const item = items[i];
-      if (!item) continue;
-      const rowY = rect.y + i * this.rowHeight - this.scrollY;
-      const hovered =
-        !item.disabled &&
-        hitRect(ui.pointerX, ui.pointerY, rect.x, rowY, rect.w, this.rowHeight);
-
-      if (hovered) {
-        ctx.fillStyle = token.bgElevated;
-        ctx.fillRect(rect.x, rowY, rect.w, this.rowHeight);
-      }
-
-      setFont(ctx, token, token.fontBody, '600');
-      ctx.fillStyle = item.disabled ? token.disabled : token.text;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(item.label, rect.x + pad(token), rowY + this.rowHeight * 0.5);
-
-      if (item.sublabel) {
-        setFont(ctx, token, token.fontCaption, '500');
-        ctx.fillStyle = token.textDim;
-        ctx.textAlign = 'right';
-        ctx.fillText(item.sublabel, rect.x + rect.w - pad(token), rowY + this.rowHeight * 0.5);
-      }
-
-      ctx.strokeStyle = token.cardStroke;
-      ctx.beginPath();
-      ctx.moveTo(rect.x, rowY + this.rowHeight);
-      ctx.lineTo(rect.x + rect.w, rowY + this.rowHeight);
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  handleClick(rect: Rect, items: ListItem[], ui: UiContext): boolean {
-    if (!ui.pointerClicked) return false;
-    if (!hitRect(ui.pointerX, ui.pointerY, rect.x, rect.y, rect.w, rect.h)) return false;
-
-    const localY = ui.pointerY - rect.y + this.scrollY;
-    const index = Math.floor(localY / this.rowHeight);
-    const item = items[index];
-    if (!item || item.disabled) return false;
-    item.onClick?.();
-    return true;
-  }
-}
-
 // ── Modal ───────────────────────────────────────────────────────────────────
 
 export function drawModal(ctx: CanvasRenderingContext2D, modal: ModalDef, ui: UiContext): void {
@@ -1074,10 +935,6 @@ export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
   }
 
   return handled;
-}
-
-export function headerHeight(token: ThemeTokens): number {
-  return headerContentH(token);
 }
 
 // ── DriverSpendPanel ────────────────────────────────────────────────────────

@@ -161,9 +161,9 @@ export class EngineSynth {
 
   /** Brief RPM dip on shift — cosmetic only. */
   blip(kind: 'up' | 'down' | 'miss'): void {
-    if (!this.started) return;
+    if (!this.started || kind === 'miss') return;
     const t = this.buses.ctx.currentTime;
-    const dip = kind === 'miss' ? 0.55 : kind === 'up' ? 0.72 : 0.85;
+    const dip = kind === 'up' ? 0.72 : 0.85;
     const g = this.voiceGain.gain;
     g.cancelScheduledValues(t);
     const cur = g.value || 0.05;

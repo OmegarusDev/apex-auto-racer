@@ -84,7 +84,6 @@ export class EntertainmentMeter {
           break;
         case 'shift':
           if (ev.detail === 'up') impulse += 0.05;
-          if (ev.detail === 'miss') drain += 0.06;
           break;
         default:
           break;

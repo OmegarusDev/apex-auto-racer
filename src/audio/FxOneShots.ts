@@ -106,12 +106,8 @@ export class FxOneShots {
   }
 
   playShift(kind: ShiftKind): void {
+    if (kind === 'miss') return; // assisted gearbox never emits miss
     const t = this.buses.ctx.currentTime;
-    if (kind === 'miss') {
-      this.playNoiseBurst(70, 900, 0.28);
-      this.playTone('square', 180, 0.08, this.buses.fx, 0.15);
-      return;
-    }
     const f0 = kind === 'up' ? 220 : 160;
     const f1 = kind === 'up' ? 320 : 120;
     const osc = this.buses.ctx.createOscillator();

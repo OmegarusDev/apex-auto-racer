@@ -28,6 +28,8 @@ export interface ThemeTokens {
   fontTitle: number;
   fontBody: number;
   fontCaption: number;
+  /** Hero wordmark size — viewport-aware, for title/brand surfaces. */
+  fontHero: number;
   fontFamily: string;
   bg: string;
   bgElevated: string;
@@ -90,17 +92,28 @@ export function createTheme(w: number, h: number): ThemeTokens {
     return cachedTheme;
   }
 
-  const min = Math.min(w, h);
-  const scale = Math.max(0.75, Math.min(1.25, min / BASE_MIN));
+  const short = Math.min(w, h);
+  const long = Math.max(w, h);
+  // Fluid UI scale: short edge drives density; slight boost when the long edge
+  // has room so desktop/tablet don't feel sparse or cramped.
+  const base = short / BASE_MIN;
+  const room = Math.min(1.12, 0.92 + (long / 1400) * 0.2);
+  const scale = Math.max(0.7, Math.min(1.35, base * room));
+
+  // Hero wordmark tracks the readable width, not only the short edge — so
+  // portrait phones get a strong brand and ultrawide doesn't explode.
+  const heroFromW = Math.min(w * 0.14, h * 0.09, 72);
+  const fontHero = Math.max(36, Math.min(72, heroFromW * (0.85 + scale * 0.25)));
 
   cachedTheme = {
     scale,
     grid: 8 * scale,
-    touchMin: Math.max(44, 44 * scale),
+    touchMin: Math.max(44, Math.min(52, 44 * scale)),
     fontDisplay: 32 * scale,
     fontTitle: 24 * scale,
-    fontBody: 16 * scale,
-    fontCaption: 12 * scale,
+    fontBody: Math.max(14, 16 * scale),
+    fontCaption: Math.max(11, 12 * scale),
+    fontHero,
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     bg: '#0a0a0c',

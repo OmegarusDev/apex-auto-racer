@@ -10,13 +10,13 @@ import {
   handleModal,
   layoutModalButtons,
   pad,
-  ensureMinTouch,
   ToastManager,
   type ButtonDef,
   type ModalDef,
 } from '../ui/components';
 import {
   buildUi,
+  computeTitleLayout,
   createTitlePreviewTrack,
   DISCIPLINE_ORDER,
   drawBackground,
@@ -94,59 +94,45 @@ export class TitleScene implements Scene {
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
     const { ui, token } = buildUi(w, h, 0, '#22d3ee');
-    const landscape = w > h * 1.2;
+    const layout = computeTitleLayout(w, h, token);
 
     drawBackground(ctx, w, h, token);
-    drawTitleAtmosphere(ctx, w, h, this.time);
-
-    const hasSave = g.save.hasSave();
-    const btnW = landscape
-      ? Math.min(w * 0.36, pad(token, 30))
-      : Math.min(w - pad(token, 4), pad(token, 28));
-    const btnH = ensureMinTouch(pad(token, 5), token);
-    const btnGap = pad(token, 0.55);
-    const menuH = btnH * 4 + btnGap * 3;
-
-    let logoX: number;
-    let logoY: number;
-    let logoAlign: 'center' | 'left';
-    let trackCx: number;
-    let trackCy: number;
-    let trackScale: number;
-    let btnX: number;
-    let btnY: number;
-
-    if (landscape) {
-      const colX = token.safe.left + pad(token, 3);
-      logoX = colX;
-      logoY = h * 0.14 + token.safe.top;
-      logoAlign = 'left';
-      trackCx = w * 0.68;
-      trackCy = h * 0.48;
-      trackScale = Math.min(w, h) * 0.42;
-      btnX = colX;
-      btnY = Math.min(h - token.safe.bottom - menuH - pad(token, 2), h * 0.48);
-    } else {
-      logoX = w * 0.5;
-      logoY = h * 0.08 + token.safe.top;
-      logoAlign = 'center';
-      trackCx = w * 0.5;
-      trackCy = h * 0.36;
-      trackScale = Math.min(w, h) * 0.36;
-      btnX = (w - btnW) * 0.5;
-      const menuBottom = h - token.safe.bottom - pad(token, 2);
-      btnY = Math.max(h * 0.54, menuBottom - menuH);
-    }
+    drawTitleAtmosphere(ctx, w, h, this.time, layout.fadeTop);
 
     drawRibbonTrack(ctx, w, h, this.time, token, {
-      cx: trackCx,
-      cy: trackCy,
-      scale: trackScale,
+      cx: layout.trackCx,
+      cy: layout.trackCy,
+      scale: layout.trackScale,
       planar: this.preview.planar,
       halfWidth: this.preview.halfWidth,
     });
 
-    drawTitleLogo(ctx, logoX, logoY, token, { align: logoAlign });
+    drawTitleLogo(ctx, layout.logoX, layout.logoY, token, {
+      align: layout.logoAlign,
+      apexSize: layout.apexSize,
+    });
+
+    if (layout.menuScrim !== null) {
+      const s = layout.menuScrim;
+      ctx.save();
+      const scrim = ctx.createLinearGradient(s.x, s.y, s.x, s.y + s.h);
+      scrim.addColorStop(0, 'rgba(10,10,12,0.15)');
+      scrim.addColorStop(0.35, 'rgba(10,10,12,0.55)');
+      scrim.addColorStop(1, 'rgba(10,10,12,0.78)');
+      ctx.fillStyle = scrim;
+      const r = pad(token, 1);
+      ctx.beginPath();
+      ctx.roundRect(s.x, s.y, s.w, s.h, r);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const hasSave = g.save.hasSave();
+    let btnY = layout.menuY;
+    const btnX = layout.menuX;
+    const btnW = layout.menuW;
+    const btnH = layout.btnH;
+    const btnGap = layout.btnGap;
 
     const continueBtn: ButtonDef = {
       x: btnX,

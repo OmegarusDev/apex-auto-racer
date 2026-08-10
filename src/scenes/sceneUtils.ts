@@ -560,6 +560,7 @@ export function drawTitleAtmosphere(
   w: number,
   h: number,
   time: number,
+  fadeTop = h * 0.55,
 ): void {
   ctx.save();
   const g = ctx.createRadialGradient(w * 0.5, h * 0.42, 0, w * 0.5, h * 0.45, Math.max(w, h) * 0.72);
@@ -578,17 +579,29 @@ export function drawTitleAtmosphere(
   ctx.fillStyle = streak;
   ctx.fillRect(0, 0, w, h);
 
-  // Bottom fade so menu stays readable
-  const fade = ctx.createLinearGradient(0, h * 0.55, 0, h);
+  // Bottom fade so menu stays readable — start just above the menu column.
+  const top = Math.max(h * 0.35, Math.min(h * 0.72, fadeTop));
+  const fade = ctx.createLinearGradient(0, top, 0, h);
   fade.addColorStop(0, 'rgba(10,10,12,0)');
-  fade.addColorStop(1, 'rgba(10,10,12,0.82)');
+  fade.addColorStop(0.55, 'rgba(10,10,12,0.55)');
+  fade.addColorStop(1, 'rgba(10,10,12,0.92)');
   ctx.fillStyle = fade;
-  ctx.fillRect(0, h * 0.55, w, h * 0.45);
+  ctx.fillRect(0, top, w, h - top);
   ctx.restore();
 }
 
 export interface TitleLogoOpts {
   align?: 'center' | 'left';
+  /** Override APEX size (px). Subtitle scales with it. */
+  apexSize?: number;
+}
+
+/** Estimate title logo block height without measuring canvas (for layout). */
+export function measureTitleLogoHeight(apexSize: number, _token?: ThemeTokens): number {
+  const subSize = apexSize * 0.28;
+  const gap = Math.max(4, apexSize * 0.08);
+  const ruleH = Math.max(2, apexSize * 0.035);
+  return apexSize + subSize + gap * 2.5 + ruleH;
 }
 
 /** Returns total block height for layout. */
@@ -600,10 +613,10 @@ export function drawTitleLogo(
   opts: TitleLogoOpts = {},
 ): number {
   const align = opts.align ?? 'center';
-  const apexSize = token.fontDisplay * 2.15;
-  const subSize = token.fontTitle * 0.78;
-  const gap = pad(token, 0.55);
-  const ruleH = Math.max(2, pad(token, 0.22));
+  const apexSize = opts.apexSize ?? token.fontHero;
+  const subSize = Math.max(11, apexSize * 0.28);
+  const gap = Math.max(4, apexSize * 0.08);
+  const ruleH = Math.max(2, apexSize * 0.035);
 
   ctx.save();
   ctx.textAlign = align;
@@ -633,7 +646,7 @@ export function drawTitleLogo(
   const subY = ruleY + ruleH + gap * 0.7;
   // Tracked wordmark (letterSpacing when available; else manual advances)
   const sub = 'AUTO-RACER';
-  const spacing = Math.max(1, token.scale * 2.5);
+  const spacing = Math.max(1, apexSize * 0.04);
   const ctxLs = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
   if (typeof ctxLs.letterSpacing === 'string') {
     ctxLs.letterSpacing = `${spacing}px`;
@@ -653,6 +666,162 @@ export function drawTitleLogo(
 
   ctx.restore();
   return apexSize + subSize + gap * 2.5 + ruleH;
+}
+
+export type TitleLayoutMode = 'portrait' | 'landscape';
+
+export interface TitleScreenLayout {
+  mode: TitleLayoutMode;
+  logoX: number;
+  logoY: number;
+  logoAlign: 'center' | 'left';
+  apexSize: number;
+  trackCx: number;
+  trackCy: number;
+  trackScale: number;
+  menuX: number;
+  menuY: number;
+  menuW: number;
+  btnH: number;
+  btnGap: number;
+  /** Y where bottom readability fade should begin. */
+  fadeTop: number;
+  /** Optional scrim behind the menu column (portrait). */
+  menuScrim: { x: number; y: number; w: number; h: number } | null;
+}
+
+/**
+ * Non-overlapping title regions for portrait phones, landscape, and resizable desktop.
+ * Priority: brand → menu → track (track shrinks first).
+ */
+export function computeTitleLayout(w: number, h: number, token: ThemeTokens): TitleScreenLayout {
+  const safe = token.safe;
+  const margin = Math.max(12, Math.min(w, h) * 0.035);
+  const innerL = safe.left + margin;
+  const innerR = w - safe.right - margin;
+  const innerT = safe.top + margin;
+  const innerB = h - safe.bottom - margin;
+  const innerW = Math.max(1, innerR - innerL);
+  const innerH = Math.max(1, innerB - innerT);
+  const landscape = w / Math.max(h, 1) >= 1.15;
+  const shortH = h < 520;
+  const btnCount = 4;
+
+  let btnH = Math.max(token.touchMin, pad(token, 5.25));
+  let btnGap = Math.max(6, pad(token, 0.7));
+  let menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+
+  if (landscape) {
+    const menuBudget = innerH * (shortH ? 0.78 : 0.58);
+    if (menuH > menuBudget) {
+      const s = menuBudget / menuH;
+      btnH = Math.max(36, btnH * s);
+      btnGap = Math.max(4, btnGap * s);
+      menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+    }
+
+    const colMax = Math.min(innerW * 0.4, 420);
+    const colW = Math.max(200, colMax);
+    const colX = innerL;
+    const brandBudget = Math.max(48, innerH - menuH - margin * 2);
+    const apexSize = Math.max(
+      shortH ? 34 : 44,
+      Math.min(
+        colW * 0.24,
+        h * (shortH ? 0.13 : 0.12),
+        brandBudget * 0.62,
+        shortH ? 48 : 70,
+      ),
+    );
+    const logoH = measureTitleLogoHeight(apexSize, token);
+    const logoY = innerT + Math.min(margin, brandBudget * 0.08);
+    const menuY = Math.min(innerB - menuH, Math.max(logoY + logoH + margin, innerT + innerH * 0.42));
+
+    const trackLeft = colX + colW + margin;
+    const trackRight = innerR;
+    const trackW = Math.max(80, trackRight - trackLeft);
+    const trackCx = trackLeft + trackW * 0.5;
+    const trackCy = innerT + innerH * (shortH ? 0.48 : 0.46);
+    const trackScale = Math.min(trackW * 0.55, innerH * (shortH ? 0.5 : 0.58), Math.min(w, h) * 0.48);
+
+    return {
+      mode: 'landscape',
+      logoX: colX,
+      logoY,
+      logoAlign: 'left',
+      apexSize,
+      trackCx,
+      trackCy,
+      trackScale,
+      menuX: colX,
+      menuY,
+      menuW: colW,
+      btnH,
+      btnGap,
+      fadeTop: menuY - margin,
+      menuScrim: null,
+    };
+  }
+
+  // Portrait / square — brand top, track mid, menu bottom.
+  const menuBudget = innerH * (h < 700 ? 0.36 : 0.34);
+  if (menuH > menuBudget) {
+    const s = menuBudget / menuH;
+    btnH = Math.max(40, btnH * s);
+    btnGap = Math.max(5, btnGap * s);
+    menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+  }
+
+  const menuW = Math.min(innerW, Math.min(420, Math.max(260, w * 0.86)));
+  const menuX = innerL + (innerW - menuW) * 0.5;
+  const menuY = innerB - menuH;
+
+  const brandCeiling = menuY - margin * 1.5;
+  const apexSize = Math.min(
+    token.fontHero * 1.15,
+    w * 0.168,
+    (brandCeiling - innerT) * 0.28,
+    70,
+  );
+  const logoH = measureTitleLogoHeight(Math.max(34, apexSize), token);
+  const logoY = innerT;
+  const logoBottom = logoY + logoH;
+
+  const trackTop = logoBottom + margin * 0.5;
+  const trackBottom = menuY - margin;
+  const trackBand = Math.max(40, trackBottom - trackTop);
+  const trackCy = trackTop + trackBand * 0.48;
+  const trackScale = Math.min(
+    innerW * 0.48,
+    trackBand * 0.72,
+    Math.min(w, h) * 0.4,
+  );
+
+  const scrimPad = margin * 0.75;
+  const menuScrim = {
+    x: menuX - scrimPad,
+    y: menuY - scrimPad,
+    w: menuW + scrimPad * 2,
+    h: menuH + scrimPad * 2,
+  };
+
+  return {
+    mode: 'portrait',
+    logoX: w * 0.5,
+    logoY,
+    logoAlign: 'center',
+    apexSize: Math.max(34, apexSize),
+    trackCx: w * 0.5,
+    trackCy,
+    trackScale,
+    menuX,
+    menuY,
+    menuW,
+    btnH,
+    btnGap,
+    fadeTop: menuY - trackBand * 0.35,
+    menuScrim,
+  };
 }
 
 export function drawTopDownCar(

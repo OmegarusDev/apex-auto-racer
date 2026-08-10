@@ -91,6 +91,8 @@ export class InputController {
 
     if (this.hitDeadZone(x, y) || this.hitPause(x, y)) {
       this.pendingClick = { x, y, consumed: false };
+      // Track hold so race HUD sliders (zoom) keep seeing pointerDown.
+      this.pointers.set(ev.pointerId, { id: ev.pointerId, x, y, active: true, side: 'none' });
       return;
     }
 
@@ -112,7 +114,7 @@ export class InputController {
     if (p !== undefined) {
       p.x = x;
       p.y = y;
-      if (this.mode === 'race' && !this.uiCapture) {
+      if (this.mode === 'race' && !this.uiCapture && p.side !== 'none') {
         if (this.hitDeadZone(x, y)) {
           p.side = 'none';
         } else {

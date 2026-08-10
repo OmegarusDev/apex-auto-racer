@@ -128,6 +128,11 @@ export interface VolumeOptions {
 
 export interface GameOptions {
   volumes: VolumeOptions;
+  /**
+   * Race tabletop zoom 0..1 — 0 = pulled back, 1 = close-in.
+   * Default sits zoomed out so phones see the circuit.
+   */
+  raceZoom: number;
 }
 
 export interface CareerStats {
@@ -199,6 +204,9 @@ export const DEFAULT_VOLUMES: VolumeOptions = {
   crowd: 0.45,
   ui: 0.6,
 };
+
+/** Default race camera — pulled well back so the circuit reads on phones. */
+export const DEFAULT_RACE_ZOOM = 0.08;
 
 export function emptyVehicleParts(startTier: number): VehicleParts {
   return {

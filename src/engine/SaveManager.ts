@@ -17,6 +17,7 @@ import type {
 import {
   SAVE_VERSION,
   DEFAULT_VOLUMES,
+  DEFAULT_RACE_ZOOM,
   defaultVehicleSave,
 } from './types';
 import { makeDriverId, syncDriverIdCounter, syncDriverIdsFrom } from './DriverGenerator';
@@ -249,6 +250,7 @@ export function createNewGame(rng: Rng, seed: number): GameState {
     },
     options: {
       volumes: { ...DEFAULT_VOLUMES },
+      raceZoom: DEFAULT_RACE_ZOOM,
     },
   };
 }
@@ -290,6 +292,11 @@ function migrate(raw: unknown): GameState | null {
     const vols = obj.options.volumes as Record<string, unknown>;
     if (typeof vols.crowd !== 'number' || !Number.isFinite(vols.crowd)) {
       vols.crowd = DEFAULT_VOLUMES.crowd;
+    }
+    if (typeof obj.options.raceZoom !== 'number' || !Number.isFinite(obj.options.raceZoom)) {
+      obj.options.raceZoom = DEFAULT_RACE_ZOOM;
+    } else {
+      obj.options.raceZoom = Math.max(0, Math.min(1, obj.options.raceZoom));
     }
   }
 

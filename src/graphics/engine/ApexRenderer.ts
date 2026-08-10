@@ -334,9 +334,11 @@ export class ApexRenderer {
 
     const zoom = Math.max(0.35, cam.zoom);
     const countdown = frame.countdown !== null;
-    // Tabletop pull-back — keep the track readable; car scale handles phone size.
-    const elev = (82 / zoom) * (countdown ? 1.2 : 1);
-    const dist = (58 / zoom) * (countdown ? 1.15 : 1);
+    // User zoom 0 = far tabletop, 1 = close. Default sits well pulled back.
+    const z = Math.max(0, Math.min(1, frame.raceZoom));
+    const pull = 2.35 - z * 1.45; // 2.35x far … 0.9x close
+    const elev = ((108 * pull) / zoom) * (countdown ? 1.18 : 1);
+    const dist = ((78 * pull) / zoom) * (countdown ? 1.12 : 1);
 
     // Fixed SE tabletop azimuth in engine XZ (never follows car tangent).
     const azX = 0.58;
@@ -348,7 +350,7 @@ export class ApexRenderer {
       look[2] + (azZ / azLen) * dist,
     ];
 
-    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.0, 560);
+    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.2, 900);
     mat4LookAt(this.view, eye, look, [0, 1, 0]);
     mat4Multiply(this.viewProj, this.proj, this.view);
 
@@ -387,9 +389,8 @@ export class ApexRenderer {
   private placeCar(worldX: number, worldY: number, heading: number, lift: number): void {
     // Engine Z = -worldY, so yaw must match Canvas2D's rotate(-heading).
     // Local +X is car forward (same as CarPainter length axis).
-    // Mild presentation scale so true-meter boxes still read as slot toys
-    // after color fix (was 2.75 — far too large with a closer cam).
-    const s = 1.35;
+    // Mild toy scale — distance is user-controlled via raceZoom.
+    const s = 1.2;
     mat4Identity(this.tmp);
     mat4RotateY(this.model, this.tmp, -heading);
     mat4Scale(this.tmp, this.model, s, s, s);

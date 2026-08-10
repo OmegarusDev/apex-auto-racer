@@ -211,8 +211,15 @@ export class RaceView {
 
     if (!this.baked || !this.bakeMeta) return;
     const { camera, screenW, screenH } = frame;
+    // Apply race zoom to 2D blit (GL path uses frame.raceZoom in ApexRenderer).
+    const z = Math.max(0, Math.min(1, frame.raceZoom));
+    const cam2d = {
+      x: camera.x,
+      y: camera.y,
+      zoom: camera.zoom * (0.28 + z * 0.9),
+    };
 
-    blitTrack(ctx, this.baked, this.bakeMeta, camera, screenW, screenH);
+    blitTrack(ctx, this.baked, this.bakeMeta, cam2d, screenW, screenH);
 
     if (frame.night) {
       const key = `${screenW}x${screenH}`;
@@ -224,16 +231,16 @@ export class RaceView {
     }
 
     if (frame.ghost !== null) {
-      this.drawGhostAt(ctx, frame.ghost, camera, screenW, screenH);
+      this.drawGhostAt(ctx, frame.ghost, cam2d, screenW, screenH);
     }
 
-    this.particles.renderGround(ctx, camera, screenW, screenH);
+    this.particles.renderGround(ctx, cam2d, screenW, screenH);
 
     for (const car of frame.cars) {
-      this.drawCarDto(ctx, car, camera, screenW, screenH);
+      this.drawCarDto(ctx, car, cam2d, screenW, screenH);
     }
 
-    this.particles.renderAir(ctx, camera, screenW, screenH);
+    this.particles.renderAir(ctx, cam2d, screenW, screenH);
     this.particles.renderRain(ctx, screenW, screenH);
   }
 

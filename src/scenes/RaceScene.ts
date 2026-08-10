@@ -42,13 +42,17 @@ import {
   drawModal,
   handleModal,
   layoutModalButtons,
+  drawSlider,
+  handleSlider,
   pad,
   ensureMinTouch,
   type ButtonDef,
   type ModalDef,
+  type SliderDef,
 } from '../ui/components';
 import { accentForDiscipline, createTheme, type ThemeTokens } from '../ui/theme';
 import { gearboxFor } from '../engine/Gearbox';
+import { DEFAULT_RACE_ZOOM } from '../engine/types';
 
 /** Avoid importing sceneUtils / ResultsScene here — that cycle breaks dynamic RaceScene load. */
 function disciplineAccent(id: import('../data/disciplines').DisciplineId): string {
@@ -108,6 +112,7 @@ export class RaceScene implements Scene {
   private camOut = { x: 0, y: 0, zoom: 1 };
   private chrome: RaceChromeLayout | null = null;
   private paused = false;
+  private zoomDirty = false;
   private pauseModal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private finishTimer = 0;
   private transitioned = false;
@@ -367,6 +372,10 @@ export class RaceScene implements Scene {
       }
     }
 
+    const raceZoom = Math.max(
+      0,
+      Math.min(1, this.g.state?.options.raceZoom ?? DEFAULT_RACE_ZOOM),
+    );
     const frame: RaceFrameView = {
       camera: cam,
       screenW: w,
@@ -378,6 +387,7 @@ export class RaceScene implements Scene {
       ghost,
       countdown: director.countdown,
       discipline: this.launch.discipline,
+      raceZoom,
     };
     this.view.draw(ctx, frame);
 
@@ -1082,7 +1092,7 @@ export class RaceScene implements Scene {
       const pauseUi = {
         pointerX: this.g.input.pointerX,
         pointerY: this.g.input.pointerY,
-        pointerDown: this.g.input.peekClick() !== null,
+        pointerDown: this.g.input.isPointerDown(),
         pointerClicked: this.g.input.consumeClick() !== null,
         dt: 0,
         w,
@@ -1092,9 +1102,53 @@ export class RaceScene implements Scene {
       };
       drawButton(ctx, pauseBtn, pauseUi);
       handleButton(pauseBtn, pauseUi);
+      this.drawZoomSlider(ctx, chrome, pauseUi, accent);
     }
 
     ctx.restore();
+  }
+
+  private drawZoomSlider(
+    ctx: CanvasRenderingContext2D,
+    chrome: RaceChromeLayout,
+    ui: {
+      pointerX: number;
+      pointerY: number;
+      pointerDown: boolean;
+      pointerClicked: boolean;
+      dt: number;
+      w: number;
+      h: number;
+      token: ThemeTokens;
+      accent: string;
+    },
+    _accent: string,
+  ): void {
+    const state = this.g.state;
+    if (state === null) return;
+    if (typeof state.options.raceZoom !== 'number') {
+      state.options.raceZoom = DEFAULT_RACE_ZOOM;
+    }
+    const z = Math.max(0, Math.min(1, state.options.raceZoom));
+    const r = chrome.zoomSlider;
+    const slider: SliderDef = {
+      x: r.x,
+      y: r.y,
+      w: r.w,
+      h: r.h,
+      label: 'ZOOM',
+      value: z,
+      onChange: (v) => {
+        state.options.raceZoom = Math.max(0, Math.min(1, v));
+        this.zoomDirty = true;
+      },
+    };
+    drawSlider(ctx, slider, ui);
+    handleSlider(slider, ui);
+    if (!ui.pointerDown && this.zoomDirty) {
+      this.zoomDirty = false;
+      this.g.autosave();
+    }
   }
 
   private drawPedalDeck(
@@ -1247,7 +1301,7 @@ export class RaceScene implements Scene {
     const chipW = pad(token, 7);
     const chipH = pad(token, 2.6);
     const x = w - token.safe.right - pad(token) - chipW;
-    const y = chrome.pause.y + chrome.pause.h + pad(token, 0.5);
+    const y = chrome.zoomSlider.y + chrome.zoomSlider.h + pad(token, 0.5);
     ctx.save();
     ctx.fillStyle = 'rgba(12, 22, 18, 0.88)';
     ctx.strokeStyle = 'rgba(94, 207, 142, 0.45)';
@@ -1271,7 +1325,7 @@ export class RaceScene implements Scene {
     const chipH = pad(token, 2.6);
     const rainOffset = this.director?.rain ? chipH + pad(token, 0.4) : 0;
     const x = w - token.safe.right - pad(token) - chipW;
-    const y = chrome.pause.y + chrome.pause.h + pad(token, 0.5) + rainOffset;
+    const y = chrome.zoomSlider.y + chrome.zoomSlider.h + pad(token, 0.5) + rainOffset;
     ctx.save();
     ctx.fillStyle = 'rgba(14, 16, 14, 0.9)';
     ctx.strokeStyle = 'rgba(240, 196, 26, 0.4)';

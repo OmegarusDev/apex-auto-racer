@@ -99,6 +99,8 @@ export interface RaceFrameView {
   ghost: GhostFrameDto | null;
   countdown: CountdownPhase;
   discipline: DisciplineId;
+  /** 0 = pulled back, 1 = close-in (from GameOptions.raceZoom). */
+  raceZoom: number;
 }
 
 export interface RaceViewPrepareOpts {

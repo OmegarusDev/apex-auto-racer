@@ -18,6 +18,8 @@ export interface RaceChromeLayout {
   shift: ChromeRect;
   pause: ChromeRect;
   minimap: ChromeRect;
+  /** Race tabletop zoom slider (draw + hit). */
+  zoomSlider: ChromeRect;
   /** Regions that must not register as pedals. */
   deadZones: ChromeRect[];
   deckTop: number;
@@ -68,13 +70,22 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     h: pauseSize,
   };
 
+  // Zoom under pause/minimap — same chrome column, fat enough for a thumb.
+  const zoomH = ensureMinTouch(pad(token, 4.25), token);
+  const zoomSlider: ChromeRect = {
+    x: mmX,
+    y: pause.y + pause.h + pad(token, 0.65),
+    w: mmSize,
+    h: zoomH,
+  };
+
   // Expand TR dead zone so fat fingers don't gas through chrome.
   const trPad = pad(token, 0.75);
   const trZone: ChromeRect = {
-    x: Math.min(mmX, pause.x) - trPad,
+    x: Math.min(mmX, pause.x, zoomSlider.x) - trPad,
     y: safe.top,
-    w: w - Math.min(mmX, pause.x) + trPad,
-    h: pause.y + pause.h + trPad - safe.top,
+    w: w - Math.min(mmX, pause.x, zoomSlider.x) + trPad,
+    h: zoomSlider.y + zoomSlider.h + trPad - safe.top,
   };
 
   return {
@@ -83,6 +94,7 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     shift,
     pause,
     minimap,
+    zoomSlider,
     deadZones: [trZone],
     deckTop,
   };

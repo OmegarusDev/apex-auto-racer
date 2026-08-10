@@ -102,6 +102,7 @@ function isValidGameState(obj: Record<string, unknown>): boolean {
   ) {
     return false;
   }
+  if (!isFiniteNumber(obj.quickRaceNonce)) return false;
   if (!isRecord(obj.objectives)) return false;
   if (!Array.isArray(obj.objectives.active) || !Array.isArray(obj.objectives.completed)) {
     return false;
@@ -234,6 +235,7 @@ export function createNewGame(rng: Rng, seed: number): GameState {
     rankUnlocked: defaultRankUnlocked(),
     inProgressTournaments: defaultTournaments(),
     careerStats: { races: 0, wins: 0, earnings: 0 },
+    quickRaceNonce: 0,
     objectives: defaultObjectives(rng),
     onboarding: {
       shownPedalControls: false,
@@ -259,6 +261,10 @@ function migrate(raw: unknown): GameState | null {
 
   if (version < SAVE_VERSION) {
     obj.version = SAVE_VERSION;
+  }
+
+  if (typeof obj.quickRaceNonce !== 'number' || !Number.isFinite(obj.quickRaceNonce)) {
+    obj.quickRaceNonce = 0;
   }
 
   if (isRecord(obj.onboarding)) {

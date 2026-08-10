@@ -180,13 +180,83 @@ function buildTrackFromWaypoints(
   const closeGap = Math.hypot(first.pos.x - last.pos.x, first.pos.y - last.pos.y);
   const length = last.s + closeGap;
 
-  return {
+  const raw: TrackData = {
     length,
     nodes,
     archetype: archetype.id,
     seed,
     discipline,
     bounds: computeBounds(nodes),
+  };
+  return phaseShiftStartToStraight(raw);
+}
+
+/**
+ * Rotate the loop so s=0 sits mid-straight (grid + checkered).
+ * Waypoint seams are usually corners — without this ~all races start in bends.
+ */
+function phaseShiftStartToStraight(track: TrackData): TrackData {
+  const nodes = track.nodes;
+  const n = nodes.length;
+  if (n < 12) return track;
+
+  const gridDepth = PHYSICS.gridRowSpacing * 6 + 60;
+  const windowLen = Math.max(gridDepth, 90);
+
+  const scores: { i: number; mean: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    let count = 0;
+    let dist = 0;
+    let j = i;
+    while (dist < windowLen && count < n) {
+      const node = nodes[j]!;
+      sum += Math.abs(node.kappaLine);
+      count += 1;
+      const next = nodes[(j + 1) % n]!;
+      let ds = next.s - node.s;
+      if (ds <= 0) ds += track.length;
+      dist += ds;
+      j = (j + 1) % n;
+    }
+    scores.push({ i, mean: sum / Math.max(1, count) });
+  }
+  scores.sort((a, b) => a.mean - b.mean);
+
+  const kappaMax = PHYSICS.grooveKappaMin;
+  let bestI = scores[0]!.i;
+  for (const cand of scores) {
+    // Prefer a window whose mean κ is clearly "straight".
+    if (cand.mean < kappaMax * 0.85) {
+      bestI = cand.i;
+      break;
+    }
+  }
+
+  const rotated = nodes.slice(bestI).concat(nodes.slice(0, bestI));
+  const s0 = rotated[0]!.s;
+  const rebasing: RacingLineNode[] = rotated.map((node) => {
+    let s = node.s - s0;
+    if (s < 0) s += track.length;
+    return {
+      pos: { x: node.pos.x, y: node.pos.y },
+      tangent: { x: node.tangent.x, y: node.tangent.y },
+      normal: { x: node.normal.x, y: node.normal.y },
+      s,
+      width: node.width,
+      runoffWidth: node.runoffWidth,
+      kappa: node.kappa,
+      kappaLine: node.kappaLine,
+      o: node.o,
+    };
+  });
+  // Keep s monotonic from 0 — sort already is by original order after rotate.
+  rebasing.sort((a, b) => a.s - b.s);
+
+  return {
+    ...track,
+    nodes: rebasing,
+    bounds: computeBounds(rebasing),
   };
 }
 

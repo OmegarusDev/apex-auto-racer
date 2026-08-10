@@ -8,8 +8,12 @@ import { invalidateSafeArea } from './ui/theme';
 
 function setupCanvas(canvas: HTMLCanvasElement): { w: number; h: number; dpr: number } {
   const dpr = Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap);
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
+  const vv = window.visualViewport;
+  const w = Math.max(1, Math.floor(vv?.width ?? canvas.clientWidth));
+  const h = Math.max(1, Math.floor(vv?.height ?? canvas.clientHeight));
+  // Keep CSS size in sync with visual viewport (mobile URL bar).
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
   canvas.width = Math.max(1, Math.floor(w * dpr));
   canvas.height = Math.max(1, Math.floor(h * dpr));
   const ctx = canvas.getContext('2d');
@@ -17,6 +21,13 @@ function setupCanvas(canvas: HTMLCanvasElement): { w: number; h: number; dpr: nu
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   return { w, h, dpr };
+}
+
+function hideSplash(): void {
+  const splash = document.querySelector<HTMLElement>('#splash');
+  if (splash === null) return;
+  splash.style.opacity = '0';
+  window.setTimeout(() => splash.remove(), 400);
 }
 
 function main(): void {
@@ -39,6 +50,7 @@ function main(): void {
   const game = initGameContext(canvas, audio);
   game.bootstrap();
   game.scenes.replace(new TitleScene());
+  hideSplash();
 
   let visible = !document.hidden;
   let lastTs = 0;
@@ -50,12 +62,18 @@ function main(): void {
   };
 
   window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', resize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+    window.visualViewport.addEventListener('scroll', resize);
+  }
   resize();
 
   document.addEventListener('visibilitychange', () => {
     visible = !document.hidden;
     if (visible) {
       void audio.resume();
+      resize();
     } else {
       void audio.suspend();
     }

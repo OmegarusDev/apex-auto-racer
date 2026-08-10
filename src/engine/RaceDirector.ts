@@ -290,9 +290,9 @@ function generateOpponentParts(
       parts[part.id] = lo;
       continue;
     }
-    // Center near strength percentile; ±~40% of band as noise.
-    const center = lo + span * (0.15 + 0.7 * strength01);
-    const jitter = (rng() - 0.5) * span * 0.85;
+    // Strong drivers sit near the top of the band; weak still upgraded vs player T1.
+    const center = lo + span * (0.35 + 0.6 * strength01);
+    const jitter = (rng() - 0.5) * span * 0.7;
     parts[part.id] = Math.max(lo, Math.min(hi, Math.round(center + jitter)));
   }
   return parts;
@@ -446,7 +446,14 @@ export function quickRaceConfig(
     state.rankUnlocked.street,
     state.rankUnlocked.rally,
   ) as 0 | 1 | 2 | 3 | 4 | 5;
-  const difficultyRank = Math.max(rank, highestRank) as 0 | 1 | 2 | 3 | 4 | 5;
+  // Match buildRaceConfig Quick Race challenge floor (see raceTypes).
+  const difficultyRank = Math.min(5, Math.max(Math.max(rank, highestRank) + 1, 2)) as
+    | 0
+    | 1
+    | 2
+    | 3
+    | 4
+    | 5;
   const statRange = BALANCE.opponentStatRanges[difficultyRank] ?? BALANCE.opponentStatRanges[0]!;
   const opponentBudget: [number, number] = [statRange[0] * 4, statRange[1] * 4];
   const opponentPartRange = BALANCE.opponentPartTiers[difficultyRank] ?? BALANCE.opponentPartTiers[0]!;

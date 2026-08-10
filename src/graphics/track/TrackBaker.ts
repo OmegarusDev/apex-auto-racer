@@ -71,18 +71,19 @@ export function bakeTrack(
     ctx.fillRect(0, 0, canvasW, canvasH);
   } else {
     // Soft tabletop plate under the circuit.
-    ctx.fillStyle = '#0c0c10';
+    ctx.fillStyle = '#08080c';
     ctx.fillRect(0, 0, canvasW, canvasH);
     const plate = ctx.createRadialGradient(
       canvasW * 0.5,
       canvasH * 0.45,
-      Math.min(canvasW, canvasH) * 0.1,
+      Math.min(canvasW, canvasH) * 0.08,
       canvasW * 0.5,
       canvasH * 0.5,
-      Math.max(canvasW, canvasH) * 0.65,
+      Math.max(canvasW, canvasH) * 0.72,
     );
-    plate.addColorStop(0, 'rgba(28,26,32,0.9)');
-    plate.addColorStop(1, 'rgba(8,8,12,0.2)');
+    plate.addColorStop(0, 'rgba(36,32,40,0.95)');
+    plate.addColorStop(0.55, 'rgba(18,16,22,0.55)');
+    plate.addColorStop(1, 'rgba(6,6,10,0.15)');
     ctx.fillStyle = plate;
     ctx.fillRect(0, 0, canvasW, canvasH);
   }
@@ -213,12 +214,12 @@ function drawAsphalt(
     else ctx.lineTo(p.x, p.y);
   }
   ctx.strokeStyle = palette.groove;
-  ctx.lineWidth = Math.max(2.2, 3.2 * s);
+  ctx.lineWidth = Math.max(2.8, 4.0 * s);
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.stroke();
   ctx.strokeStyle = palette.grooveHighlight;
-  ctx.lineWidth = Math.max(0.7, 1.0 * s);
+  ctx.lineWidth = Math.max(0.9, 1.3 * s);
   ctx.stroke();
 
   // Outer bevel ribbon.

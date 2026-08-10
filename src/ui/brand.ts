@@ -6,9 +6,9 @@ import type { DisciplineId } from '../data/disciplines';
 import { getDiscipline } from '../data/disciplines';
 import type { ThemeTokens } from './theme';
 
-/** Expressive display stack — avoid Inter/Roboto/system-default look. */
+/** Condensed display stack that falls back cleanly on iOS/Android. */
 export const BRAND_DISPLAY_FONT =
-  '"DIN Alternate", "Bahnschrift", "Eurostile", "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif';
+  '"Arial Narrow", "Helvetica Neue Condensed", "Roboto Condensed", "Franklin Gothic Medium", Impact, sans-serif';
 
 export const BRAND_BODY_FONT =
   '"Trebuchet MS", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif';

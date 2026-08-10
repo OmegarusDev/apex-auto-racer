@@ -126,11 +126,18 @@ export function makeQuickRaceConfig(
   discipline: DisciplineId,
   returnTo: 'title' | 'campaign' = 'title',
 ): RaceLaunchConfig {
+  state.quickRaceNonce = ((state.quickRaceNonce >>> 0) + 1) >>> 0;
+  try {
+    getGameContext().autosave();
+  } catch {
+    // Context may be absent in headless harnesses.
+  }
   const seedMaterial =
     (state.seed +
       state.careerStats.races * 9973 +
       state.careerStats.earnings +
-      discipline.charCodeAt(0) * 131) >>>
+      discipline.charCodeAt(0) * 131 +
+      state.quickRaceNonce * 7919) >>>
     0;
   const rng = mulberry32(seedMaterial);
   const raceSeed = randInt(rng, 1, 0x7fffffff);

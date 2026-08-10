@@ -27,6 +27,7 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 - Wall recovery is soft (stun cuts drive; no lateral freeze/teleport). Track width / normals / kerbs match painted asphalt.
 - **Assisted gearbox:** Enter/gas, Space/brake; gears auto up/down. Shift = optional early upshift nudge (no miss slap). Mild torque/topFrac personality per discipline; soft gear-cap overshoot (`gearCapSoft`). Street = 5 gears + harder walls; Rally = 4 gears + longer deslot.
 - Opponent fields stratify weak→strong within the rank budget band (no dead stall-cars at novice).
+- **Quick Race challenge floor** — Quick Race uses `max(unlocked+1, 2)` into existing opponentStatRanges / opponentPartTiers (tournament keeps true rank). Field traits are cycled for style variety; part roll biases upgraded. Freeze arrays untouched.
 
 ### Driver stats → track (summary)
 
@@ -83,3 +84,4 @@ Three layers — keep new work in the right one:
 - Exhaustive tier/rank balance matrices and dual-orientation visual QA remain manual.
 - Full visual identity + menu-flow product overhaul deferred until playability soak.
 - **Presentation rebuild (2026-08-10)** — Graphics engine split into `RaceView` + `TrackBaker` / `TrackBlit` / `CarPainter` / `materials` / `TrackSampler`. RaceScene consumes `RaceFrameView` DTOs; cars show part tiers / condition / tyre; garage+tuning share CarPainter; brand shell via `ui/brand.ts`. Feel-freeze physics untouched. Quick Race Results Back uses `returnTo: 'title'`.
+- **Race chrome + track origin (2026-08-10)** — Bottom pedal deck + shared `raceChromeLayout` (pause/minimap dead-zone); Quick Race `quickRaceNonce` (save v2); TrackGenerator phase-shifts `s=0` to best straight; Pages `100dvh` + visualViewport + splash.

@@ -1,4 +1,8 @@
 import { PHYSICS } from '../data/physics';
+import {
+  pointInRect,
+  type RaceChromeLayout,
+} from '../graphics/hud/raceChromeLayout';
 
 export type InputMode = 'menu' | 'race';
 
@@ -48,6 +52,25 @@ export class InputController {
   private shiftKeysHeld = new Set<string>();
   private touchShiftHeld = false;
   private prevTouchShift = false;
+  private raceChrome: RaceChromeLayout | null = null;
+  /** When true (pause modal), all taps become UI clicks — no pedals. */
+  private uiCapture = false;
+
+  /** RaceScene pushes layout each frame so hit zones match draw. */
+  setRaceChrome(layout: RaceChromeLayout | null): void {
+    this.raceChrome = layout;
+  }
+
+  setUiCapture(on: boolean): void {
+    this.uiCapture = on;
+    if (on) {
+      this.pointers.clear();
+      this.targetThrottle = 0;
+      this.targetBrake = 0;
+      this.touchShiftHeld = false;
+      this.syncPedalTargets();
+    }
+  }
 
   private onPointerDown = (ev: PointerEvent): void => {
     if (!this.canvas) return;
@@ -58,12 +81,18 @@ export class InputController {
     this.pointerX = x;
     this.pointerY = y;
 
-    if (this.mode === 'menu') {
+    if (this.mode === 'menu' || this.uiCapture) {
+      this.pendingClick = { x, y, consumed: false };
+      return;
+    }
+
+    if (this.hitDeadZone(x, y) || this.hitPause(x, y)) {
       this.pendingClick = { x, y, consumed: false };
       return;
     }
 
     const side = this.sideForPoint(x, y);
+    if (side === 'none') return;
     this.pointers.set(ev.pointerId, { id: ev.pointerId, x, y, active: true, side });
     this.syncPedalTargets();
   };
@@ -80,7 +109,12 @@ export class InputController {
     if (p !== undefined) {
       p.x = x;
       p.y = y;
-      p.side = this.sideForPoint(x, y);
+      if (this.hitDeadZone(x, y)) {
+        p.side = 'none';
+      } else {
+        p.side = this.sideForPoint(x, y);
+      }
+      this.syncPedalTargets();
     }
   };
 
@@ -99,7 +133,7 @@ export class InputController {
 
   private onKeyDown = (ev: KeyboardEvent): void => {
     this.keysDown.add(ev.code);
-    if (this.mode === 'race') {
+    if (this.mode === 'race' && !this.uiCapture) {
       if (UPSHIFT_KEYS.has(ev.code) && !this.shiftKeysHeld.has(ev.code)) {
         this.shiftKeysHeld.add(ev.code);
         this.upshiftPulse = true;
@@ -151,6 +185,8 @@ export class InputController {
       this.pointers.clear();
       this.upshiftPulse = false;
       this.shiftKeysHeld.clear();
+      this.uiCapture = false;
+      this.raceChrome = null;
     }
     this.syncPedalTargets();
   }
@@ -166,6 +202,8 @@ export class InputController {
     this.touchShiftHeld = false;
     this.prevTouchShift = false;
     this.pointers.clear();
+    this.uiCapture = false;
+    this.pendingClick = null;
   }
 
   /** Consume the one-frame upshift edge. */
@@ -180,18 +218,16 @@ export class InputController {
     this.throttle = this.easeToward(this.throttle, this.targetThrottle, ease);
     this.brake = this.easeToward(this.brake, this.targetBrake, ease);
 
-    // Touch SHIFT pad: rising edge → pulse.
-    if (this.touchShiftHeld && !this.prevTouchShift) {
+    if (this.touchShiftHeld && !this.prevTouchShift && this.mode === 'race' && !this.uiCapture) {
       this.upshiftPulse = true;
     }
     this.prevTouchShift = this.touchShiftHeld;
 
-    if (this.mode === 'race' && (this.throttle > 0.1 || this.brake > 0.1)) {
+    if (this.mode === 'race' && !this.uiCapture && (this.throttle > 0.1 || this.brake > 0.1)) {
       this.inputTime += dt;
     }
   }
 
-  /** Returns the latest menu click if not yet consumed. */
   peekClick(): ClickEvent | null {
     if (this.pendingClick === null || this.pendingClick.consumed) return null;
     return this.pendingClick;
@@ -211,23 +247,47 @@ export class InputController {
     return [...this.pointers.values()];
   }
 
+  private hitDeadZone(x: number, y: number): boolean {
+    const chrome = this.raceChrome;
+    if (chrome === null) return false;
+    for (const z of chrome.deadZones) {
+      if (pointInRect(x, y, z)) return true;
+    }
+    return false;
+  }
+
+  private hitPause(x: number, y: number): boolean {
+    const chrome = this.raceChrome;
+    if (chrome === null) return false;
+    return pointInRect(x, y, chrome.pause);
+  }
+
   /**
-   * Layout: left half = brake, right half = gas, bottom-center strip = SHIFT.
-   * SHIFT zone is the middle 28% width in the bottom 22% height.
+   * Bottom deck: left = brake, right = gas, center = SHIFT.
+   * Falls back to bottom-band halves if chrome layout not set yet.
    */
   private sideForPoint(x: number, y: number): 'left' | 'right' | 'shift' | 'none' {
     if (!this.canvas) return 'none';
+    const chrome = this.raceChrome;
+    if (chrome !== null) {
+      if (this.hitDeadZone(x, y)) return 'none';
+      if (pointInRect(x, y, chrome.shift)) return 'shift';
+      if (pointInRect(x, y, chrome.brake)) return 'left';
+      if (pointInRect(x, y, chrome.gas)) return 'right';
+      return 'none';
+    }
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     if (w <= 0 || h <= 0) return 'none';
     const inShiftY = y > h * 0.78;
     const inShiftX = x > w * 0.36 && x < w * 0.64;
     if (inShiftY && inShiftX) return 'shift';
+    if (y < h * 0.72) return 'none';
     return x < w * 0.5 ? 'left' : 'right';
   }
 
   private syncPedalTargets(): void {
-    if (this.mode !== 'race') {
+    if (this.mode !== 'race' || this.uiCapture) {
       this.targetThrottle = 0;
       this.targetBrake = 0;
       this.touchShiftHeld = false;

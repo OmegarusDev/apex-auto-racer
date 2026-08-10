@@ -181,12 +181,14 @@ export interface GameState {
   rankUnlocked: RankUnlocked;
   inProgressTournaments: InProgressTournaments;
   careerStats: CareerStats;
+  /** Incremented each Quick Race launch so trackSeed changes every click. */
+  quickRaceNonce: number;
   objectives: ObjectivesState;
   onboarding: OnboardingFlags;
   options: GameOptions;
 }
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
 export const DEFAULT_VOLUMES: VolumeOptions = {
   master: 0.8,

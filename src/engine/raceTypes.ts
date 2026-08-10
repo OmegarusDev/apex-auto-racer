@@ -131,12 +131,21 @@ export function buildRaceConfig(state: GameState, launch: RaceLaunchConfig): Rac
     .map((id) => state.roster.find((d) => d.id === id))
     .filter((d): d is Driver => d !== undefined);
 
-  const rank = Math.max(
+  const unlocked = Math.max(
     state.rankUnlocked.track,
     state.rankUnlocked.street,
     state.rankUnlocked.rally,
     state.rankUnlocked[launch.discipline] ?? 0,
   );
+  /**
+   * Quick Race is a sparring challenge, not a soft tutorial field.
+   * Floor at rank band 2 and nudge +1 above career unlock so early careers
+   * still face upgraded cars and skilled drivers (tournament keeps true rank).
+   */
+  const rank =
+    launch.mode === 'quick'
+      ? Math.min(5, Math.max(unlocked + 1, 2))
+      : unlocked;
   const statRange = BALANCE.opponentStatRanges[rank] ?? BALANCE.opponentStatRanges[0]!;
   const opponentBudget: [number, number] = [statRange[0] * 4, statRange[1] * 4];
   const opponentPartRange = BALANCE.opponentPartTiers[rank] ?? BALANCE.opponentPartTiers[0]!;

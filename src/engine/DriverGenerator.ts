@@ -127,6 +127,7 @@ export function generateDriver(
 /**
  * Spread a field across [budgetMin, budgetMax] so races have backmarkers,
  * midfield, and standouts — not a flat random pack clustered in the middle.
+ * Traits are cycled so the pack has distinct driving styles.
  */
 export function generateFieldDrivers(
   rng: Rng,
@@ -139,17 +140,23 @@ export function generateFieldDrivers(
   if (count <= 0) return [];
 
   const span = Math.max(0, budgetMax - budgetMin);
+  const traitOrder = [...TRAITS];
+  shuffleInPlace(rng, traitOrder);
   const drivers: Driver[] = [];
   for (let i = 0; i < count; i++) {
-    // Even percentiles + jitter; shuffle later so grid order ≠ strength order.
-    const t = count === 1 ? rng() : i / (count - 1);
-    // Mild curve: slightly more midfield mass, still hits both extremes.
-    const shaped = t * t * (3 - 2 * t);
-    const center = budgetMin + span * shaped;
-    const jitter = Math.max(8, span * 0.14);
+    // Stratify weak→strong; pin poles so the pack always has real spread.
+    let t: number;
+    if (count === 1) t = rng();
+    else if (i === 0) t = 0.02 + rng() * 0.06;
+    else if (i === count - 1) t = 0.92 + rng() * 0.08;
+    else t = i / (count - 1);
+    const center = budgetMin + span * t;
+    const jitter = Math.max(8, span * 0.12);
     const lo = Math.round(Math.max(budgetMin, center - jitter));
     const hi = Math.round(Math.min(budgetMax, center + jitter));
-    drivers.push(generateDriver(rng, Math.min(lo, hi), Math.max(lo, hi), used));
+    const driver = generateDriver(rng, Math.min(lo, hi), Math.max(lo, hi), used);
+    driver.trait = traitOrder[i % traitOrder.length]!.id as TraitId;
+    drivers.push(driver);
   }
   shuffleInPlace(rng, drivers);
   return drivers;

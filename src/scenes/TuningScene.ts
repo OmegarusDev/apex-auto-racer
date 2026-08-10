@@ -32,6 +32,7 @@ import {
   disciplineAccent,
   buyPartTier,
   repairVehicle,
+  drawTopDownCar,
 } from './sceneUtils';
 
 export class TuningScene implements Scene {
@@ -39,6 +40,7 @@ export class TuningScene implements Scene {
   private toasts = new ToastManager();
   private scroller = new ContentScroller();
   private detachWheel: (() => void) | null = null;
+  private previewPart: PartCategory | null = null;
 
   constructor(discipline: DisciplineId) {
     this.discipline = discipline;
@@ -103,6 +105,8 @@ export class TuningScene implements Scene {
       pad(token, 0.75) +
       radarR * 2 +
       pad(token, 1.5) +
+      pad(token, 10) +
+      pad(token, 1) +
       token.fontCaption +
       pad(token, 0.75) +
       statBarHeight(token) +
@@ -128,6 +132,26 @@ export class TuningScene implements Scene {
       lui,
     );
     y += radarR * 2 + pad(token, 1.5);
+
+    y += drawSectionTitle(ctx, 0, y, 'Loadout preview', lui);
+    const previewH = pad(token, 9);
+    const previewCx = view.w * 0.5;
+    const previewCy = y + previewH * 0.5;
+    drawTopDownCar(ctx, previewCx, previewCy, pad(token, 14), previewH, accent, this.discipline, {
+      partTiers: vehicle.partTiers,
+      condition: vehicle.condition,
+      highlightPart: this.previewPart ?? undefined,
+    });
+    if (this.previewPart) {
+      ctx.save();
+      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = accent;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`Preview: next ${this.previewPart} tier`, previewCx, y + previewH - token.fontCaption);
+      ctx.restore();
+    }
+    y += previewH + pad(token, 1);
 
     y += drawSectionTitle(ctx, 0, y, 'Condition', lui);
     drawStatBar(
@@ -173,10 +197,19 @@ export class TuningScene implements Scene {
       const atMax = tier >= BALANCE.maxPartTier;
 
       drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui);
+      const localY = y + view.y - this.scroller.scroll.offset;
+      if (
+        lui.pointerX >= view.x &&
+        lui.pointerX <= view.x + view.w &&
+        lui.pointerY >= localY &&
+        lui.pointerY <= localY + rowH
+      ) {
+        this.previewPart = part.id;
+      }
 
       ctx.save();
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-      ctx.fillStyle = token.text;
+      ctx.fillStyle = this.previewPart === part.id ? accent : token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(part.name, pad(token, 0.5), y + rowH * 0.5);

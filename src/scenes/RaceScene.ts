@@ -5,13 +5,11 @@ import { getTrait } from '../data/traits';
 import { PHYSICS } from '../data/physics';
 import {
   RaceDirector,
-  teamColor,
   type CountdownPhase,
   type GhostSample,
   type GhostTrace,
 } from '../engine/RaceDirector';
-import type { CarSimState } from '../engine/Vehicle';
-import type { OnboardingFlags, RaceEvent } from '../engine/types';
+import type { OnboardingFlags, RaceEvent, VehicleParts } from '../engine/types';
 import {
   intentHudLabel,
   intentTickerPhrase,
@@ -25,9 +23,9 @@ import {
   type RaceLaunchConfig,
   type RaceObjectiveStats,
 } from '../engine/raceTypes';
-import { Camera } from '../graphics/Camera';
-import { Particles } from '../graphics/Particles';
-import { VectorRenderer, sampleTrack } from '../graphics/VectorRenderer';
+import { RaceView } from '../graphics/RaceView';
+import { writeCarWorld } from '../graphics/TrackSampler';
+import type { CarFrameDto, FxImpulse, RaceFrameView } from '../graphics/types';
 import {
   drawPegMeter,
   drawPreRaceCard,
@@ -59,6 +57,22 @@ const FINISH_DELAY_SEC = 2.2;
 const TICKER_MAX = 4;
 const TICKER_TTL = 6;
 
+const carPoseScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
+const ghostScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
+
+/** Soft rival paint — team hue nudged by loadout strength. */
+function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts): string {
+  const hue = teamCount <= 0 ? 200 : Math.round((teamId * 360) / teamCount) % 360;
+  let tierSum = 0;
+  for (const k of Object.keys(parts) as (keyof VehicleParts)[]) {
+    tierSum += parts[k] ?? 1;
+  }
+  const avg = tierSum / 7;
+  const light = 48 + Math.min(12, avg * 2);
+  const sat = 62 + Math.min(12, (avg - 1) * 3);
+  return `hsl(${hue}, ${sat}%, ${light}%)`;
+}
+
 interface TickerLine {
   text: string;
   ttl: number;
@@ -86,9 +100,10 @@ export class RaceScene implements Scene {
   private readonly g: GameContext;
   private readonly launch: RaceLaunchConfig;
   private director: RaceDirector | null = null;
-  private renderer = new VectorRenderer();
-  private camera = new Camera();
-  private particles = new Particles();
+  private view = new RaceView();
+  private frameCars: CarFrameDto[] = [];
+  private fxImpulses: FxImpulse[] = [];
+  private camOut = { x: 0, y: 0, zoom: 1 };
   private paused = false;
   private pauseModal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private finishTimer = 0;
@@ -106,6 +121,7 @@ export class RaceScene implements Scene {
   /** One-shot lift warning before first deslot teaching toast. */
   private warnedDeslotLift = false;
   private nearDeslotFxCd = 0;
+  private condScrapeFxCd = 0;
   private shiftCueArmed = false;
   private ghostCarId: string | null = null;
   private ghostTrace: GhostTrace | null = null;
@@ -179,8 +195,12 @@ export class RaceScene implements Scene {
 
       const raceConfig = buildRaceConfig(state, this.launch);
       this.director = new RaceDirector(raceConfig);
-      this.renderer.bakeTrack(this.director.track, this.launch.discipline, this.director.night);
-      this.particles.setRaining(this.director.rain);
+      this.view.prepare({
+        track: this.director.track,
+        discipline: this.launch.discipline,
+        night: this.director.night,
+        rain: this.director.rain,
+      });
       this.g.audio.setDiscipline?.(this.launch.discipline);
       this.g.audio.setRain(this.director.rain);
 
@@ -304,53 +324,46 @@ export class RaceScene implements Scene {
 
     const token = createTheme(w, h);
     const accent = disciplineAccent(this.launch.discipline);
-    const cam = this.camera.getTransform();
+    const cam = this.view.writeCamera(this.camOut);
+    const cars = this.buildCarFrame(director, accent);
+    const playerIdx = cars.findIndex((c) => c.isPlayer);
 
-    this.renderer.blitTrack(ctx, cam, w, h);
-    if (director.night) {
-      ctx.save();
-      const g = ctx.createRadialGradient(w * 0.5, h * 0.45, h * 0.15, w * 0.5, h * 0.5, h * 0.85);
-      g.addColorStop(0, 'rgba(0,0,0,0)');
-      g.addColorStop(1, 'rgba(4,8,20,0.42)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-      ctx.restore();
-    }
-
+    let ghost: RaceFrameView['ghost'] = null;
     if (this.ghostTrace !== null && this.ghostCarId !== null && director.countdown === null) {
       const sample = sampleGhost(this.ghostTrace, this.ghostCarId, director.raceClock);
       if (sample !== null) {
-        const track = this.renderer.getTrack();
+        const track = this.view.getTrack();
         if (track !== null) {
-          const ts = sampleTrack(track, sample.s);
-          const wx = ts.pos.x + ts.normal.x * sample.l;
-          const wy = ts.pos.y + ts.normal.y * sample.l;
-          const tang = Math.atan2(ts.tangent.y, ts.tangent.x);
-          this.renderer.drawGhost(ctx, wx, wy, tang, `${accent}66`, cam, w, h);
+          writeCarWorld(track, sample.s, sample.l, ghostScratch);
+          ghost = {
+            worldX: ghostScratch.x,
+            worldY: ghostScratch.y,
+            heading: ghostScratch.heading,
+            color: `${accent}66`,
+          };
         }
       }
     }
 
-    // Ground FX under cars — tabletop depth.
-    this.particles.renderGround(ctx, cam, w, h);
-
-    const cars = director.cars;
-    const teamCount = director.config.format.teamCount;
-    const playerIdx = cars.findIndex((c) => c.isPlayerControlled);
-
-    for (let i = 0; i < cars.length; i++) {
-      const car = cars[i]!;
-      const color = teamColor(car.teamId, teamCount);
-      this.renderer.drawCar(ctx, car, color, car.isPlayerControlled, cam, w, h);
-    }
-
-    this.particles.renderAir(ctx, cam, w, h);
-    this.particles.renderRain(ctx, w, h);
+    const frame: RaceFrameView = {
+      camera: cam,
+      screenW: w,
+      screenH: h,
+      night: director.night,
+      rain: director.rain,
+      cars,
+      playerIndex: playerIdx,
+      ghost,
+      countdown: director.countdown,
+      discipline: this.launch.discipline,
+    };
+    this.view.draw(ctx, frame);
 
     this.drawHud(ctx, w, h, token, accent, director, cars, playerIdx);
     this.drawPedalTints(ctx, w, h, token);
     const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
     const traitName = leadDriver !== undefined ? getTrait(leadDriver.trait).name : 'Driver';
+    const vehicle = this.g.state?.vehicles[this.launch.discipline];
     drawPreRaceCard(ctx, w, h, token, accent, {
       discipline: this.launch.discipline,
       laps: director.config.laps,
@@ -359,6 +372,7 @@ export class RaceScene implements Scene {
       driverName: leadDriver?.name ?? 'Driver',
       traitName,
       phase: director.countdown,
+      partTiers: vehicle?.partTiers,
     });
     this.drawCountdownBanner(ctx, w, h, token, director.countdown);
     if (director.rain) this.drawRainChip(ctx, w, h, token);
@@ -398,6 +412,46 @@ export class RaceScene implements Scene {
     if (this.g.debug) {
       this.drawDebugOverlay(ctx, w, h, token, director);
     }
+  }
+
+  private buildCarFrame(director: RaceDirector, playerAccent: string): CarFrameDto[] {
+    const track = this.view.getTrack();
+    const teamCount = director.config.format.teamCount;
+    const out = this.frameCars;
+    out.length = 0;
+    if (track === null) return out;
+
+    for (const car of director.cars) {
+      writeCarWorld(track, car.s, car.l, carPoseScratch, car.slipAngle);
+      const parts = director.partTiersFor(car.id);
+      const color = car.isPlayerControlled
+        ? playerAccent
+        : rivalPaint(car.teamId, teamCount, parts);
+      out.push({
+        id: car.id,
+        s: car.s,
+        l: car.l,
+        v: car.v,
+        slipAngle: car.slipAngle,
+        heading: carPoseScratch.heading,
+        color,
+        isPlayer: car.isPlayerControlled,
+        tyreTemp: car.tyreTemp,
+        condition: car.condition,
+        slotMode: car.slotMode,
+        driftState: car.driftState,
+        spinRemaining: car.spinRemaining,
+        gripUsage: car.gripUsage,
+        partTiers: parts,
+        worldX: carPoseScratch.x,
+        worldY: carPoseScratch.y,
+        tangentX: carPoseScratch.tx,
+        tangentY: carPoseScratch.ty,
+        lineNoise: car.stats.lineNoise,
+      });
+    }
+    this.frameCars = out;
+    return out;
   }
 
   private openPause(): void {
@@ -564,57 +618,31 @@ export class RaceScene implements Scene {
   private setupCountdownCamera(): void {
     const director = this.director;
     if (director === null) return;
-    const track = this.renderer.getTrack();
-    if (track === null) return;
-
-    const positions = director.cars.map((car) => {
-      const sample = sampleTrack(track, car.s);
-      return {
-        x: sample.pos.x + sample.normal.x * car.l,
-        y: sample.pos.y + sample.normal.y * car.l,
-      };
-    });
-
-    this.camera.setCountdownTargets(
-      positions,
+    const accent = disciplineAccent(this.launch.discipline);
+    const cars = this.buildCarFrame(director, accent);
+    this.view.syncCameraCountdown(
+      cars,
       this.g.canvas.clientWidth,
       this.g.canvas.clientHeight,
     );
   }
 
   private updateCamera(director: RaceDirector): void {
-    const track = this.renderer.getTrack();
-    if (track === null) return;
+    const accent = disciplineAccent(this.launch.discipline);
+    const cars = this.buildCarFrame(director, accent);
+    const w = this.g.canvas.clientWidth;
+    const h = this.g.canvas.clientHeight;
 
     if (director.countdown !== null) {
-      const positions = director.cars.map((car) => {
-        const sample = sampleTrack(track, car.s);
-        return {
-          x: sample.pos.x + sample.normal.x * car.l,
-          y: sample.pos.y + sample.normal.y * car.l,
-        };
-      });
-      this.camera.setCountdownTargets(
-        positions,
-        this.g.canvas.clientWidth,
-        this.g.canvas.clientHeight,
-      );
+      this.view.syncCameraCountdown(cars, w, h);
     } else {
-      const player = director.cars.find((c) => c.isPlayerControlled) ?? director.cars[0];
+      const player = cars.find((c) => c.isPlayer) ?? cars[0];
       if (player !== undefined) {
-        const sample = sampleTrack(track, player.s);
-        this.camera.setFollowTarget(
-          {
-            x: sample.pos.x + sample.normal.x * player.l,
-            y: sample.pos.y + sample.normal.y * player.l,
-          },
-          player.v,
-          sample.tangent,
-        );
+        this.view.syncCameraFollow(player, w, h);
       }
     }
 
-    this.camera.update(this.lastDt);
+    this.view.updateCamera(this.lastDt);
   }
 
   private updateCountdownAudio(phase: CountdownPhase): void {
@@ -628,13 +656,14 @@ export class RaceScene implements Scene {
   }
 
   private updateCarAudioAndParticles(director: RaceDirector): void {
-    const track = this.renderer.getTrack();
+    const track = this.view.getTrack();
     if (track === null) return;
 
     const player = director.cars.find((c) => c.isPlayerControlled);
     const ent = director.entertainmentSnapshot;
     this.stats.entertainmentScore = ent.entertainmentScore;
     this.g.audio.setCrowd(ent.hype);
+    this.fxImpulses.length = 0;
 
     if (player !== undefined) {
       this.g.audio.updateVehicleAudio({
@@ -693,15 +722,14 @@ export class RaceScene implements Scene {
         this.g.audio.playSpin();
       }
 
-      // Near-deslot tell + Authority / peg / shift teach (presentation only).
       const kappa = sampleKappaAt(director.track.nodes, player.s);
       this.nearDeslotFxCd = Math.max(0, this.nearDeslotFxCd - this.lastDt);
       if (nearDeslotThreat(player, kappa) && this.nearDeslotFxCd <= 0) {
-        const renderedP = this.renderer.sampleCar(player);
-        if (renderedP !== null) {
-          this.particles.emitSparks(renderedP.pos.x, renderedP.pos.y, 3, 2);
-          this.particles.emitDust(renderedP.pos.x, renderedP.pos.y, 3, 0.95);
-        }
+        writeCarWorld(track, player.s, player.l, carPoseScratch, player.slipAngle);
+        this.fxImpulses.push(
+          { kind: 'sparks', x: carPoseScratch.x, y: carPoseScratch.y, index: 2, count: 3 },
+          { kind: 'dust', x: carPoseScratch.x, y: carPoseScratch.y, index: 3, intensity: 0.95 },
+        );
         this.nearDeslotFxCd = 0.35;
         if (!this.g.state!.onboarding.shownPegHint && this.hintText === null) {
           this.showHint('Peg meter: keep under 100% in bends', 'shownPegHint');
@@ -735,34 +763,64 @@ export class RaceScene implements Scene {
       this.prevPlayerSpins = player.spinCount;
       this.prevPlayerDeslots = player.deslotCount;
       this.prevPlayerContactHits = player.contactHits;
+
+      // Condition scrape escalation when Cond drops mid-race.
+      this.condScrapeFxCd = Math.max(0, this.condScrapeFxCd - this.lastDt);
+      if (
+        this.condScrapeFxCd <= 0 &&
+        player.condition < this.stats.vehicleConditionAtStart - 0.02 &&
+        player.v > 8
+      ) {
+        writeCarWorld(track, player.s, player.l, carPoseScratch, player.slipAngle);
+        this.fxImpulses.push({
+          kind: 'sparks',
+          x: carPoseScratch.x,
+          y: carPoseScratch.y,
+          index: 11,
+          count: 2,
+        });
+        this.condScrapeFxCd = 0.55;
+      }
     }
 
     let tick = 0;
     for (const car of director.cars) {
-      const rendered = this.renderer.sampleCar(car);
-      if (rendered === null) continue;
+      writeCarWorld(track, car.s, car.l, carPoseScratch, car.slipAngle);
+      const px = carPoseScratch.x;
+      const py = carPoseScratch.y;
       const prev = this.prevCarSamples.get(car.id);
-      const px = rendered.pos.x;
-      const py = rendered.pos.y;
 
       const scrubbing = car.driftState || car.slotMode === 'deslot';
       if (prev !== undefined && scrubbing && car.v > 4) {
-        this.particles.emitSkid(prev.x, prev.y, px, py);
+        this.fxImpulses.push({
+          kind: 'skid',
+          x: prev.x,
+          y: prev.y,
+          x2: px,
+          y2: py,
+          index: tick,
+        });
       }
       if (scrubbing && car.v > 6) {
-        this.particles.emitDust(px, py, tick, Math.max(car.gripUsage, 1.1));
+        this.fxImpulses.push({
+          kind: 'dust',
+          x: px,
+          y: py,
+          index: tick,
+          intensity: Math.max(car.gripUsage, 1.1),
+        });
       }
       if (car.spinRemaining > 0) {
-        this.particles.emitSmoke(px, py, tick);
+        this.fxImpulses.push({ kind: 'smoke', x: px, y: py, index: tick });
       }
       const prevDeslots = this.prevCarDeslots.get(car.id) ?? 0;
       if (car.deslotCount > prevDeslots) {
-        this.particles.emitSparks(px, py, tick);
+        this.fxImpulses.push({ kind: 'sparks', x: px, y: py, index: tick });
       }
       this.prevCarDeslots.set(car.id, car.deslotCount);
       const prevHits = this.prevCarWallHits.get(car.id) ?? 0;
       if (car.wallHits > prevHits && car.v > PHYSICS.crashSpeed) {
-        this.particles.emitSparks(px, py, tick);
+        this.fxImpulses.push({ kind: 'sparks', x: px, y: py, index: tick });
       }
       this.prevCarWallHits.set(car.id, car.wallHits);
 
@@ -770,7 +828,8 @@ export class RaceScene implements Scene {
       tick += 1;
     }
 
-    this.particles.update(this.lastDt);
+    this.view.applyFx(this.fxImpulses);
+    this.view.updateFx(this.lastDt);
   }
 
   private updateTicker(events: readonly RaceEvent[], eventSeq: number, dt: number): void {
@@ -880,10 +939,10 @@ export class RaceScene implements Scene {
     token: ThemeTokens,
     accent: string,
     director: RaceDirector,
-    cars: readonly CarSimState[],
+    cars: readonly CarFrameDto[],
     playerIdx: number,
   ): void {
-    const player = cars.find((c) => c.isPlayerControlled);
+    const player = director.cars.find((c) => c.isPlayerControlled);
     const standing = director.currentStandings.find((s) => s.isPlayerControlled);
     const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
 
@@ -893,7 +952,7 @@ export class RaceScene implements Scene {
     const mmSize = Math.min(pad(token, 10), w * 0.22, h * 0.18);
     const mmX = w - safe.right - pad(token) - mmSize;
     const mmY = safe.top + pad(token);
-    this.renderer.drawMinimap(
+    this.view.drawMinimap(
       ctx,
       { x: mmX, y: mmY, w: mmSize, h: mmSize * 0.72 },
       cars,
@@ -905,7 +964,7 @@ export class RaceScene implements Scene {
       y: mmY + mmSize * 0.72 + pad(token, 0.5),
       w: pauseSize,
       h: pauseSize,
-      label: '⏸',
+      label: 'II',
       onClick: () => this.openPause(),
     };
 
@@ -969,7 +1028,13 @@ export class RaceScene implements Scene {
         hudY += token.fontBody + pad(token, 0.25);
         ctx.fillText(tyre, hudX, hudY);
       }
-      hudY += token.fontBody + pad(token, 0.6);
+      hudY += token.fontBody + pad(token, 0.35);
+      // Line cleanliness — presentation of existing lineNoise (suspension/condition).
+      const clean = Math.max(0, Math.min(1, 1.2 - player.stats.lineNoise));
+      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = clean > 0.7 ? token.textDim : clean > 0.45 ? '#fbbf24' : token.danger;
+      ctx.fillText(`Line ${Math.round(clean * 100)}%`, hudX, hudY);
+      hudY += token.fontCaption + pad(token, 0.5);
 
       const barW = Math.min(pad(token, 12), telemetryMaxW);
       const barH = Math.max(4, pad(token, 0.45));

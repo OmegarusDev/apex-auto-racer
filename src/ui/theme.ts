@@ -1,4 +1,5 @@
 import type { DisciplineId } from '../data/disciplines';
+import { BRAND_BODY_FONT, BRAND_DISPLAY_FONT } from './brand';
 
 /** Reference viewport short edge for token scaling. */
 const BASE_MIN = 720;
@@ -117,10 +118,8 @@ export function createTheme(w: number, h: number): ThemeTokens {
     fontBody: Math.max(14, 16 * scale),
     fontCaption: Math.max(11, 12 * scale),
     fontHero,
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    fontDisplayFamily:
-      '"Arial Narrow", "Helvetica Neue Condensed", "Roboto Condensed", Impact, "Arial Black", sans-serif',
+    fontFamily: BRAND_BODY_FONT,
+    fontDisplayFamily: BRAND_DISPLAY_FONT,
     bg: '#0a0a0c',
     bgElevated: '#121216',
     card: '#16161a',

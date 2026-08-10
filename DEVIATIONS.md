@@ -82,3 +82,4 @@ Three layers — keep new work in the right one:
 - On-device Android LAN verify not run here (Capacitor scaffolding removed until needed).
 - Exhaustive tier/rank balance matrices and dual-orientation visual QA remain manual.
 - Full visual identity + menu-flow product overhaul deferred until playability soak.
+- **Presentation rebuild (2026-08-10)** — Graphics engine split into `RaceView` + `TrackBaker` / `TrackBlit` / `CarPainter` / `materials` / `TrackSampler`. RaceScene consumes `RaceFrameView` DTOs; cars show part tiers / condition / tyre; garage+tuning share CarPainter; brand shell via `ui/brand.ts`. Feel-freeze physics untouched. Quick Race Results Back uses `returnTo: 'title'`.

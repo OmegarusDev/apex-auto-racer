@@ -227,6 +227,7 @@ export class CampaignScene implements Scene {
       leadDriverId: progress.leadDriverId,
       mode: 'tournament',
       tournamentDefId: def.id,
+      returnTo: 'campaign',
     };
     launchRace(config, this.toasts);
   }
@@ -444,7 +445,7 @@ export class CampaignScene implements Scene {
           this.toasts.push('Need a driver on the roster', accent);
           return;
         }
-        const config = makeQuickRaceConfig(state, this.discipline);
+        const config = makeQuickRaceConfig(state, this.discipline, 'campaign');
         launchRace(config, this.toasts);
       },
     };

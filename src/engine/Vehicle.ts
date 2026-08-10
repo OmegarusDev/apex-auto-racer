@@ -100,8 +100,8 @@ export interface ZoneModifiers {
   atWall: boolean;
 }
 
-/** Match VectorRenderer kerb kappa gate so zones align with painted stripes. */
-const KERB_KAPPA_THRESHOLD = 0.012;
+/** Match TrackBaker kerb kappa gate so zones align with painted stripes. */
+const KERB_KAPPA_THRESHOLD = PHYSICS.kerbKappa;
 
 /** Tyre temperature grip multiplier (plan 4.1; cold floor from PHYSICS.tyreColdGrip). */
 export function computeTempGrip(T: number): number {

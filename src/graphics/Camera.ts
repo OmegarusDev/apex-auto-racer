@@ -87,8 +87,18 @@ export class Camera {
   }
 
   getTransform(): CameraTransform {
-    return { x: this.x, y: this.y, zoom: this.zoom };
+    return this.writeTransform(this.transformScratch);
   }
+
+  /** Write current transform into `out` — no alloc. */
+  writeTransform(out: CameraTransform): CameraTransform {
+    out.x = this.x;
+    out.y = this.y;
+    out.zoom = this.zoom;
+    return out;
+  }
+
+  private transformScratch: CameraTransform = { x: 0, y: 0, zoom: 1 };
 }
 
 function clamp(v: number, min: number, max: number): number {

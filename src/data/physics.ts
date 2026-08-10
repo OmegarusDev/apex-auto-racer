@@ -21,6 +21,8 @@ export const PHYSICS = {
    */
   gearCapSoft: 1.08,
   kerbOuterM: 0.8,
+  /** Kappa gate for painted kerbs — must match Vehicle zone detection. */
+  kerbKappa: 0.012,
   kerbGrip: 0.95,
   runoffGrip: 0.5,
   runoffDrag: 3,

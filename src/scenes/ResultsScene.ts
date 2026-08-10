@@ -204,6 +204,12 @@ export class ResultsScene implements Scene {
 
   private navigateBack(): void {
     const g = getGameContext();
+    if (this.payload.config.returnTo === 'title' || this.payload.config.mode === 'quick') {
+      void import('./TitleScene').then((mod) => {
+        g.scenes.replace(new mod.TitleScene());
+      });
+      return;
+    }
     g.scenes.replace(new CampaignScene(this.payload.discipline));
   }
 
@@ -223,7 +229,7 @@ export class ResultsScene implements Scene {
     }
     const g = getGameContext();
     if (g.state !== null && this.payload.config.mode === 'quick') {
-      launchRace(makeQuickRaceConfig(g.state, this.payload.discipline), this.toasts);
+      launchRace(makeQuickRaceConfig(g.state, this.payload.discipline, this.payload.config.returnTo ?? 'title'), this.toasts);
       return;
     }
     this.navigateBack();

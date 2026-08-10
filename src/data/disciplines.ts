@@ -18,7 +18,7 @@ export interface DisciplineDef {
     kerbA: string;
     kerbB: string;
     runoff: string;
-    /** Optional center-groove tint hint (unused by bake; reserved). */
+    /** Center-groove channel tint for TrackBaker Scalextric rail. */
     groove?: string;
   };
 }
@@ -42,6 +42,7 @@ export const DISCIPLINES: DisciplineDef[] = [
       kerbA: '#3b82f6',
       kerbB: '#f8fafc',
       runoff: '#2a2a30',
+      groove: 'rgba(0,0,0,0.5)',
     },
   },
   {
@@ -62,6 +63,7 @@ export const DISCIPLINES: DisciplineDef[] = [
       kerbA: '#eab308',
       kerbB: '#fefce8',
       runoff: '#3a3a3c',
+      groove: 'rgba(0,0,0,0.48)',
     },
   },
   {
@@ -82,6 +84,7 @@ export const DISCIPLINES: DisciplineDef[] = [
       kerbA: '#a16207',
       kerbB: '#fef3c7',
       runoff: '#6b5344',
+      groove: 'rgba(20,10,0,0.45)',
     },
   },
 ];

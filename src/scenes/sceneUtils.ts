@@ -30,6 +30,8 @@ import {
   ensureMinTouch,
 } from '../ui/components';
 import { drawSlotCarMesh } from '../graphics/CarMesh';
+import { drawBrandAtmosphere } from '../ui/brand';
+import { BRAND_DISPLAY_FONT } from '../ui/brand';
 
 export const DISCIPLINE_ORDER: DisciplineId[] = ['track', 'street', 'rally'];
 
@@ -119,7 +121,11 @@ export function defaultLeadDriver(state: GameState, lineup: string[]): string {
   return lineup[0] ?? state.roster[0]?.id ?? '';
 }
 
-export function makeQuickRaceConfig(state: GameState, discipline: DisciplineId): RaceLaunchConfig {
+export function makeQuickRaceConfig(
+  state: GameState,
+  discipline: DisciplineId,
+  returnTo: 'title' | 'campaign' = 'title',
+): RaceLaunchConfig {
   const seedMaterial =
     (state.seed +
       state.careerStats.races * 9973 +
@@ -152,6 +158,7 @@ export function makeQuickRaceConfig(state: GameState, discipline: DisciplineId):
     playerLineup,
     leadDriverId,
     mode: 'quick',
+    returnTo,
   };
 }
 
@@ -241,28 +248,18 @@ export function launchRace(config: RaceLaunchConfig, toasts: ToastManager): void
   }
 }
 
-export function drawBackground(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
-  ctx.fillStyle = token.bg;
-  ctx.fillRect(0, 0, w, h);
-  // Quiet Title-grade atmosphere — menus share product space, not a flat void.
-  ctx.save();
-  const g = ctx.createRadialGradient(w * 0.5, h * 0.28, 0, w * 0.5, h * 0.4, Math.max(w, h) * 0.75);
-  g.addColorStop(0, 'rgba(34, 28, 22, 0.28)');
-  g.addColorStop(0.45, 'rgba(18, 18, 24, 0.12)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  const bottom = ctx.createLinearGradient(0, h * 0.7, 0, h);
-  bottom.addColorStop(0, 'rgba(0,0,0,0)');
-  bottom.addColorStop(1, 'rgba(0,0,0,0.35)');
-  ctx.fillStyle = bottom;
-  ctx.fillRect(0, h * 0.7, w, h * 0.3);
-  ctx.restore();
+export function drawBackground(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  token: ThemeTokens,
+  accent?: string,
+): void {
+  drawBrandAtmosphere(ctx, w, h, token, accent);
 }
 
 const ACCENT_RIBBON = '#22d3ee';
-const TITLE_FONT =
-  '"Arial Narrow", "Helvetica Neue Condensed", "Roboto Condensed", Impact, "Arial Black", sans-serif';
+const TITLE_FONT = BRAND_DISPLAY_FONT;
 
 export interface PlanarPoint {
   x: number;
@@ -847,6 +844,11 @@ export function drawTopDownCar(
   h: number,
   accent: string,
   discipline: DisciplineId,
+  opts?: {
+    partTiers?: import('../engine/types').VehicleParts;
+    condition?: number;
+    highlightPart?: import('../data/parts').PartCategory;
+  },
 ): void {
   const def = getDiscipline(discipline);
   ctx.save();
@@ -858,6 +860,10 @@ export function drawTopDownCar(
   ctx.fill();
   // Nose up for garage read (matches race heading convention).
   ctx.rotate(-Math.PI / 2);
+  const previewTiers = opts?.partTiers ? { ...opts.partTiers } : undefined;
+  if (previewTiers && opts?.highlightPart) {
+    previewTiers[opts.highlightPart] = Math.min(5, (previewTiers[opts.highlightPart] ?? 1) + 1);
+  }
   drawSlotCarMesh(
     ctx,
     {
@@ -867,6 +873,9 @@ export function drawTopDownCar(
       isPlayer: true,
       detail: 'hero',
       discipline,
+      partTiers: previewTiers,
+      condition: opts?.condition ?? 1,
+      tyreTemp: 0.75,
     },
     true,
   );

@@ -566,6 +566,12 @@ export class RaceDirector {
     return this.carsView;
   }
 
+  /** Presentation seam — part tiers for CarPainter (not on CarSimState). */
+  partTiersFor(carId: string): VehicleParts {
+    const entry = this.entries.find((e) => e.car.id === carId);
+    return entry?.partTiers ?? emptyVehicleParts(1);
+  }
+
   /**
    * Headless/test harness — stable snapshot so validators need not cast private entries.
    * Full RaceDirector module split deferred; this is the public seam for feel gates.

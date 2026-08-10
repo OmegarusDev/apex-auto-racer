@@ -86,12 +86,13 @@ export function drawPreRaceCard(
     driverName: string;
     traitName: string;
     phase: 3 | 2 | 1 | 'go' | null;
+    partTiers?: import('../engine/types').VehicleParts;
   },
 ): void {
   if (opts.phase !== 3 && opts.phase !== 2) return;
   const def = getDiscipline(opts.discipline);
   const cardW = Math.min(w - pad(token, 4), pad(token, 36));
-  const cardH = pad(token, 14);
+  const cardH = pad(token, opts.partTiers ? 16.5 : 14);
   const x = (w - cardW) * 0.5;
   const y = h * 0.18;
 
@@ -126,6 +127,20 @@ export function drawPreRaceCard(
   if (opts.night) bits.push('Night');
   bits.push('Gears auto · Shift early optional');
   ctx.fillText(bits.join(' · '), x + cardW * 0.5, y + cardH - pad(token, 2) - token.fontCaption);
+
+  if (opts.partTiers) {
+    const focus =
+      opts.discipline === 'rally'
+        ? (['tyres', 'suspension', 'brakes'] as const)
+        : opts.discipline === 'street'
+          ? (['brakes', 'tyres', 'engine'] as const)
+          : (['spoiler', 'engine', 'tyres'] as const);
+    const loadout = focus
+      .map((id) => `${id.slice(0, 3).toUpperCase()} T${opts.partTiers![id] ?? 1}`)
+      .join(' · ');
+    ctx.fillStyle = accent;
+    ctx.fillText(loadout, x + cardW * 0.5, y + cardH - pad(token, 3.5) - token.fontCaption);
+  }
   ctx.restore();
 }
 

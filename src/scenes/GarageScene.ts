@@ -191,7 +191,10 @@ export class GarageScene implements Scene {
       ctx.fillStyle = glow;
       ctx.fillRect(carCx - carW, carCy - carH * 0.7, carW * 2, carH * 1.4);
       ctx.restore();
-      drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline);
+      drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline, {
+        partTiers: vehicle.partTiers,
+        condition: vehicle.condition,
+      });
       y += carH + pad(token, 1);
       drawRadarChart(
         ctx,
@@ -216,7 +219,10 @@ export class GarageScene implements Scene {
       ctx.fillStyle = glow;
       ctx.fillRect(carCx - carW, carCy - carH * 0.7, carW * 2, carH * 1.4);
       ctx.restore();
-      drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline);
+      drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline, {
+        partTiers: vehicle.partTiers,
+        condition: vehicle.condition,
+      });
       drawRadarChart(
         ctx,
         {

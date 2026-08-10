@@ -872,7 +872,7 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
       y: midY - btnSize * 0.5,
       w: btnSize,
       h: btnSize,
-      label: '⚙',
+      label: 'OPT',
       onClick: header.onSettings,
     };
     drawButton(ctx, settingsBtn, ui);
@@ -928,7 +928,7 @@ export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
       y: midY - btnSize * 0.5,
       w: btnSize,
       h: btnSize,
-      label: '⚙',
+      label: 'OPT',
       onClick: header.onSettings,
     };
     if (handleButton(settingsBtn, ui)) handled = true;

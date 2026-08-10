@@ -19,6 +19,8 @@ export interface RaceLaunchConfig {
   mode: 'quick' | 'tournament';
   tournamentDefId?: string;
   again?: boolean;
+  /** Where Results Back should land — Title for Quick Race, Campaign otherwise. */
+  returnTo?: 'title' | 'campaign';
 }
 
 export interface RaceResultEntry {
@@ -432,6 +434,7 @@ export function buildResultsPayload(
             leadDriverId: progress.leadDriverId,
             mode: 'tournament',
             tournamentDefId: def.id,
+            returnTo: launch.returnTo ?? 'campaign',
           };
         }
       }

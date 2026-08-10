@@ -6,8 +6,15 @@
 import { KERB_KAPPA } from '../constants';
 import type { TrackPalette } from '../materials';
 import type { TrackView } from '../types';
+import {
+  MAT_CONCRETE,
+  MAT_DIRT,
+  MAT_GRASS,
+  MAT_GROOVE,
+  MAT_RUMBLE,
+  MAT_TARMAC,
+} from './materials';
 import { MeshBuilder } from './MeshBuilder';
-import { hexToRgb } from './math';
 
 export interface BuiltTrackMesh {
   vertices: Float32Array;
@@ -66,7 +73,7 @@ function sampleClosed(
     const kappa = Math.abs(a.kappa) * (1 - t) + Math.abs(b.kappa) * t;
     out.push({
       x,
-      z: -y, // engine Z
+      z: -y,
       tx: tx / tlen,
       tz: -ty / tlen,
       nx: nx / nlen,
@@ -76,31 +83,38 @@ function sampleClosed(
       kappa,
     });
   }
-  // Close ring by repeating first
   out.push(out[0]!);
   return out;
 }
 
-export function buildTrackGeometry(track: TrackView, palette: TrackPalette): BuiltTrackMesh {
+export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): BuiltTrackMesh {
+  void _palette;
   const mb = new MeshBuilder();
-  const samples = sampleClosed(track, Math.max(96, track.nodes.length * 2));
-  const asphalt = hexToRgb(palette.asphalt);
-  const runoffC = hexToRgb(palette.runoff);
-  const kerbA = hexToRgb(palette.kerbA);
-  const kerbB = hexToRgb(palette.kerbB);
-  const accent = hexToRgb(palette.accent);
-  const rim = hexToRgb(palette.accentDim);
+  const samples = sampleClosed(track, Math.max(120, track.nodes.length * 2));
+
+  // Neutral bases — shader noise owns the look.
+  const tarmacBase = [0.16, 0.16, 0.17] as const;
+  const dirtBase = [0.3, 0.24, 0.16] as const;
+  const grassBase = [0.2, 0.32, 0.14] as const;
+  const grooveBase = [0.08, 0.08, 0.09] as const;
+  const concreteBase = [0.4, 0.39, 0.36] as const;
 
   const leftAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const rightAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const leftGroove: Array<{ x: number; y: number; z: number }> = [];
   const rightGroove: Array<{ x: number; y: number; z: number }> = [];
-  const leftRun: Array<{ x: number; y: number; z: number }> = [];
-  const rightRun: Array<{ x: number; y: number; z: number }> = [];
+  const leftDirtInner: Array<{ x: number; y: number; z: number }> = [];
+  const rightDirtInner: Array<{ x: number; y: number; z: number }> = [];
+  const leftDirtOuter: Array<{ x: number; y: number; z: number }> = [];
+  const rightDirtOuter: Array<{ x: number; y: number; z: number }> = [];
+  const leftGrassOuter: Array<{ x: number; y: number; z: number }> = [];
+  const rightGrassOuter: Array<{ x: number; y: number; z: number }> = [];
 
   const grooveHalf = 0.55;
+  const grassExtra = 14;
 
   for (const s of samples) {
+    const dirtW = Math.max(s.runoff, 2.2);
     leftAsphalt.push({
       x: s.x + s.nx * s.halfW,
       y: 0.02,
@@ -113,90 +127,167 @@ export function buildTrackGeometry(track: TrackView, palette: TrackPalette): Bui
     });
     leftGroove.push({
       x: s.x + s.nx * grooveHalf,
-      y: -0.04,
+      y: -0.045,
       z: s.z + s.nz * grooveHalf,
     });
     rightGroove.push({
       x: s.x - s.nx * grooveHalf,
-      y: -0.04,
+      y: -0.045,
       z: s.z - s.nz * grooveHalf,
     });
-    leftRun.push({
-      x: s.x + s.nx * (s.halfW + s.runoff),
-      y: -0.01,
-      z: s.z + s.nz * (s.halfW + s.runoff),
+    leftDirtInner.push({
+      x: s.x + s.nx * s.halfW,
+      y: 0.0,
+      z: s.z + s.nz * s.halfW,
     });
-    rightRun.push({
-      x: s.x - s.nx * (s.halfW + s.runoff),
-      y: -0.01,
-      z: s.z - s.nz * (s.halfW + s.runoff),
+    rightDirtInner.push({
+      x: s.x - s.nx * s.halfW,
+      y: 0.0,
+      z: s.z - s.nz * s.halfW,
+    });
+    leftDirtOuter.push({
+      x: s.x + s.nx * (s.halfW + dirtW),
+      y: -0.015,
+      z: s.z + s.nz * (s.halfW + dirtW),
+    });
+    rightDirtOuter.push({
+      x: s.x - s.nx * (s.halfW + dirtW),
+      y: -0.015,
+      z: s.z - s.nz * (s.halfW + dirtW),
+    });
+    leftGrassOuter.push({
+      x: s.x + s.nx * (s.halfW + dirtW + grassExtra),
+      y: -0.04,
+      z: s.z + s.nz * (s.halfW + dirtW + grassExtra),
+    });
+    rightGrassOuter.push({
+      x: s.x - s.nx * (s.halfW + dirtW + grassExtra),
+      y: -0.04,
+      z: s.z - s.nz * (s.halfW + dirtW + grassExtra),
     });
   }
 
-  // Plate / runoff
-  mb.ribbon(leftRun, leftAsphalt, 0, runoffC[0] * 0.85, runoffC[1] * 0.85, runoffC[2] * 0.85);
-  mb.ribbon(rightAsphalt, rightRun, 0, runoffC[0] * 0.85, runoffC[1] * 0.85, runoffC[2] * 0.85);
+  // Grass verges beyond dirt
+  mb.ribbon(
+    leftGrassOuter,
+    leftDirtOuter,
+    0,
+    grassBase[0],
+    grassBase[1],
+    grassBase[2],
+    MAT_GRASS,
+  );
+  mb.ribbon(
+    rightDirtOuter,
+    rightGrassOuter,
+    0,
+    grassBase[0],
+    grassBase[1],
+    grassBase[2],
+    MAT_GRASS,
+  );
 
-  // Main asphalt decks (left of groove / right of groove)
-  mb.ribbon(leftAsphalt, leftGroove, 0, asphalt[0], asphalt[1], asphalt[2]);
-  mb.ribbon(rightGroove, rightAsphalt, 0, asphalt[0], asphalt[1], asphalt[2]);
+  // Dirt / gravel runoff
+  mb.ribbon(
+    leftDirtOuter,
+    leftDirtInner,
+    0,
+    dirtBase[0],
+    dirtBase[1],
+    dirtBase[2],
+    MAT_DIRT,
+  );
+  mb.ribbon(
+    rightDirtInner,
+    rightDirtOuter,
+    0,
+    dirtBase[0],
+    dirtBase[1],
+    dirtBase[2],
+    MAT_DIRT,
+  );
 
-  // Recessed Scalextric groove channel
+  // Tarmac decks
+  mb.ribbon(
+    leftAsphalt,
+    leftGroove,
+    0,
+    tarmacBase[0],
+    tarmacBase[1],
+    tarmacBase[2],
+    MAT_TARMAC,
+  );
+  mb.ribbon(
+    rightGroove,
+    rightAsphalt,
+    0,
+    tarmacBase[0],
+    tarmacBase[1],
+    tarmacBase[2],
+    MAT_TARMAC,
+  );
+
+  // Recessed groove
   mb.ribbon(
     leftGroove,
     rightGroove,
     0,
-    asphalt[0] * 0.35,
-    asphalt[1] * 0.35,
-    asphalt[2] * 0.38,
+    grooveBase[0],
+    grooveBase[1],
+    grooveBase[2],
+    MAT_GROOVE,
   );
 
-  // Kerbs on high-kappa segments + barrier walls
+  // Red/white rumble strips on corners + muted concrete barriers
   for (let i = 0; i < samples.length - 1; i++) {
     const s0 = samples[i]!;
     const s1 = samples[i + 1]!;
     if (s0.kappa >= KERB_KAPPA || s1.kappa >= KERB_KAPPA) {
-      const stripe = i % 2 === 0 ? kerbA : kerbB;
-      const kerbW = 0.55;
-      // Outer kerb left
-      const l0a = {
-        x: s0.x + s0.nx * s0.halfW,
-        y: 0.05,
-        z: s0.z + s0.nz * s0.halfW,
-      };
-      const l0b = {
-        x: s0.x + s0.nx * (s0.halfW + kerbW),
-        y: 0.08,
-        z: s0.z + s0.nz * (s0.halfW + kerbW),
-      };
-      const l1a = {
-        x: s1.x + s1.nx * s1.halfW,
-        y: 0.05,
-        z: s1.z + s1.nz * s1.halfW,
-      };
-      const l1b = {
-        x: s1.x + s1.nx * (s1.halfW + kerbW),
-        y: 0.08,
-        z: s1.z + s1.nz * (s1.halfW + kerbW),
-      };
-      mb.ribbon([l0b, l1b], [l0a, l1a], 0, stripe[0], stripe[1], stripe[2]);
+      const kerbW = 0.65;
+      for (const side of [1, -1] as const) {
+        const inner0 = {
+          x: s0.x + side * s0.nx * s0.halfW,
+          y: 0.04,
+          z: s0.z + side * s0.nz * s0.halfW,
+        };
+        const outer0 = {
+          x: s0.x + side * s0.nx * (s0.halfW + kerbW),
+          y: 0.07,
+          z: s0.z + side * s0.nz * (s0.halfW + kerbW),
+        };
+        const inner1 = {
+          x: s1.x + side * s1.nx * s1.halfW,
+          y: 0.04,
+          z: s1.z + side * s1.nz * s1.halfW,
+        };
+        const outer1 = {
+          x: s1.x + side * s1.nx * (s1.halfW + kerbW),
+          y: 0.07,
+          z: s1.z + side * s1.nz * (s1.halfW + kerbW),
+        };
+        if (side > 0) {
+          mb.rumbleRibbon([outer0, outer1], [inner0, inner1], 0, MAT_RUMBLE);
+        } else {
+          mb.rumbleRibbon([inner0, inner1], [outer0, outer1], 0, MAT_RUMBLE);
+        }
+      }
     }
 
-    // Barrier walls (thin upright quads)
-    const wallH = 0.42;
-    const wallT = 0.12;
+    // Low concrete barriers — no neon accents
+    const wallH = 0.38;
     for (const side of [1, -1] as const) {
-      const ox0 = s0.x + side * s0.nx * (s0.halfW + s0.runoff * 0.15);
-      const oz0 = s0.z + side * s0.nz * (s0.halfW + s0.runoff * 0.15);
-      const ox1 = s1.x + side * s1.nx * (s1.halfW + s1.runoff * 0.15);
-      const oz1 = s1.z + side * s1.nz * (s1.halfW + s1.runoff * 0.15);
-      const c = i % 3 === 0 ? accent : rim;
+      const dirtW = Math.max(s0.runoff, 2.2);
+      const ox0 = s0.x + side * s0.nx * (s0.halfW + dirtW * 0.55);
+      const oz0 = s0.z + side * s0.nz * (s0.halfW + dirtW * 0.55);
+      const dirtW1 = Math.max(s1.runoff, 2.2);
+      const ox1 = s1.x + side * s1.nx * (s1.halfW + dirtW1 * 0.55);
+      const oz1 = s1.z + side * s1.nz * (s1.halfW + dirtW1 * 0.55);
       mb.addFace(
         ox0,
-        0.02,
+        0.0,
         oz0,
         ox1,
-        0.02,
+        0.0,
         oz1,
         ox1,
         wallH,
@@ -207,41 +298,41 @@ export function buildTrackGeometry(track: TrackView, palette: TrackPalette): Bui
         side * s0.nx,
         0,
         side * s0.nz,
-        c[0] * 0.55,
-        c[1] * 0.55,
-        c[2] * 0.55,
+        concreteBase[0],
+        concreteBase[1],
+        concreteBase[2],
+        MAT_CONCRETE,
       );
-      void wallT;
     }
   }
 
-  // Ground plate under circuit (bounds)
+  // Far grass ground plate
   const b = track.bounds;
-  const pad = 18;
+  const pad = 36;
   const minX = b.minX - pad;
   const maxX = b.maxX + pad;
   const minZ = -(b.maxY + pad);
   const maxZ = -(b.minY - pad);
-  const plate = hexToRgb('#0b0d0c');
   mb.addFace(
     minX,
-    -0.2,
+    -0.08,
     minZ,
     maxX,
-    -0.2,
+    -0.08,
     minZ,
     maxX,
-    -0.2,
+    -0.08,
     maxZ,
     minX,
-    -0.2,
+    -0.08,
     maxZ,
     0,
     1,
     0,
-    plate[0],
-    plate[1],
-    plate[2],
+    grassBase[0],
+    grassBase[1],
+    grassBase[2],
+    MAT_GRASS,
   );
 
   const { vertices, indices } = mb.build();

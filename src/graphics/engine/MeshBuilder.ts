@@ -1,6 +1,7 @@
-/** CPU-side mesh builder — interleaved pos/normal/color. */
+/** CPU-side mesh builder — interleaved pos/normal/color/mat. */
 
 import { VERTEX_STRIDE } from './gl';
+import { MAT_GENERIC } from './materials';
 
 export class MeshBuilder {
   private verts: number[] = [];
@@ -25,9 +26,10 @@ export class MeshBuilder {
     r: number,
     g: number,
     b: number,
+    mat = MAT_GENERIC,
   ): number {
     const i = this.vertexCount;
-    this.verts.push(x, y, z, nx, ny, nz, r, g, b);
+    this.verts.push(x, y, z, nx, ny, nz, r, g, b, mat);
     return i;
   }
 
@@ -49,17 +51,15 @@ export class MeshBuilder {
     g: number,
     b: number,
     y0 = 0,
+    mat = MAT_GENERIC,
   ): void {
     const y1 = y0 + hy * 2;
-    const yMid = y0 + hy;
-    // Bottom / top use outward normals; sides too.
-    this.addFace(-hx, y0, -hz, hx, y0, -hz, hx, y0, hz, -hx, y0, hz, 0, -1, 0, r * 0.55, g * 0.55, b * 0.55);
-    this.addFace(-hx, y1, hz, hx, y1, hz, hx, y1, -hz, -hx, y1, -hz, 0, 1, 0, r, g, b);
-    this.addFace(-hx, y0, hz, hx, y0, hz, hx, y1, hz, -hx, y1, hz, 0, 0, 1, r * 0.85, g * 0.85, b * 0.85);
-    this.addFace(hx, y0, -hz, -hx, y0, -hz, -hx, y1, -hz, hx, y1, -hz, 0, 0, -1, r * 0.75, g * 0.75, b * 0.75);
-    this.addFace(-hx, y0, -hz, -hx, y0, hz, -hx, y1, hz, -hx, y1, -hz, -1, 0, 0, r * 0.7, g * 0.7, b * 0.7);
-    this.addFace(hx, y0, hz, hx, y0, -hz, hx, y1, -hz, hx, y1, hz, 1, 0, 0, r * 0.9, g * 0.9, b * 0.9);
-    void yMid;
+    this.addFace(-hx, y0, -hz, hx, y0, -hz, hx, y0, hz, -hx, y0, hz, 0, -1, 0, r * 0.55, g * 0.55, b * 0.55, mat);
+    this.addFace(-hx, y1, hz, hx, y1, hz, hx, y1, -hz, -hx, y1, -hz, 0, 1, 0, r, g, b, mat);
+    this.addFace(-hx, y0, hz, hx, y0, hz, hx, y1, hz, -hx, y1, hz, 0, 0, 1, r * 0.85, g * 0.85, b * 0.85, mat);
+    this.addFace(hx, y0, -hz, -hx, y0, -hz, -hx, y1, -hz, hx, y1, -hz, 0, 0, -1, r * 0.75, g * 0.75, b * 0.75, mat);
+    this.addFace(-hx, y0, -hz, -hx, y0, hz, -hx, y1, hz, -hx, y1, -hz, -1, 0, 0, r * 0.7, g * 0.7, b * 0.7, mat);
+    this.addFace(hx, y0, hz, hx, y0, -hz, hx, y1, -hz, hx, y1, hz, 1, 0, 0, r * 0.9, g * 0.9, b * 0.9, mat);
   }
 
   addFace(
@@ -81,11 +81,12 @@ export class MeshBuilder {
     r: number,
     g: number,
     b: number,
+    mat = MAT_GENERIC,
   ): void {
-    const i0 = this.vertex(ax, ay, az, nx, ny, nz, r, g, b);
-    const i1 = this.vertex(bx, by, bz, nx, ny, nz, r, g, b);
-    const i2 = this.vertex(cx, cy, cz, nx, ny, nz, r, g, b);
-    const i3 = this.vertex(dx, dy, dz, nx, ny, nz, r, g, b);
+    const i0 = this.vertex(ax, ay, az, nx, ny, nz, r, g, b, mat);
+    const i1 = this.vertex(bx, by, bz, nx, ny, nz, r, g, b, mat);
+    const i2 = this.vertex(cx, cy, cz, nx, ny, nz, r, g, b, mat);
+    const i3 = this.vertex(dx, dy, dz, nx, ny, nz, r, g, b, mat);
     this.quad(i0, i1, i2, i3);
   }
 
@@ -97,6 +98,7 @@ export class MeshBuilder {
     r: number,
     g: number,
     b: number,
+    mat = MAT_GENERIC,
     upBias = 1,
   ): void {
     const n = Math.min(left.length, right.length);
@@ -106,7 +108,6 @@ export class MeshBuilder {
       const l1 = left[i + 1]!;
       const r0 = right[i]!;
       const r1 = right[i + 1]!;
-      // Face normal from cross of edges
       const ex = l1.x - l0.x;
       const ey = l1.y - l0.y;
       const ez = l1.z - l0.z;
@@ -120,16 +121,62 @@ export class MeshBuilder {
       nx = (nx / len) * upBias;
       ny = (ny / len) * upBias;
       nz = (nz / len) * upBias;
-      // Prefer upward-facing asphalt
       if (ny < 0) {
         nx = -nx;
         ny = -ny;
         nz = -nz;
       }
-      const i0 = this.vertex(l0.x, l0.y + yLift, l0.z, nx, ny, nz, r, g, b);
-      const i1 = this.vertex(r0.x, r0.y + yLift, r0.z, nx, ny, nz, r, g, b);
-      const i2 = this.vertex(r1.x, r1.y + yLift, r1.z, nx, ny, nz, r, g, b);
-      const i3 = this.vertex(l1.x, l1.y + yLift, l1.z, nx, ny, nz, r, g, b);
+      const i0 = this.vertex(l0.x, l0.y + yLift, l0.z, nx, ny, nz, r, g, b, mat);
+      const i1 = this.vertex(r0.x, r0.y + yLift, r0.z, nx, ny, nz, r, g, b, mat);
+      const i2 = this.vertex(r1.x, r1.y + yLift, r1.z, nx, ny, nz, r, g, b, mat);
+      const i3 = this.vertex(l1.x, l1.y + yLift, l1.z, nx, ny, nz, r, g, b, mat);
+      this.quad(i0, i1, i2, i3);
+    }
+  }
+
+  /**
+   * Rumble strip with alternating red/white baked per segment along the ribbon.
+   * Shader still adds chalk wear / edge grit on MAT_RUMBLE.
+   */
+  rumbleRibbon(
+    left: Array<{ x: number; y: number; z: number }>,
+    right: Array<{ x: number; y: number; z: number }>,
+    yLift: number,
+    mat: number,
+  ): void {
+    const n = Math.min(left.length, right.length);
+    if (n < 2) return;
+    const red = [0.72, 0.12, 0.1];
+    const white = [0.9, 0.88, 0.82];
+    for (let i = 0; i < n - 1; i++) {
+      const stripe = i % 2 === 0 ? red : white;
+      const l0 = left[i]!;
+      const l1 = left[i + 1]!;
+      const r0 = right[i]!;
+      const r1 = right[i + 1]!;
+      const ex = l1.x - l0.x;
+      const ey = l1.y - l0.y;
+      const ez = l1.z - l0.z;
+      const fx = r0.x - l0.x;
+      const fy = r0.y - l0.y;
+      const fz = r0.z - l0.z;
+      let nx = ey * fz - ez * fy;
+      let ny = ez * fx - ex * fz;
+      let nz = ex * fy - ey * fx;
+      const len = Math.hypot(nx, ny, nz) || 1;
+      nx /= len;
+      ny /= len;
+      nz /= len;
+      if (ny < 0) {
+        nx = -nx;
+        ny = -ny;
+        nz = -nz;
+      }
+      const [r, g, b] = stripe;
+      const i0 = this.vertex(l0.x, l0.y + yLift, l0.z, nx, ny, nz, r, g, b, mat);
+      const i1 = this.vertex(r0.x, r0.y + yLift, r0.z, nx, ny, nz, r, g, b, mat);
+      const i2 = this.vertex(r1.x, r1.y + yLift, r1.z, nx, ny, nz, r, g, b, mat);
+      const i3 = this.vertex(l1.x, l1.y + yLift, l1.z, nx, ny, nz, r, g, b, mat);
       this.quad(i0, i1, i2, i3);
     }
   }

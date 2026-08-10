@@ -57,8 +57,8 @@ export interface GpuMesh {
   stride: number;
 }
 
-/** Interleaved: pos3 + normal3 + color3 = 9 floats. */
-export const VERTEX_STRIDE = 9;
+/** Interleaved: pos3 + normal3 + color3 + mat1 = 10 floats. */
+export const VERTEX_STRIDE = 10;
 export const VERTEX_BYTES = VERTEX_STRIDE * 4;
 
 export function createMesh(
@@ -96,6 +96,7 @@ export function bindLitAttribs(
   const aPos = gl.getAttribLocation(prog, 'aPosition');
   const aNrm = gl.getAttribLocation(prog, 'aNormal');
   const aCol = gl.getAttribLocation(prog, 'aColor');
+  const aMat = gl.getAttribLocation(prog, 'aMat');
   if (aPos >= 0) {
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, VERTEX_BYTES, 0);
@@ -107,5 +108,9 @@ export function bindLitAttribs(
   if (aCol >= 0) {
     gl.enableVertexAttribArray(aCol);
     gl.vertexAttribPointer(aCol, 3, gl.FLOAT, false, VERTEX_BYTES, 24);
+  }
+  if (aMat >= 0) {
+    gl.enableVertexAttribArray(aMat);
+    gl.vertexAttribPointer(aMat, 1, gl.FLOAT, false, VERTEX_BYTES, 36);
   }
 }

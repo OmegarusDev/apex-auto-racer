@@ -136,7 +136,7 @@ export class ApexRenderer {
   clear(): void {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.043, 0.051, 0.047, 1);
+    gl.clearColor(0.42, 0.48, 0.42, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   }
 
@@ -246,7 +246,7 @@ export class ApexRenderer {
     const h = this.canvas.height;
     if (w < 2 || h < 2 || !this.trackMesh || !this.carMesh) return;
 
-    const bg = this.night ? [0.03, 0.035, 0.05] : [0.043, 0.051, 0.047];
+    const bg = this.night ? [0.04, 0.045, 0.06] : [0.42, 0.48, 0.42];
     gl.viewport(0, 0, w, h);
     gl.clearColor(bg[0]!, bg[1]!, bg[2]!, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -308,16 +308,17 @@ export class ApexRenderer {
     const fZ = -ty;
 
     const zoom = Math.max(0.35, cam.zoom);
-    const elev = (42 / zoom) * (frame.countdown !== null ? 1.35 : 1);
-    const back = (26 / zoom) * (frame.countdown !== null ? 1.2 : 1);
+    // Pulled back — tabletop overview, not bumper-cam.
+    const elev = (78 / zoom) * (frame.countdown !== null ? 1.25 : 1);
+    const back = (52 / zoom) * (frame.countdown !== null ? 1.15 : 1);
     const eye: Vec3 = [
       look[0] - fX * back,
       elev,
       look[2] - fZ * back,
     ];
 
-    mat4Perspective(this.proj, (48 * Math.PI) / 180, aspect, 0.5, 400);
-    mat4LookAt(this.view, eye, [look[0], 0.2, look[2]], [0, 1, 0]);
+    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.0, 520);
+    mat4LookAt(this.view, eye, [look[0], 0.15, look[2]], [0, 1, 0]);
     mat4Multiply(this.viewProj, this.proj, this.view);
 
     // Stash eye for rim/fog in shader via uniform
@@ -334,17 +335,18 @@ export class ApexRenderer {
     const gl = this.gl;
     const p = this.litProg;
     const night = frame.night ? 1 : 0;
-    gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.45, 0.82, 0.35);
+    // Soft late-afternoon sun — warm, not neon
+    gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.35, 0.88, 0.28);
     if (frame.night) {
-      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.55, 0.62, 0.85);
-      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.14, 0.16, 0.22);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.04, 0.05, 0.08);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 1.4);
+      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.42, 0.48, 0.62);
+      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.1, 0.12, 0.16);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.05, 0.06, 0.09);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 1.1);
     } else {
-      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 1.05, 0.98, 0.85);
-      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.22, 0.24, 0.22);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.08, 0.1, 0.09);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.7);
+      gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.92, 0.88, 0.78);
+      gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.28, 0.3, 0.26);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.55, 0.6, 0.52);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.45);
     }
     gl.uniform1f(gl.getUniformLocation(p, 'uNight'), night);
     gl.uniform3f(gl.getUniformLocation(p, 'uCameraPos'), this.eyeX, this.eyeY, this.eyeZ);

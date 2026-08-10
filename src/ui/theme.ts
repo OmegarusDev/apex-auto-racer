@@ -111,12 +111,12 @@ export function createTheme(w: number, h: number): ThemeTokens {
   cachedTheme = {
     scale,
     grid: 8 * scale,
-    touchMin: Math.max(44, Math.min(52, 44 * scale)),
-    // Floors keep titles readable at the 0.7 scale clamp.
-    fontDisplay: Math.max(22, 32 * scale),
-    fontTitle: Math.max(18, 24 * scale),
-    fontBody: Math.max(14, 16 * scale),
-    fontCaption: Math.max(11, 12 * scale),
+    touchMin: Math.max(48, Math.min(58, 48 * scale)),
+    // Floors keep titles readable at the 0.7 scale clamp; body bumped for phones.
+    fontDisplay: Math.max(24, 34 * scale),
+    fontTitle: Math.max(20, 26 * scale),
+    fontBody: Math.max(15, 17 * scale),
+    fontCaption: Math.max(12, 13 * scale),
     fontHero,
     fontFamily: BRAND_BODY_FONT,
     fontDisplayFamily: BRAND_DISPLAY_FONT,

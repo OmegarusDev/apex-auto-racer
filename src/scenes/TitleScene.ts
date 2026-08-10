@@ -137,6 +137,29 @@ export class TitleScene implements Scene {
     const btnW = layout.menuW;
     const btnH = layout.btnH;
     const btnGap = layout.btnGap;
+    const btnFont = layout.btnFont;
+
+    const quickRaceBtn: ButtonDef = {
+      x: btnX,
+      y: btnY,
+      w: btnW,
+      h: btnH,
+      label: 'Quick Race',
+      cta: true,
+      fontSize: btnFont,
+      onClick: () => {
+        const state = ensureQuickRaceState();
+        if (state.roster.length < 1) {
+          this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
+          return;
+        }
+        const seedMaterial =
+          (state.seed + state.careerStats.races * 9973 + state.careerStats.earnings) >>> 0;
+        const discipline = pick(mulberry32(seedMaterial), DISCIPLINE_ORDER);
+        launchRace(makeQuickRaceConfig(state, discipline), this.toasts);
+      },
+    };
+    btnY += btnH + btnGap;
 
     const continueBtn: ButtonDef = {
       x: btnX,
@@ -145,7 +168,7 @@ export class TitleScene implements Scene {
       h: btnH,
       label: 'Continue',
       disabled: !hasSave,
-      primary: hasSave,
+      fontSize: btnFont,
       onClick: () => {
         if (!hasSave) return;
         g.bootstrap();
@@ -160,6 +183,7 @@ export class TitleScene implements Scene {
       w: btnW,
       h: btnH,
       label: 'New Game',
+      fontSize: btnFont,
       onClick: () => {
         if (hasSave) {
           this.modal = {
@@ -200,45 +224,25 @@ export class TitleScene implements Scene {
     };
     btnY += btnH + btnGap;
 
-    const quickRaceBtn: ButtonDef = {
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: btnH,
-      label: 'Quick Race',
-      primary: !hasSave,
-      onClick: () => {
-        const state = ensureQuickRaceState();
-        if (state.roster.length < 1) {
-          this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
-          return;
-        }
-        const seedMaterial =
-          (state.seed + state.careerStats.races * 9973 + state.careerStats.earnings) >>> 0;
-        const discipline = pick(mulberry32(seedMaterial), DISCIPLINE_ORDER);
-        launchRace(makeQuickRaceConfig(state, discipline), this.toasts);
-      },
-    };
-    btnY += btnH + btnGap;
-
     const optionsBtn: ButtonDef = {
       x: btnX,
       y: btnY,
       w: btnW,
       h: btnH,
       label: 'Options',
+      fontSize: btnFont,
       onClick: () => g.scenes.push(new OptionsScene()),
     };
 
+    drawButton(ctx, quickRaceBtn, ui);
     drawButton(ctx, continueBtn, ui);
     drawButton(ctx, newGameBtn, ui);
-    drawButton(ctx, quickRaceBtn, ui);
     drawButton(ctx, optionsBtn, ui);
 
     if (!this.modal.open) {
+      handleButton(quickRaceBtn, ui);
       handleButton(continueBtn, ui);
       handleButton(newGameBtn, ui);
-      handleButton(quickRaceBtn, ui);
       handleButton(optionsBtn, ui);
     }
 

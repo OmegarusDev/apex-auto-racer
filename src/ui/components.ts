@@ -46,6 +46,10 @@ export interface ButtonDef {
   label: string;
   disabled?: boolean;
   primary?: boolean;
+  /** Hero CTA — filled accent with a play mark (title Quick Race). */
+  cta?: boolean;
+  /** Optional label size — defaults to fontBody. Title menu uses a larger display size. */
+  fontSize?: number;
   onClick?: () => void;
 }
 
@@ -217,6 +221,8 @@ export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: Ui
   // Sharp pit-plate corners — not soft app cards.
   const r = Math.max(2, pad(token, 0.25));
   const rail = Math.max(3, pad(token, 0.35));
+  const isCta = btn.cta === true && !btn.disabled;
+  const isPrimary = (btn.primary === true || isCta) && !btn.disabled;
 
   ctx.save();
   if (btn.disabled) {
@@ -224,8 +230,25 @@ export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: Ui
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
     ctx.fillStyle = token.disabled;
-  } else if (btn.primary) {
-    const fill = hovered ? accent : accent;
+  } else if (isCta) {
+    // CTA: solid signal plate + dark inset edge (reads hotter than a normal primary).
+    ctx.fillStyle = accent;
+    roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
+    ctx.fill();
+    ctx.fillStyle = hovered ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.16)';
+    ctx.fillRect(btn.x + r, btn.y + 1, btn.w - r * 2, Math.max(2, btn.h * 0.1));
+    ctx.strokeStyle = hovered ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.22)';
+    ctx.lineWidth = Math.max(2, pad(token, 0.2));
+    roundRectPath(ctx, btn.x + 1, btn.y + 1, btn.w - 2, btn.h - 2, Math.max(1, r - 1));
+    ctx.stroke();
+    if (hovered) {
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
+      ctx.fill();
+    }
+    ctx.fillStyle = token.bg;
+  } else if (isPrimary) {
+    const fill = accent;
     ctx.fillStyle = fill;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
@@ -255,13 +278,34 @@ export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: Ui
     ctx.fillStyle = token.text;
   }
 
-  const label = truncateText(ctx, btn.label.toUpperCase(), btn.w - pad(token) - rail);
-  setFont(ctx, token, token.fontBody, btn.primary ? '700' : '600', true);
+  const playPad = isCta ? btn.h * 0.28 : 0;
+  const label = truncateText(
+    ctx,
+    btn.label.toUpperCase(),
+    btn.w - pad(token) - rail - playPad,
+  );
+  const labelSize = btn.fontSize ?? token.fontBody;
+  setFont(ctx, token, labelSize, isPrimary || isCta ? '700' : '600', true);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   // Bebas Neue sits high — nudge baseline slightly for optical center.
   const ty = btn.y + btn.h * 0.52;
-  ctx.fillText(label, btn.x + btn.w * 0.5 + (btn.primary ? 0 : rail * 0.25), ty);
+  const tx = btn.x + btn.w * 0.5 + (isPrimary || isCta ? -playPad * 0.15 : rail * 0.25);
+  ctx.fillText(label, tx, ty);
+
+  if (isCta) {
+    // Play chevron — marks this as the go-now action.
+    const tri = Math.min(btn.h * 0.22, pad(token, 1.6));
+    const cx = btn.x + btn.w - pad(token, 1.75) - tri;
+    const cy = btn.y + btn.h * 0.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - tri * 0.35, cy - tri);
+    ctx.lineTo(cx + tri * 0.85, cy);
+    ctx.lineTo(cx - tri * 0.35, cy + tri);
+    ctx.closePath();
+    ctx.fillStyle = token.bg;
+    ctx.fill();
+  }
   ctx.restore();
 }
 

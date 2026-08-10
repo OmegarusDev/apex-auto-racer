@@ -705,6 +705,8 @@ export interface TitleScreenLayout {
   menuW: number;
   btnH: number;
   btnGap: number;
+  /** Display label size for title menu buttons. */
+  btnFont: number;
   /** Y where bottom readability fade should begin. */
   fadeTop: number;
   /** Optional scrim behind the menu column (portrait). */
@@ -714,6 +716,7 @@ export interface TitleScreenLayout {
 /**
  * Non-overlapping title regions for portrait phones, landscape, and resizable desktop.
  * Priority: brand → menu → track (track shrinks first).
+ * Portrait phones get fat touch targets and large display labels.
  */
 export function computeTitleLayout(w: number, h: number, token: ThemeTokens): TitleScreenLayout {
   const safe = token.safe;
@@ -726,37 +729,47 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
   const innerH = Math.max(1, innerB - innerT);
   const landscape = w / Math.max(h, 1) >= 1.15;
   const shortH = h < 520;
+  const phone = Math.min(w, h) < 520;
   const btnCount = 4;
 
-  let btnH = Math.max(token.touchMin, pad(token, 5.25));
-  let btnGap = Math.max(6, pad(token, 0.7));
+  // Mobile-first: big hit targets; shrink only as a last resort below.
+  let btnH = phone
+    ? Math.max(token.touchMin * 1.28, pad(token, 7.25), 56)
+    : Math.max(token.touchMin * 1.1, pad(token, 5.75), 50);
+  let btnGap = phone ? Math.max(10, pad(token, 1.15)) : Math.max(8, pad(token, 0.85));
   let menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+  const btnFontFor = (height: number): number =>
+    Math.max(
+      token.fontTitle,
+      Math.min(height * 0.44, phone ? token.fontDisplay * 1.05 : token.fontDisplay * 0.9),
+    );
 
   if (landscape) {
-    const menuBudget = innerH * (shortH ? 0.78 : 0.58);
+    // Give the menu column room — don't crush buttons on phones in landscape.
+    const menuBudget = innerH * (shortH || phone ? 0.88 : 0.62);
     if (menuH > menuBudget) {
       const s = menuBudget / menuH;
       btnH = Math.max(token.touchMin, btnH * s);
-      btnGap = Math.max(4, btnGap * s);
+      btnGap = Math.max(phone ? 6 : 4, btnGap * s);
       menuH = btnCount * btnH + (btnCount - 1) * btnGap;
     }
 
-    const colMax = Math.min(innerW * 0.4, 420);
-    const colW = Math.max(200, colMax);
+    const colMax = Math.min(innerW * (phone ? 0.48 : 0.4), phone ? 460 : 420);
+    const colW = Math.max(phone ? 240 : 200, colMax);
     const colX = innerL;
     const brandBudget = Math.max(48, innerH - menuH - margin * 2);
     const apexSize = Math.max(
-      shortH ? 34 : 44,
+      shortH ? 38 : 48,
       Math.min(
-        colW * 0.24,
-        h * (shortH ? 0.13 : 0.12),
-        brandBudget * 0.62,
-        shortH ? 48 : 70,
+        colW * (phone ? 0.3 : 0.24),
+        h * (shortH ? 0.15 : 0.13),
+        brandBudget * 0.7,
+        shortH ? 56 : 78,
       ),
     );
     const logoH = measureTitleLogoHeight(apexSize, token);
     const logoY = innerT + Math.min(margin, brandBudget * 0.08);
-    const menuY = Math.min(innerB - menuH, Math.max(logoY + logoH + margin, innerT + innerH * 0.42));
+    const menuY = Math.min(innerB - menuH, Math.max(logoY + logoH + margin, innerT + innerH * 0.38));
 
     const trackLeft = colX + colW + margin;
     const trackRight = innerR;
@@ -779,32 +792,34 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
       menuW: colW,
       btnH,
       btnGap,
+      btnFont: btnFontFor(btnH),
       fadeTop: menuY - margin,
       menuScrim: null,
     };
   }
 
   // Portrait / square — brand top, track mid, menu bottom.
-  const menuBudget = innerH * (h < 700 ? 0.36 : 0.34);
+  // Reserve a larger share for the menu so buttons stay fat on phones.
+  const menuBudget = innerH * (phone ? 0.46 : h < 700 ? 0.4 : 0.36);
   if (menuH > menuBudget) {
     const s = menuBudget / menuH;
     btnH = Math.max(token.touchMin, btnH * s);
-    btnGap = Math.max(5, btnGap * s);
+    btnGap = Math.max(phone ? 8 : 5, btnGap * s);
     menuH = btnCount * btnH + (btnCount - 1) * btnGap;
   }
 
-  const menuW = Math.min(innerW, Math.min(420, Math.max(260, w * 0.86)));
+  const menuW = Math.min(innerW, Math.min(phone ? 480 : 420, Math.max(phone ? 300 : 260, w * 0.9)));
   const menuX = innerL + (innerW - menuW) * 0.5;
   const menuY = innerB - menuH;
 
   const brandCeiling = menuY - margin * 1.5;
   const apexSize = Math.min(
-    token.fontHero * 1.15,
-    w * 0.168,
-    (brandCeiling - innerT) * 0.28,
-    70,
+    token.fontHero * (phone ? 1.28 : 1.15),
+    w * (phone ? 0.2 : 0.168),
+    (brandCeiling - innerT) * (phone ? 0.34 : 0.28),
+    phone ? 82 : 70,
   );
-  const logoH = measureTitleLogoHeight(Math.max(34, apexSize), token);
+  const logoH = measureTitleLogoHeight(Math.max(phone ? 42 : 34, apexSize), token);
   const logoY = innerT;
   const logoBottom = logoY + logoH;
 
@@ -831,7 +846,7 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     logoX: w * 0.5,
     logoY,
     logoAlign: 'center',
-    apexSize: Math.max(34, apexSize),
+    apexSize: Math.max(phone ? 42 : 34, apexSize),
     trackCx: w * 0.5,
     trackCy,
     trackScale,
@@ -840,6 +855,7 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     menuW,
     btnH,
     btnGap,
+    btnFont: btnFontFor(btnH),
     fadeTop: menuY - trackBand * 0.35,
     menuScrim,
   };

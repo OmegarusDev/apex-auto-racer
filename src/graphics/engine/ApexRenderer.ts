@@ -68,6 +68,7 @@ export class ApexRenderer {
   private readonly fx: FxParticle[] = [];
   private fxCount = 0;
   private fxTick = 0;
+  private contextLost = false;
 
   private readonly view = mat4();
   private readonly proj = mat4();
@@ -86,6 +87,21 @@ export class ApexRenderer {
     gl.cullFace(gl.BACK);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    canvas.addEventListener(
+      'webglcontextlost',
+      (ev) => {
+        ev.preventDefault();
+        this.contextLost = true;
+      },
+      false,
+    );
+    canvas.addEventListener(
+      'webglcontextrestored',
+      () => {
+        this.contextLost = true; // still force RaceView to rebuild / fall back
+      },
+      false,
+    );
   }
 
   static tryCreate(canvas: HTMLCanvasElement | null): ApexRenderer | null {
@@ -98,6 +114,19 @@ export class ApexRenderer {
       console.warn('[apex] WebGL engine unavailable', err);
       return null;
     }
+  }
+
+  /** True when the GL context died — caller should fall back to Canvas2D. */
+  isLost(): boolean {
+    return this.contextLost || this.gl.isContextLost();
+  }
+
+  dispose(): void {
+    const gl = this.gl;
+    if (this.trackMesh) destroyMesh(gl, this.trackMesh);
+    if (this.carMesh) destroyMesh(gl, this.carMesh);
+    this.trackMesh = null;
+    this.carMesh = null;
   }
 
   getMinimapPoints(): Array<{ nx: number; ny: number }> {
@@ -305,8 +334,9 @@ export class ApexRenderer {
 
     const zoom = Math.max(0.35, cam.zoom);
     const countdown = frame.countdown !== null;
-    const elev = (88 / zoom) * (countdown ? 1.2 : 1);
-    const dist = (62 / zoom) * (countdown ? 1.15 : 1);
+    // Closer tabletop than the original pull-back — phones need readable slot cars.
+    const elev = (58 / zoom) * (countdown ? 1.18 : 1);
+    const dist = (42 / zoom) * (countdown ? 1.12 : 1);
 
     // Fixed SE tabletop azimuth in engine XZ (never follows car tangent).
     const azX = 0.58;
@@ -318,7 +348,7 @@ export class ApexRenderer {
       look[2] + (azZ / azLen) * dist,
     ];
 
-    mat4Perspective(this.proj, (38 * Math.PI) / 180, aspect, 1.0, 560);
+    mat4Perspective(this.proj, (44 * Math.PI) / 180, aspect, 0.8, 560);
     mat4LookAt(this.view, eye, look, [0, 1, 0]);
     mat4Multiply(this.viewProj, this.proj, this.view);
 
@@ -357,11 +387,16 @@ export class ApexRenderer {
   private placeCar(worldX: number, worldY: number, heading: number, lift: number): void {
     // Engine Z = -worldY, so yaw must match Canvas2D's rotate(-heading).
     // Local +X is car forward (same as CarPainter length axis).
+    // Presentation scale: physics boxes are true-to-meter but too small under
+    // the tabletop camera (esp. phones) — boost so slot cars read as toys.
+    const s = 2.75;
     mat4Identity(this.tmp);
     mat4RotateY(this.model, this.tmp, -heading);
+    mat4Scale(this.tmp, this.model, s, s, s);
+    mat4CopyInPlace(this.model, this.tmp);
     mat4Identity(this.tmp);
     mat4Translate(this.tmp, this.tmp, worldX, lift, -worldY);
-    mat4Multiply(this.mvp, this.tmp, this.model); // T * R
+    mat4Multiply(this.mvp, this.tmp, this.model); // T * R * S
     mat4CopyInPlace(this.model, this.mvp);
     void PHYSICS;
   }
@@ -386,10 +421,9 @@ export class ApexRenderer {
     gl.uniform3f(gl.getUniformLocation(p, 'uTint'), tint[0], tint[1], tint[2]);
     gl.uniform1f(gl.getUniformLocation(p, 'uAlpha'), alpha);
     bindLitAttribs(gl, p, mesh);
-    const type = mesh.indexCount > 65535 ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
-    // OES_element_index_uint may be needed for UNSIGNED_INT — tracks stay under 65k with our builder
-    gl.drawElements(gl.TRIANGLES, mesh.indexCount, gl.UNSIGNED_SHORT, 0);
-    void type;
+    const useUint = mesh.indexCount > 65535;
+    const type = useUint ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+    gl.drawElements(gl.TRIANGLES, mesh.indexCount, type, 0);
   }
 
   private drawFxPoints(frame: RaceFrameView): void {

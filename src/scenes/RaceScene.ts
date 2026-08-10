@@ -25,6 +25,7 @@ import {
 } from '../engine/raceTypes';
 import { RaceView } from '../graphics/RaceView';
 import { writeCarWorld } from '../graphics/TrackSampler';
+import { hslToHex } from '../graphics/engine/math';
 import type { CarFrameDto, FxImpulse, RaceFrameView } from '../graphics/types';
 import {
   drawPegMeter,
@@ -61,7 +62,7 @@ const TICKER_TTL = 6;
 const carPoseScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
 const ghostScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
 
-/** Soft rival paint — team hue nudged by loadout strength. */
+/** Soft rival paint — team hue nudged by loadout strength. Always #rrggbb. */
 function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts): string {
   const hue = teamCount <= 0 ? 200 : Math.round((teamId * 360) / teamCount) % 360;
   let tierSum = 0;
@@ -71,7 +72,7 @@ function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts): str
   const avg = tierSum / 7;
   const light = 48 + Math.min(12, avg * 2);
   const sat = 62 + Math.min(12, (avg - 1) * 3);
-  return `hsl(${hue}, ${sat}%, ${light}%)`;
+  return hslToHex(hue, sat, light);
 }
 
 interface TickerLine {

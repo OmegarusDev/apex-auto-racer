@@ -111,6 +111,32 @@ export class RaceView {
     return this.useEngine;
   }
 
+  /** Drop a dead GL context and bake a Canvas2D track so cars stay visible. */
+  private dropEngineToCanvas2d(frame: RaceFrameView): void {
+    if (this.engine !== null) {
+      try {
+        this.engine.dispose();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.engine = null;
+    this.useEngine = false;
+    if (typeof document !== 'undefined') {
+      document.querySelector('#world')?.classList.remove('is-live');
+    }
+    if (this.track !== null && this.discipline !== null) {
+      const night = frame.night;
+      const rain = frame.rain;
+      const result = bakeTrack(this.track, this.discipline, night, rain);
+      this.baked = result.canvas;
+      this.bakeMeta = result.meta;
+      this.minimapPoints = result.minimap;
+      this.palette = result.palette;
+      this.particles.setRaining(rain);
+    }
+  }
+
   writeCamera(out: CameraTransform = camScratch): CameraTransform {
     return this.camera.writeTransform(out);
   }
@@ -167,11 +193,20 @@ export class RaceView {
 
   draw(ctx: CanvasRenderingContext2D, frame: RaceFrameView): void {
     if (this.useEngine && this.engine !== null) {
-      this.engine.resize(frame.screenW, frame.screenH, Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap));
-      this.engine.render(frame);
-      // HUD canvas stays transparent over the GL world.
-      ctx.clearRect(0, 0, frame.screenW, frame.screenH);
-      return;
+      if (this.engine.isLost()) {
+        console.warn('[apex] WebGL context lost — falling back to Canvas2D');
+        this.dropEngineToCanvas2d(frame);
+      } else {
+        this.engine.resize(
+          frame.screenW,
+          frame.screenH,
+          Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap),
+        );
+        this.engine.render(frame);
+        // HUD canvas stays transparent over the GL world.
+        ctx.clearRect(0, 0, frame.screenW, frame.screenH);
+        return;
+      }
     }
 
     if (!this.baked || !this.bakeMeta) return;

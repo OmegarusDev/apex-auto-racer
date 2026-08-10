@@ -162,9 +162,76 @@ export function worldToEngine(wx: number, wy: number, height = 0): Vec3 {
 }
 
 export function hexToRgb(hex: string): Vec3 {
-  const h = hex.replace('#', '');
-  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
-  const n = parseInt(full, 16);
-  if (!Number.isFinite(n)) return [0.9, 0.9, 0.85];
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  return parseCssColor(hex);
+}
+
+/** Parse #rgb / #rrggbb / #rrggbbaa / hsl(...) / rgb(...) into 0–1 RGB. */
+export function parseCssColor(color: string): Vec3 {
+  const c = color.trim();
+  if (c.startsWith('#')) {
+    let h = c.slice(1);
+    if (h.length === 3 || h.length === 4) {
+      h = h
+        .slice(0, 3)
+        .split('')
+        .map((ch) => ch + ch)
+        .join('');
+    } else if (h.length >= 8) {
+      h = h.slice(0, 6);
+    } else if (h.length > 6) {
+      h = h.slice(0, 6);
+    }
+    const n = parseInt(h, 16);
+    if (!Number.isFinite(n)) return [0.85, 0.2, 0.2];
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  }
+
+  const hsl = /^hsla?\(\s*([-\d.]+)(?:deg)?\s*,\s*([-\d.]+)%\s*,\s*([-\d.]+)%/i.exec(c);
+  if (hsl) {
+    return hslToRgb(Number(hsl[1]), Number(hsl[2]) / 100, Number(hsl[3]) / 100);
+  }
+  const rgb = /^rgba?\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)/i.exec(c);
+  if (rgb) {
+    return [
+      Math.max(0, Math.min(1, Number(rgb[1]) / 255)),
+      Math.max(0, Math.min(1, Number(rgb[2]) / 255)),
+      Math.max(0, Math.min(1, Number(rgb[3]) / 255)),
+    ];
+  }
+  // Unknown format — vivid red so missing paints are obvious in QA, not cream-on-asphalt.
+  return [0.85, 0.2, 0.2];
+}
+
+function hslToRgb(hDeg: number, s: number, l: number): Vec3 {
+  const h = ((hDeg % 360) + 360) % 360;
+  const sat = Math.max(0, Math.min(1, s));
+  const lit = Math.max(0, Math.min(1, l));
+  if (sat <= 1e-6) return [lit, lit, lit];
+  const q = lit < 0.5 ? lit * (1 + sat) : lit + sat - lit * sat;
+  const p = 2 * lit - q;
+  const hk = h / 360;
+  const tr = hueToRgb(p, q, hk + 1 / 3);
+  const tg = hueToRgb(p, q, hk);
+  const tb = hueToRgb(p, q, hk - 1 / 3);
+  return [tr, tg, tb];
+}
+
+function hueToRgb(p: number, q: number, tIn: number): number {
+  let t = tIn;
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+
+/** Convert HSL (deg, 0–100, 0–100) to #rrggbb for Canvas2D + WebGL. */
+export function hslToHex(hDeg: number, sPct: number, lPct: number): string {
+  const [r, g, b] = hslToRgb(hDeg, sPct / 100, lPct / 100);
+  const to = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v * 255)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${to(r)}${to(g)}${to(b)}`;
 }

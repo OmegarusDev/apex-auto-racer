@@ -1,14 +1,34 @@
 /** Low-level WebGL1 helpers for the Apex engine. */
 
 export function createGL(canvas: HTMLCanvasElement): WebGLRenderingContext | null {
-  const gl = canvas.getContext('webgl', {
-    alpha: false,
-    antialias: true,
-    depth: true,
-    premultipliedAlpha: false,
-    powerPreference: 'high-performance',
-  });
-  return gl;
+  const attempts: WebGLContextAttributes[] = [
+    {
+      alpha: false,
+      antialias: true,
+      depth: true,
+      premultipliedAlpha: false,
+      powerPreference: 'high-performance',
+    },
+    {
+      alpha: false,
+      antialias: false,
+      depth: true,
+      premultipliedAlpha: false,
+      powerPreference: 'default',
+    },
+  ];
+  for (const attrs of attempts) {
+    const gl =
+      canvas.getContext('webgl', attrs) ??
+      canvas.getContext('experimental-webgl', attrs);
+    if (gl) {
+      const ctx = gl as WebGLRenderingContext;
+      // Large tracks may exceed 65k indices — enable when available.
+      ctx.getExtension('OES_element_index_uint');
+      return ctx;
+    }
+  }
+  return null;
 }
 
 export function compileShader(

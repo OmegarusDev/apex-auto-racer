@@ -13,6 +13,11 @@ import {
 import type { CarSimState } from '../engine/Vehicle';
 import type { OnboardingFlags, RaceEvent } from '../engine/types';
 import {
+  intentHudLabel,
+  intentTickerPhrase,
+  type BrainIntentTag,
+} from '../engine/BrainIntent';
+import {
   buildRaceConfig,
   buildResultsPayload,
   loadGhostTrace,
@@ -89,6 +94,8 @@ export class RaceScene implements Scene {
   private seenEventSeq = 0;
   private hintText: string | null = null;
   private hintT = 0;
+  /** One-shot lift warning before first deslot teaching toast. */
+  private warnedDeslotLift = false;
   private ghostCarId: string | null = null;
   private ghostTrace: GhostTrace | null = null;
   private lastDt = 1 / 60;
@@ -100,6 +107,7 @@ export class RaceScene implements Scene {
     playerBrakeUsed: false,
     playerWallHits: 0,
     playerSpinCount: 0,
+    playerDeslotCount: 0,
     playerOvertakes: 0,
     startGridPosition: 1,
     vehicleConditionAtStart: 1,
@@ -135,6 +143,7 @@ export class RaceScene implements Scene {
       this.seenEventSeq = 0;
       this.hintText = null;
       this.hintT = 0;
+      this.warnedDeslotLift = false;
 
       const vehicle = state.vehicles[this.launch.discipline];
       if (vehicle === undefined) {
@@ -144,6 +153,7 @@ export class RaceScene implements Scene {
         playerBrakeUsed: false,
         playerWallHits: 0,
         playerSpinCount: 0,
+        playerDeslotCount: 0,
         playerOvertakes: 0,
         startGridPosition: 1,
         vehicleConditionAtStart: vehicle.condition,
@@ -583,6 +593,26 @@ export class RaceScene implements Scene {
         this.g.audio.playDeslot();
         if (!this.g.state!.onboarding.shownBrakeHint) {
           this.showHint('Too fast for the corner — brake before the bend!', 'shownBrakeHint');
+        } else if (!this.g.state!.onboarding.shownDeslotHint) {
+          this.showHint("Crawl back onto the peg.", 'shownDeslotHint');
+        }
+      } else if (
+        !this.g.state!.onboarding.shownDeslotHint &&
+        !this.warnedDeslotLift &&
+        this.hintText === null &&
+        player.slotMode === 'groove' &&
+        player.throttle > 0.85 &&
+        player.brake < 0.08
+      ) {
+        // First curved pin: teach lift before the peg pops.
+        let kappa = 0;
+        for (const n of director.track.nodes) {
+          if (n.s <= player.s) kappa = n.kappaLine;
+        }
+        if (Math.abs(kappa) >= PHYSICS.grooveKappaMin) {
+          this.hintText = "Lift or you'll leave the peg.";
+          this.hintT = 4;
+          this.warnedDeslotLift = true;
         }
       }
       if (player.spinCount > this.prevPlayerSpins) {
@@ -591,6 +621,7 @@ export class RaceScene implements Scene {
 
       this.stats.playerWallHits = player.wallHits;
       this.stats.playerSpinCount = player.spinCount;
+      this.stats.playerDeslotCount = player.deslotCount;
       this.prevPlayerWallHits = player.wallHits;
       this.prevPlayerSpins = player.spinCount;
       this.prevPlayerDeslots = player.deslotCount;
@@ -656,7 +687,7 @@ export class RaceScene implements Scene {
             text = `${ev.time.toFixed(1)}s — ${name} spins!`;
             break;
           case 'deslot':
-            text = `${ev.time.toFixed(1)}s — ${name} deslots!`;
+            text = `${ev.time.toFixed(1)}s — ${name} pops the peg`;
             break;
           case 'crash':
             text = `${ev.time.toFixed(1)}s — ${name} crashes!`;
@@ -666,6 +697,24 @@ export class RaceScene implements Scene {
             break;
           case 'lap':
             text = `${ev.time.toFixed(1)}s — ${name} lap ${ev.detail ?? ''}`;
+            break;
+          case 'mistake':
+            text = `${ev.time.toFixed(1)}s — ${name} makes a mistake`;
+            break;
+          case 'draftPass':
+            text = `${ev.time.toFixed(1)}s — ${name} slingshots past`;
+            break;
+          case 'wallHit':
+            text = `${ev.time.toFixed(1)}s — ${name} clips the wall`;
+            break;
+          case 'intent':
+            text = `${ev.time.toFixed(1)}s — ${intentTickerPhrase(name, ev.detail as BrainIntentTag)}`;
+            break;
+          case 'rejoin':
+            text = `${ev.time.toFixed(1)}s — ${name} finds the peg`;
+            break;
+          case 'driftEntry':
+            text = `${ev.time.toFixed(1)}s — ${name} slides`;
             break;
           default:
             text = `${ev.time.toFixed(1)}s — ${name}: ${ev.kind}`;
@@ -777,8 +826,9 @@ export class RaceScene implements Scene {
 
     if (leadDriver !== undefined) {
       const trait = getTrait(leadDriver.trait);
+      const playerIntent = player !== undefined ? director.intentForCar(player.id) : undefined;
       const chipW = pad(token, 14);
-      const chipH = pad(token, 3.5);
+      const chipH = pad(token, playerIntent !== undefined ? 5.2 : 3.5);
       const chipX = hudX;
       const chipY = h - safe.bottom - pad(token) - chipH;
       ctx.fillStyle = token.card;
@@ -793,6 +843,14 @@ export class RaceScene implements Scene {
       ctx.fillText(leadDriver.name, chipX + pad(token, 0.75), chipY + pad(token, 0.5));
       ctx.fillStyle = token.textDim;
       ctx.fillText(trait.name, chipX + pad(token, 0.75), chipY + pad(token, 1.5));
+      if (playerIntent !== undefined) {
+        ctx.fillStyle = accent;
+        ctx.fillText(
+          intentHudLabel(playerIntent.tag),
+          chipX + pad(token, 0.75),
+          chipY + pad(token, 2.6),
+        );
+      }
     }
 
     const pauseSize = ensureMinTouch(pad(token, 4.5), token);

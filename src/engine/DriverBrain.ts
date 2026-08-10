@@ -1,14 +1,15 @@
 import { BALANCE } from '../data/balance';
 import { PHYSICS } from '../data/physics';
 import type { DisciplineId } from '../data/disciplines';
-import type { Driver } from './types';
+import type { Driver, SlotMode } from './types';
 import type { Modifier, ModifierContext } from './modifiers';
 import { applyModifierParam } from './modifiers';
 import type { TrackData } from './TrackGenerator';
 import { interpolateAtSInto, type InterpolatedNode } from './RacingLine';
 import type { CarSimState } from './Vehicle';
 import type { BrainOutput } from './Vehicle';
-import { computeTempGrip, computeVDeslot, vDriverAt } from './Vehicle';
+import { computeTempGrip, computeVDeslot, personalLineAt, vDriverAt } from './Vehicle';
+import { makeIntent, type BrainIntent, type BrainIntentTag } from './BrainIntent';
 import type { Rng } from './rng';
 import { randRange } from './rng';
 
@@ -62,9 +63,24 @@ export interface BrainState {
   overtakeSide: number;
   overtakeUntil: number;
   draftHoldTime: number;
+  /** Seconds stuck same-lane blocked without a pull-out (anti park-forever). */
+  blockStallTime: number;
+  /** Race-time until which brain returns raw (post-deslot / post-spin recovery). */
+  recoveryUntil: number;
+  /** Previous slot mode — detect rejoin edges for recovery grace. */
+  prevSlotMode: SlotMode | '';
 }
 
 const EMPTY_OUTPUT: BrainOutput = { desiredThrottle: 0, desiredBrake: 0, lTarget: 0 };
+
+/** Brain ticks at 120/brainEveryN Hz — stall accumulator step. */
+const BRAIN_DT = PHYSICS.dt * PHYSICS.brainEveryN;
+/** After this many seconds parked behind a wreck, force a side. */
+const BLOCK_FORCE_SEC = 0.85;
+/** Creep throttle while committing a forced wreck pass. */
+const BLOCK_CREEP_THROTTLE = 0.2;
+/** Park-forever stall speed threshold (m/s). */
+const BLOCK_STALL_V = 8;
 
 export function createBrainState(): BrainState {
   return {
@@ -75,6 +91,9 @@ export function createBrainState(): BrainState {
     overtakeSide: 0,
     overtakeUntil: 0,
     draftHoldTime: 0,
+    blockStallTime: 0,
+    recoveryUntil: 0,
+    prevSlotMode: '',
   };
 }
 
@@ -184,19 +203,21 @@ function computeDesiredThrottle(
   return 1;
 }
 
-/** Blend grid column → racing line so launch does not collapse the pack onto o(s). */
+/**
+ * Blend grid column → personal racing line after GO.
+ * Stay on the grid stub until the car is actually rolling — otherwise the brain
+ * asks for a lateral target while v≈0 and (historically) the peg shoved sideways.
+ */
 function gridAwareLineTarget(
   car: CarSimState,
   lineTarget: number,
   raceTime: number,
-  kappaLine: number,
+  _kappaLine: number,
 ): number {
   const hold = PHYSICS.gridHoldSec;
+  // Parked / crawling off the lights: hold the starting column.
+  if (car.v < PHYSICS.grooveLatMinV * 1.5) return car.gridL;
   if (raceTime >= hold) return lineTarget;
-  // Release onto the peg before T1 — holding a grid stub through curvature deslots the pack.
-  if (raceTime > 0.55 && Math.abs(kappaLine) >= PHYSICS.grooveKappaMin * 0.65) {
-    return lineTarget;
-  }
   const pureEnd = hold * PHYSICS.gridHoldPureFrac;
   if (raceTime <= pureEnd) return car.gridL;
   const blend = (raceTime - pureEnd) / Math.max(1e-3, hold - pureEnd);
@@ -218,7 +239,12 @@ function rivalWithinAny(rivals: readonly RivalSnapshot[], distance: number): boo
   return false;
 }
 
-function pickOvertakeSide(car: CarSimState, track: TrackData, rivals: readonly RivalSnapshot[]): number {
+function pickOvertakeSide(
+  car: CarSimState,
+  track: TrackData,
+  rivals: readonly RivalSnapshot[],
+  force = false,
+): number {
   const node = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
   const lineClamp = node.width / 2 - PHYSICS.racingLineMargin;
   let roomLeft = car.l + lineClamp;
@@ -239,7 +265,11 @@ function pickOvertakeSide(car: CarSimState, track: TrackData, rivals: readonly R
 
   // Need a clear car-width corridor; wide asphalt usually has room on both sides.
   const need = Math.min(PHYSICS.carWidth * 0.95, BALANCE.overtakeLateralShift * 0.7);
-  if (roomLeft < need && roomRight < need) return 0;
+  if (roomLeft < need && roomRight < need) {
+    if (!force) return 0;
+    if (roomLeft <= 0 && roomRight <= 0) return car.l >= 0 ? -1 : 1;
+    return roomLeft >= roomRight ? -1 : 1;
+  }
   if (roomLeft >= roomRight) return -1;
   return 1;
 }
@@ -299,6 +329,8 @@ function computeTrafficBrake(
   return { brake, blocked, closeAhead };
 }
 
+type MistakeKind = 'lateBrake' | 'wobble' | null;
+
 function rollMistake(
   state: BrainState,
   driver: Driver,
@@ -306,7 +338,7 @@ function rollMistake(
   modifierStack: readonly Modifier[],
   modCtx: ModifierContext,
   rng: Rng,
-): void {
+): MistakeKind {
   let rate = ((100 - driver.focus) / 100) * PHYSICS.mistakeBasePerSec;
   rate = applyModifierParam(rate, 'mistakeRate', modifierStack, modCtx);
 
@@ -319,21 +351,92 @@ function rollMistake(
   if (ctx.rain) rate *= BALANCE.rainMistakeMult;
 
   const pTick = rate / 30;
-  if (rng() >= pTick) return;
+  if (rng() >= pTick) return null;
 
   if (rng() < 0.5) {
     state.suppressBrakeUntil = ctx.raceTime + PHYSICS.mistakeBrakeSuppress;
-  } else {
-    state.mistakeLShift = (rng() < 0.5 ? -1 : 1) * PHYSICS.mistakeLateralShift;
-    state.mistakeLUntil = ctx.raceTime + PHYSICS.mistakeLateralDuration;
+    return 'lateBrake';
   }
+  state.mistakeLShift = (rng() < 0.5 ? -1 : 1) * PHYSICS.mistakeLateralShift;
+  state.mistakeLUntil = ctx.raceTime + PHYSICS.mistakeLateralDuration;
+  return 'wobble';
 }
 
-function applyTraitKBrake(driver: Driver, rivals: readonly RivalSnapshot[], kBrake: number): number {
+function applyTraitKBrake(
+  driver: Driver,
+  rivals: readonly RivalSnapshot[],
+  kBrake: number,
+): { kBrake: number; hotheadLate: boolean } {
   if (driver.trait === 'hothead' && rivalWithinBehind(rivals, 12)) {
-    return kBrake - 0.1;
+    return { kBrake: kBrake - 0.1, hotheadLate: true };
   }
-  return kBrake;
+  return { kBrake, hotheadLate: false };
+}
+
+function attachIntent(out: BrainOutput, intent: BrainIntent): BrainOutput {
+  return { ...out, intent };
+}
+
+function resolvePrimaryIntent(args: {
+  spinning: boolean;
+  deslotted: boolean;
+  unstick: boolean;
+  pullingOut: boolean;
+  wreckAhead: boolean;
+  contactBlocked: boolean;
+  draftHold: boolean;
+  cornerBrake: boolean;
+  trafficLift: boolean;
+  launching: boolean;
+  launchWindow: boolean;
+  recovering: boolean;
+}): BrainIntentTag {
+  if (args.spinning) return 'SPIN_SCRUB';
+  if (args.deslotted) return 'REJOIN_CRAWL';
+  if (args.unstick) return 'UNSTICK_SIDE';
+  if (args.pullingOut) return 'PULL_OUT';
+  if (args.wreckAhead) return 'AVOID_WRECK';
+  if (args.contactBlocked) return 'CONTACT_BLOCKED';
+  if (args.draftHold) return 'DRAFT_HOLD';
+  if (args.cornerBrake) return 'BRAKE_FOR_CORNER';
+  if (args.trafficLift) return 'TRAFFIC_LIFT';
+  if (args.recovering) return 'RECOVERY_GRACE';
+  if (args.launching) return 'HOLD_GRID';
+  if (args.launchWindow) return 'LAUNCH_CLEAR';
+  return 'FULL_SEND';
+}
+
+function applyTraitIntentOverlay(
+  primary: BrainIntentTag,
+  opts: {
+    mistakeKind: MistakeKind;
+    hotheadLate: boolean;
+    iceColdCalm: boolean;
+    showboatRisk: boolean;
+    cornerBrake: boolean;
+  },
+): BrainIntentTag {
+  if (primary === 'SPIN_SCRUB' || primary === 'REJOIN_CRAWL') return primary;
+
+  if (opts.mistakeKind === 'lateBrake') return 'MISTAKE_LATE_BRAKE';
+  if (opts.mistakeKind === 'wobble') return 'MISTAKE_WOBBLE';
+
+  if (opts.hotheadLate && (primary === 'BRAKE_FOR_CORNER' || opts.cornerBrake)) {
+    return 'HOTHEAD_LATE';
+  }
+  if (
+    opts.iceColdCalm &&
+    (primary === 'FULL_SEND' || primary === 'BRAKE_FOR_CORNER' || primary === 'HOLD_GRID')
+  ) {
+    return 'ICE_COLD_CALM';
+  }
+  if (
+    opts.showboatRisk &&
+    (primary === 'FULL_SEND' || primary === 'BRAKE_FOR_CORNER' || primary === 'LAUNCH_CLEAR')
+  ) {
+    return 'SHOWBOAT_RISK';
+  }
+  return primary;
 }
 
 function drainReactionQueue(state: BrainState, raceTime: number, tau: number): BrainOutput {
@@ -374,24 +477,64 @@ export function tickDriverBrain(
 
   interpolateAtSInto(ctx.track.nodes, ctx.track.length, car.s, nodeScratch);
   // Snapshot — nested helpers may reuse nodeScratch.
-  const nodeO = nodeScratch.o;
   const nodeKappa = nodeScratch.kappaLine;
   const nodeWidth = nodeScratch.width;
   const halfW = nodeWidth / 2;
   const lineClamp = halfW - PHYSICS.racingLineMargin;
+  const personalO = personalLineAt(car, ctx.track, car.s);
   const tempGrip = computeTempGrip(car.tyreTemp);
+
+  // Rejoin edge: grant a short undelayed window so EMPTY_OUTPUT cannot stall recovery.
+  if (
+    state.prevSlotMode === 'deslot' &&
+    car.slotMode === 'groove' &&
+    car.spinRemaining <= 0
+  ) {
+    state.recoveryUntil = Math.max(
+      state.recoveryUntil,
+      ctx.raceTime + PHYSICS.recoveryBrainSec,
+    );
+  }
+  if (car.spinRemaining > 0) {
+    state.recoveryUntil = Math.max(
+      state.recoveryUntil,
+      ctx.raceTime + PHYSICS.recoveryBrainSec,
+    );
+  }
+  state.prevSlotMode = car.spinRemaining > 0 ? 'deslot' : car.slotMode;
 
   // Off-slot: scrub, rejoin, continue. Return raw — delayed deslot brake was
   // leaving cars at v≈0 with throttle 0 after rejoin (false "start stalls").
   if (car.slotMode === 'deslot' || car.spinRemaining > 0) {
-    const crawling = car.v < 6 && car.spinRemaining <= 0;
+    const spinning = car.spinRemaining > 0;
+    const ai = !car.isPlayerControlled;
+    const farFromLine = Math.abs(car.l - personalO) > PHYSICS.deslotRejoinL * 0.55;
+    const crawling = car.v < 8 && !spinning;
+    // AI stranded off-line at low speed: keep a crawl so they can steer home.
+    // Player Authority assist stays crawl-only (pin-throttle must still hurt).
+    let desiredThrottle = 0;
+    let desiredBrake = spinning ? 0.85 : crawling ? 0.05 : 0.35;
+    if (spinning) {
+      desiredThrottle = 0.05;
+    } else if (ai && (crawling || farFromLine)) {
+      desiredThrottle = 0.42 + 0.28 * (ctx.driver.skill / 100);
+      desiredBrake = 0.05;
+    } else if (crawling) {
+      desiredThrottle = 0.4 + 0.25 * (ctx.driver.skill / 100);
+    }
+    const intent = makeIntent(spinning ? 'SPIN_SCRUB' : 'REJOIN_CRAWL');
     const raw: BrainOutput = {
-      desiredThrottle: crawling ? 0.35 + 0.25 * (ctx.driver.skill / 100) : 0,
-      desiredBrake: car.spinRemaining > 0 ? 1 : crawling ? 0.1 : 0.4,
-      lTarget: Math.max(-lineClamp, Math.min(lineClamp, nodeO)),
+      desiredThrottle,
+      desiredBrake,
+      lTarget: Math.max(-lineClamp, Math.min(lineClamp, personalO)),
+      intent,
     };
     state.reactionQueue.length = 0;
     state.reactionQueue.push({ emitTime: ctx.raceTime, out: raw });
+    state.recoveryUntil = Math.max(
+      state.recoveryUntil,
+      ctx.raceTime + PHYSICS.recoveryBrainSec,
+    );
     return raw;
   }
 
@@ -399,12 +542,18 @@ export function tickDriverBrain(
   const launchWindow = ctx.raceTime < PHYSICS.aiLaunchSec;
 
   let kBrake = computeKBrake(ctx.driver, ctx.modifierStack, modCtx);
-  kBrake = applyTraitKBrake(ctx.driver, ctx.rivals, kBrake);
+  const traitBrake = applyTraitKBrake(ctx.driver, ctx.rivals, kBrake);
+  kBrake = traitBrake.kBrake;
+  const hotheadLate = traitBrake.hotheadLate;
   if (launchWindow) {
     // Milder look-ahead during launch so weak AI do not park on the lights.
     kBrake *= 0.85;
   }
-  if (car.tyreTemp < 0.35) {
+  if (car.tyreTemp < PHYSICS.tyreRecoveryFloor + 0.05) {
+    kBrake *= 1.05;
+  }
+  // Rally: earlier brake perception — loose surface punishes late arrivals.
+  if (ctx.discipline === 'rally') {
     kBrake *= 1.08;
   }
 
@@ -425,6 +574,7 @@ export function tickDriverBrain(
   // Low Skill brakes well before the peg; Bravery delays onset (risk).
   const slotOnset =
     0.74 + 0.18 * (ctx.driver.skill / 100) + 0.08 * (ctx.driver.bravery / 100);
+  let cornerBrake = false;
   if (
     Math.abs(nodeKappa) >= PHYSICS.grooveKappaMin &&
     car.v > vDeslot * slotOnset &&
@@ -432,7 +582,12 @@ export function tickDriverBrain(
   ) {
     const over = (car.v - vDeslot * slotOnset) / Math.max(vDeslot, 1);
     desiredBrake = Math.max(desiredBrake, Math.min(1, 0.55 + over * 1.5));
+    cornerBrake = true;
   }
+  if (desiredBrake > 0.05 && req > 0.35 * car.stats.aBrake) {
+    cornerBrake = true;
+  }
+  const cornerBrakeAmt = desiredBrake;
 
   // Solid traffic: AI must not tunnel. Player brain emits a traffic brake cue so
   // low-Skill Authority auto-brake can pick it up (rookies get safer pack driving).
@@ -478,56 +633,105 @@ export function tickDriverBrain(
     }
   }
 
-  let lTarget = nodeO;
+  // Base target is this driver's personal line — not the shared geometric o(s).
+  let lTarget = personalO;
+
+  // Track parked-behind-traffic time (low speed only).
+  let pullingOut = ctx.raceTime < state.overtakeUntil && state.overtakeSide !== 0;
+  const parkRisk =
+    aiTraffic &&
+    (traffic.blocked || (ctx.contactBlocked && traffic.closeAhead)) &&
+    !pullingOut &&
+    car.v < BLOCK_STALL_V;
+  if (parkRisk) state.blockStallTime += BRAIN_DT;
+  else if (!traffic.blocked && !ctx.contactBlocked) state.blockStallTime = 0;
+  else if (car.v >= BLOCK_STALL_V) {
+    state.blockStallTime = Math.max(0, state.blockStallTime - BRAIN_DT * 2);
+  }
 
   // Overtake: draft hold, contact block, or closing on a same-lane car.
   // Stay in the wake first — Determination shortens the hold before the pull-out.
-  const pullingOut = ctx.raceTime < state.overtakeUntil && state.overtakeSide !== 0;
   const draftReady =
     ctx.draft > BALANCE.overtakeDraftThreshold ||
     (ctx.draft > BALANCE.overtakeDraftThreshold * 0.55 && traffic.closeAhead);
   if (draftReady || traffic.closeAhead || pullingOut) {
-    // Keep tow credit through the pull-out so draftPass events / AI commit stick.
-    state.draftHoldTime += 1 / 30;
+    state.draftHoldTime += BRAIN_DT;
   } else {
-    state.draftHoldTime = Math.max(0, state.draftHoldTime - 1 / 20);
+    state.draftHoldTime = Math.max(0, state.draftHoldTime - BRAIN_DT * 1.5);
   }
   const holdNeed =
     BALANCE.overtakeHoldSec *
     (1.15 - 0.35 * (ctx.driver.determination / 100) - 0.15 * (ctx.driver.skill / 100));
 
+  // Only true wrecks force a pass — a slow groove car is traffic, not a stranded peg.
+  let wreckAhead = false;
+  if (car.v < BLOCK_STALL_V) {
+    const laneWidth = PHYSICS.carWidth * 0.62;
+    for (const r of ctx.rivals) {
+      const centerGap = r.arcGap + PHYSICS.carLength;
+      if (centerGap <= 0 || centerGap > BALANCE.followMinGap * 2.2) continue;
+      if (Math.abs(r.lateralSep) >= laneWidth) continue;
+      if (r.deslotted) {
+        wreckAhead = true;
+        break;
+      }
+    }
+  }
+  const forceSide =
+    state.blockStallTime >= BLOCK_FORCE_SEC && car.v < BLOCK_STALL_V && wreckAhead;
+  // Also force a side after long park even without a deslot wreck (clogged pack).
+  const forceAny =
+    forceSide || (state.blockStallTime >= BLOCK_FORCE_SEC * 1.6 && car.v < BLOCK_STALL_V * 0.6);
   const shouldOvertake =
     ctx.contactBlocked ||
     traffic.blocked ||
-    state.draftHoldTime >= holdNeed;
+    state.draftHoldTime >= holdNeed ||
+    forceAny;
 
+  let unstickCommit = false;
   if (shouldOvertake && ctx.raceTime >= state.overtakeUntil) {
-    state.overtakeSide = pickOvertakeSide(car, ctx.track, ctx.rivals);
-    // Side 0 = no room — stay in lane and brake rather than force a tunnel.
+    state.overtakeSide = pickOvertakeSide(car, ctx.track, ctx.rivals, forceAny);
     if (state.overtakeSide !== 0) {
       state.overtakeUntil = ctx.raceTime + BALANCE.overtakeDurationSec;
+      state.blockStallTime = 0;
+      pullingOut = true;
+      if (forceAny) unstickCommit = true;
+    } else if (forceAny) {
+      // Never park forever — pick a least-bad side and creep.
+      state.overtakeSide = car.l >= 0 ? -1 : 1;
+      state.overtakeUntil = ctx.raceTime + BALANCE.overtakeDurationSec * 0.8;
+      state.blockStallTime = 0;
+      pullingOut = true;
+      unstickCommit = true;
+      desiredThrottle = Math.max(desiredThrottle, BLOCK_CREEP_THROTTLE + 0.1);
+      desiredBrake = Math.min(desiredBrake, 0.15);
     } else if (traffic.blocked || ctx.contactBlocked) {
-      desiredThrottle = 0;
-      desiredBrake = Math.max(desiredBrake, 0.7);
+      desiredThrottle = Math.min(desiredThrottle, BLOCK_CREEP_THROTTLE);
+      desiredBrake = Math.max(desiredBrake, 0.45);
     }
   }
 
   if (pullingOut) {
-    // Use more of the asphalt on wide tracks (cap by line clamp).
     const wideShift = Math.min(
       BALANCE.overtakeLateralShift * (0.9 + 0.25 * Math.min(1, nodeWidth / 36)),
       Math.max(PHYSICS.carWidth * 1.15, lineClamp * 0.55),
     );
-    lTarget = nodeO + state.overtakeSide * wideShift;
+    lTarget = personalO + state.overtakeSide * wideShift;
+    if (forceAny) unstickCommit = true;
   }
 
-  // Drafting races need throttle in the wake; only stack contact fully kills drive.
-  // During grid clear, never park at throttle 0 for soft traffic.
+  // Drafting races need throttle in the wake; creep only while forcing a wreck pass.
+  let trafficLift = false;
   if (aiTraffic) {
     if (traffic.blocked && !pullingOut) {
-      desiredThrottle = launching ? Math.min(desiredThrottle, 0.35) : 0;
+      if (launching) desiredThrottle = Math.min(desiredThrottle, 0.35);
+      else if (forceSide) {
+        desiredThrottle = Math.max(BLOCK_CREEP_THROTTLE, Math.min(desiredThrottle, 0.28));
+      } else desiredThrottle = 0;
+      trafficLift = true;
     } else if (ctx.contactBlocked && !pullingOut && traffic.closeAhead && !launching) {
       desiredThrottle = Math.min(desiredThrottle, 0.2);
+      trafficLift = true;
     } else if (traffic.closeAhead && !pullingOut && !launching) {
       if (ctx.draft >= BALANCE.overtakeDraftThreshold * 0.5) {
         // Stay planted in the tow — relative speed for the pass.
@@ -537,11 +741,17 @@ export function tickDriverBrain(
         // Weak / no wake: lift earlier when low Skill.
         const lift = 0.28 + 0.4 * (ctx.driver.skill / 100);
         desiredThrottle = Math.min(desiredThrottle, lift);
+        trafficLift = true;
       }
     }
   }
 
-  // AI: hold a lane when a rival is abreast — groove magnet must not stack on o(s).
+  // Prefer corner intent when corner brake dominates traffic.
+  if (traffic.brake * (aiTraffic ? 1 : 0.85) > cornerBrakeAmt + 0.08) {
+    cornerBrake = false;
+  }
+
+  // AI: hold a lane when a rival is abreast — don't stack on the same personal line.
   // Player keeps racing-line authority; contact resolve still peels bodies apart.
   if (aiTraffic && !launching) {
     for (const r of ctx.rivals) {
@@ -553,7 +763,7 @@ export function tickDriverBrain(
         Math.max(BALANCE.overtakeLateralShift * 0.85, PHYSICS.carWidth * 1.05),
         Math.max(PHYSICS.carWidth * 1.1, lineClamp * 0.5),
       );
-      lTarget = nodeO + away * holdShift;
+      lTarget = personalO + away * holdShift;
       if (state.overtakeSide === 0 || ctx.raceTime >= state.overtakeUntil) {
         state.overtakeSide = away;
         state.overtakeUntil = ctx.raceTime + BALANCE.overtakeDurationSec * 0.6;
@@ -562,7 +772,7 @@ export function tickDriverBrain(
     }
   }
 
-  rollMistake(state, ctx.driver, ctx, ctx.modifierStack, modCtx, ctx.rng);
+  const mistakeKind = rollMistake(state, ctx.driver, ctx, ctx.modifierStack, modCtx, ctx.rng);
 
   if (ctx.raceTime < state.mistakeLUntil) {
     lTarget += state.mistakeLShift;
@@ -587,13 +797,44 @@ export function tickDriverBrain(
   lTarget = gridAwareLineTarget(car, lTarget, ctx.raceTime, nodeKappa);
   lTarget = Math.max(-lineClamp, Math.min(lineClamp, lTarget));
 
-  const raw: BrainOutput = { desiredThrottle, desiredBrake, lTarget };
+  const draftHold =
+    draftReady && !pullingOut && state.draftHoldTime > 0 && !ctx.contactBlocked;
+  const iceColdCalm =
+    ctx.driver.trait === 'iceCold' &&
+    (ctx.isFinalLap || rivalWithinAny(ctx.rivals, 10));
+  const showboatRisk =
+    ctx.driver.trait === 'showboat' && ctx.isLeading && ctx.leadingMarginSec > 3;
+
+  const primary = resolvePrimaryIntent({
+    spinning: false,
+    deslotted: false,
+    unstick: pullingOut && unstickCommit,
+    pullingOut,
+    wreckAhead: wreckAhead && !pullingOut && (traffic.blocked || traffic.closeAhead),
+    contactBlocked: ctx.contactBlocked && !pullingOut && (traffic.blocked || traffic.closeAhead),
+    draftHold,
+    cornerBrake: cornerBrake && desiredBrake > 0.05,
+    trafficLift: trafficLift && !cornerBrake,
+    launching,
+    launchWindow,
+    recovering: ctx.raceTime < state.recoveryUntil,
+  });
+  const intentTag = applyTraitIntentOverlay(primary, {
+    mistakeKind,
+    hotheadLate,
+    iceColdCalm,
+    showboatRisk,
+    cornerBrake,
+  });
+  const intent = makeIntent(intentTag);
+
+  const raw: BrainOutput = { desiredThrottle, desiredBrake, lTarget, intent };
 
   const tau = PHYSICS.reactionBase + PHYSICS.reactionFocusSpan * (1 - ctx.driver.focus / 100);
   state.reactionQueue.push({ emitTime: ctx.raceTime, out: raw });
 
-  // Launch: commit immediately — EMPTY_OUTPUT from an unaged queue stalled the grid.
-  if (launchWindow || car.v < 4) {
+  // Launch / crawl / post-deslot: commit immediately — EMPTY_OUTPUT stalls recovery.
+  if (launchWindow || car.v < 4 || ctx.raceTime < state.recoveryUntil) {
     return raw;
   }
 
@@ -604,14 +845,17 @@ export function tickDriverBrain(
     aiTraffic &&
     (traffic.blocked || ctx.contactBlocked || traffic.brake >= 0.55)
   ) {
-    return {
-      desiredThrottle: Math.min(delayed.desiredThrottle, desiredThrottle),
-      desiredBrake: Math.max(delayed.desiredBrake, desiredBrake),
-      lTarget: ctx.raceTime < state.overtakeUntil ? lTarget : delayed.lTarget,
-    };
+    return attachIntent(
+      {
+        desiredThrottle: Math.min(delayed.desiredThrottle, desiredThrottle),
+        desiredBrake: Math.max(delayed.desiredBrake, desiredBrake),
+        lTarget: ctx.raceTime < state.overtakeUntil ? lTarget : delayed.lTarget,
+      },
+      intent,
+    );
   }
 
-  return delayed;
+  return attachIntent(delayed, intent);
 }
 
 /** Neutral brain output for stun/spin or pre-race. */

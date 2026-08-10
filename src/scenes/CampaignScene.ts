@@ -8,6 +8,7 @@ import { generateOpponents } from '../engine/DriverGenerator';
 import { mulberry32, randInt } from '../engine/rng';
 import type { DisciplineId } from '../data/disciplines';
 import type { RaceLaunchConfig } from '../engine/raceTypes';
+import { buildTournamentStandings } from '../engine/raceTypes';
 import type { TournamentProgress } from '../engine/types';
 import {
   drawButton,
@@ -139,14 +140,16 @@ export class CampaignScene implements Scene {
     const format = FORMATS.find((f) => f.id === def.races[0]?.formatId) ?? FORMATS[0]!;
     const opponentCount = Math.max(1, (format.teamCount - 1) * format.teamSize);
     const opponents = generateOpponents(rng, opponentCount, def.rank);
-    const rivalName = opponents[0]?.name.split(' ')[0] ?? 'Rival';
+    const rivalNames: string[] = [];
+    for (let t = 1; t < format.teamCount; t++) {
+      const leadOpp = opponents[(t - 1) * format.teamSize];
+      const short = leadOpp?.name.split(' ')[0];
+      rivalNames.push(short ? `${short}'s Crew` : `Rival ${t}`);
+    }
     const progress: TournamentProgress = {
       defId: def.id,
       raceIndex: 0,
-      standings: [
-        { teamId: 0, points: 0, name: 'You' },
-        { teamId: 1, points: 0, name: rivalName },
-      ],
+      standings: buildTournamentStandings(format.teamCount, rivalNames),
       opponentDrivers: opponents,
       playerLineup: [...this.lineupSelection],
       leadDriverId: this.leadDriverId,

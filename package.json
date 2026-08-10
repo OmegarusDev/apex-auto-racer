@@ -8,7 +8,17 @@
     "play": "vite --host 127.0.0.1 --port 5173 --open",
     "start": "vite --host 127.0.0.1 --port 5173 --open",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "validate:feel": "vite-node scripts/feel-contract.ts",
+    "validate:intent": "vite-node scripts/intent-validate.ts",
+    "validate:meta": "vite-node scripts/meta-validate.ts",
+    "validate:start": "vite-node scripts/start-validate.ts",
+    "validate:slot": "vite-node scripts/scalextric-validate.ts",
+    "validate:pack": "vite-node scripts/collision-validate.ts",
+    "validate:field": "vite-node scripts/field-validate.ts",
+    "validate:smoke": "vite-node scripts/smoke.ts",
+    "validate:stack": "vite-node scripts/stack-smoke.ts",
+    "validate": "npm run validate:feel"
   },
   "devDependencies": {
     "terser": "^5.49.0",

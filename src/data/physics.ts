@@ -5,8 +5,8 @@ export const PHYSICS = {
   brainEveryN: 4,
   g: 9.81,
   pxPerM: 5,
-  carLength: 4.5,
-  carWidth: 2.0,
+  carLength: 5.1,
+  carWidth: 2.3,
   dprCap: 2.0,
   pedalEaseMs: 80,
   kerbOuterM: 0.8,
@@ -19,37 +19,73 @@ export const PHYSICS = {
    * Equals half carWidth so the body edge meets the visible wall/kerb rim —
    * never an arbitrary mid-asphalt clamp.
    */
-  wallMargin: 1.0,
+  wallMargin: 1.15,
+  /** Starting-grid row spacing along the track (m). */
+  gridRowSpacing: 12,
+  /** Starting-grid column offset from centerline (m). */
+  gridColOffset: 4.6,
   crashSpeed: 15,
   /** Post-impact speed retained on hard wall hit (inelastic). */
-  crashSpeedMult: 0.32,
+  crashSpeedMult: 0.42,
   /**
    * Soft recovery after wall impact — throttles drive only; does not freeze
    * lateral dynamics or teleport the car.
    */
-  crashStun: 0.55,
+  crashStun: 0.38,
+  /** Street discipline: harder wall stun (discipline mult — not a groove base retune). */
+  streetWallStunMult: 1.2,
   scrapeSpeedMultPerSec: 0.55,
   /** Fraction of inbound lateral velocity reflected on wall contact. */
   wallRestitution: 0.18,
   /** Extra long decel (m/s²) while recovering from a wall hit. */
-  crashRecoveryDecel: 9,
+  crashRecoveryDecel: 5.5,
+  /** Softer recovery decel while deslotted (let cars crawl off the wall). */
+  crashRecoveryDecelDeslot: 2.2,
   /** Longitudinal scrub (m/s²) scale from wall impact severity. */
-  wallImpactScrub: 14,
+  wallImpactScrub: 10,
+  /** Minimum roll factor for deslot steer-home (stranded cars can still crawl). */
+  deslotSteerMinRoll: 0.38,
+  /** Soft inward nudge (m/s²) when stuck on the wall while deslotted. */
+  deslotWallPush: 4.5,
+  /** Seconds of raw (undelayed) brain output after rejoining the groove. */
+  recoveryBrainSec: 0.85,
 
   // --- Scalextric groove / deslot ---
   /** |kappa| below this is treated as a straight — no deslot at any throttle. */
   grooveKappaMin: 0.012,
   /**
-   * Grip-usage secondary deslot — only when already near v_deslot.
-   * Primary failure is speed vs v_deslot (slot adhesion), not O alone.
+   * Grip-usage secondary deslot — near peg + overloaded friction circle.
+   * Primary failure is speed vs v_deslot; capacity fail is the pin-throttle path.
    */
-  oDeslot: 1.32,
-  /** Fraction of v_deslot required before O can force a deslot. */
-  oDeslotSpeedFrac: 0.96,
-  /** Strong magnetic hold onto the racing line while slotted. */
-  grooveFollowGain: 6.5,
+  oDeslot: 1.26,
+  /** Fraction of v_deslot required before O / capacity can force a deslot. */
+  oDeslotSpeedFrac: 0.92,
+  /**
+   * Groove magnet: restoring lateral accel toward personal line.
+   * magnet = roll(v) × (1 − loadKill×longLoad) × (1 − cornerKill×cornerLoad)
+   * aLat = spring×magnet×err − damp×dl; |dl| ≤ maxDlPerV×v
+   */
+  grooveSpring: 18,
+  grooveDamp: 7.5,
+  /** How hard accel/brake kills magnet (0–1 scale on |aLongDemand|/aGrip). */
+  grooveLoadKill: 0.72,
+  /** How hard corner load (aLat/aGrip) kills magnet. */
+  grooveCornerKill: 0.55,
+  /** Below this forward speed (m/s), magnet is fully off. */
+  grooveLatMinV: 1.2,
+  /** Forward speed (m/s) at which roll(v) reaches full strength. */
+  grooveLatFullV: 10,
+  /** Max |dl| as a fraction of forward speed (no sideways teleport). */
+  grooveMaxDlPerV: 0.38,
+  /**
+   * Capacity-fail deslot: magnet collapsed + off personal line + loaded corner.
+   * |l − line| must exceed this (m) while magnet is near zero.
+   */
+  grooveCapacityDeslotL: 0.85,
+  /** Magnet strength below this (0–1) counts as collapsed for capacity deslot. */
+  grooveCapacityMagnetMin: 0.18,
   /** Scales Focus/condition line noise while in groove. */
-  grooveWobbleScale: 0.48,
+  grooveWobbleScale: 0.32,
   /**
    * Off-slot lateral model (Frenet):
    *   a_excess = max(0, v²|κ| − a_lat_cap)  → outward accel
@@ -79,20 +115,20 @@ export const PHYSICS = {
   deslotSlipMax: 0.28,
   /**
    * v_deslot = v_safe * mDriver * mCar.
-   * Skill: rookies hold ~55% of v_safe; elites approach ~100%.
-   * Low skills must hurt — wide RPG span, not a soft nanny.
+   * Skill: rookies ~42% of v_safe; elites approach ~100%.
+   * Stock careers must lift in corners — not a soft nanny.
    */
-  deslotSkillBase: 0.5,
-  deslotSkillSpan: 0.5,
+  deslotSkillBase: 0.45,
+  deslotSkillSpan: 0.55,
   /** Focus widens the hold window (cleaner peg). Low Focus slips early. */
-  deslotFocusBase: 0.86,
-  deslotFocusSpan: 0.14,
+  deslotFocusBase: 0.84,
+  deslotFocusSpan: 0.16,
   /**
    * Bravery rides closer to the slot limit (multiplies mDriver).
    * Low bravery leaves margin; high bravery risks deslot for pace.
    */
-  deslotBraveryBase: 0.88,
-  deslotBraverySpan: 0.14,
+  deslotBraveryBase: 0.87,
+  deslotBraverySpan: 0.15,
 
   // --- Spin demoted: rare wall smash / extreme abuse only ---
   /** Wall impact above this speed while deslotted can tumble. */
@@ -100,34 +136,25 @@ export const PHYSICS = {
   spinAngle: 1.45,
   spinDecelTime: 0.55,
   spinStun: 1.0,
-  driftSpinO: 2.5,
 
-  /** Colder start — pin-throttle on T1 washouts harder before tyres warm. */
+  /**
+   * Tyres start garage-warm, not ice-cold. Pin-throttle still hurts via the
+   * cold window below optimal; stalled wrecks must not cool back to zero.
+   */
+  tyreStartTemp: 0.42,
+  tyreTempMax: 1.45,
   tyreColdGrip: 0.88,
   tyreHotGrip: 0.94,
-  tyreHeatSpeed: 0.03,
-  tyreHeatOver: 0.15,
-  tyreHeatDrift: 0.1,
-  tyreCool: 0.003,
+  tyreHeatSpeed: 0.045,
+  tyreHeatOver: 0.12,
+  tyreHeatDrift: 0.08,
+  tyreCool: 0.0025,
+  /** Floor while moving / recovering — prevents ice-cold restart after a crash. */
+  tyreRecoveryFloor: 0.28,
   loadTransferTau: 0.3,
   loadTransferScale: 10,
-  /** Legacy yaw knobs kept dormant / minimal (groove path does not use them). */
-  trailBrakeSlipRate: 0.05,
-  liftOffImpulse: 0.01,
-  lineFollowGain: 2.0,
+  /** Cosmetic slip decay while in groove (not a free-yaw model). */
   slipDecay: 8.0,
-  oversteerRate: 0.15,
-  oversteerThrottleLo: 0.85,
-  oversteerThrottleHi: 0.98,
-  oversteerKnee: 2.0,
-  oversteerRearBiasMin: 0.5,
-  oversteerMinSlip: 0.2,
-  oversteerExcessForce: 0.9,
-  coldYawFloor: 0.35,
-  coldYawWarmTemp: 0.4,
-  understeerScrub: 0.9,
-  aiSlipBleed: 6.0,
-  aiYawScale: 0.1,
   coastBase: 0.5,
   coastVel: 0.02,
   /** Slipstream top-speed bonus at full draft (aligned, straight). */
@@ -147,25 +174,28 @@ export const PHYSICS = {
   mistakeLateralDuration: 1.35,
   /**
    * Player Authority split:
-   * - Brake assist is stronger for low Skill (safer auto-brake).
+   * - Rookies get light brake assist only — stock car must be driven in corners.
    * - Throttle trim rises with Skill (elites self-manage pin-throttle).
    * Pin-throttle overrule nearly kills brake assist (see Vehicle).
    */
-  brakeAuthorityBase: 0.72,
-  brakeAuthoritySpan: -0.48,
-  throttleAuthorityBase: 0.12,
-  throttleAuthoritySpan: 0.7,
+  brakeAuthorityBase: 0.38,
+  brakeAuthoritySpan: -0.22,
+  throttleAuthorityBase: 0.1,
+  throttleAuthoritySpan: 0.72,
   horizonSec: 8,
   /** Mild launch caution — cold adhesion already lowers v_deslot. */
   aiLaunchSec: 1.6,
   /**
-   * Hold grid lateral columns after GO so the pack does not magnet to o(s)
-   * and overlap. Pure hold then blend into the racing line; curvature
-   * releases early onto the peg (see DriverBrain.gridAwareLineTarget).
+   * Hold grid lateral columns after GO so the pack does not magnet sideways
+   * into one shared line. Pure hold then slow blend into each car's personal line.
    */
-  gridHoldSec: 1.8,
-  /** Fraction of gridHoldSec spent on pure grid L before blending to o(s). */
-  gridHoldPureFrac: 0.4,
+  gridHoldSec: 2.6,
+  /** Fraction of gridHoldSec spent on pure grid L before blending to personal line. */
+  gridHoldPureFrac: 0.62,
+  /** Groove spring multiplier during gridHoldSec (soft pack-clear after GO). */
+  gridFollowGainMult: 0.28,
+  /** Cap on |dl| (m/s) during grid hold — prevents sideways teleport. */
+  gridMaxDl: 2.2,
   /** Minimum AI throttle while clearing the grid (avoids reaction-queue stalls). */
   aiLaunchMinThrottle: 0.68,
   detBonus: 0.12,
@@ -173,7 +203,6 @@ export const PHYSICS = {
   cameraZoomRate: 3,
   zoomMin: 0.7,
   zoomMax: 1.15,
-  kUnderBase: 0.8,
   lineNoiseBase: 0.8,
   maxBakeRes: 2048,
   sampleDs: 2,
@@ -193,8 +222,10 @@ export const SURFACE_MU: Record<string, number> = {
 };
 
 /**
- * Drift kept dormant — Scalextric loop is groove/deslot.
- * Config retained so a later mode can re-enable without schema churn.
+ * QUARANTINED — drift latch is dormant for Scalextric groove/deslot.
+ * Keep `enabled: false` on every surface. `VehicleState.driftState` remains on
+ * the car schema; latch / muMult / tyreHeatDrift / driftEntry only run when
+ * a mode flips `enabled` true. Do not delete — re-enable without schema churn.
  */
 export const DRIFT_CFG: Record<
   string,

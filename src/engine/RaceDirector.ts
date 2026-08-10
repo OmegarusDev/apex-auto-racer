@@ -1,5 +1,5 @@
 import { BALANCE } from '../data/balance';
-import { PHYSICS } from '../data/physics';
+import { DRIFT_CFG, PHYSICS } from '../data/physics';
 import { PARTS } from '../data/parts';
 import { getDiscipline } from '../data/disciplines';
 import type { DisciplineId } from '../data/disciplines';
@@ -12,7 +12,7 @@ import {
   tickDriverBrain,
 } from './DriverBrain';
 import type { BrainState, BrainTickContext, RivalSnapshot } from './DriverBrain';
-import { driverStrength01, generateFieldDrivers } from './DriverGenerator';
+import { driverStrength01, generateFieldDrivers, syncDriverIdsFrom } from './DriverGenerator';
 import {
   buildSpeedProfiles,
   buildVDriverProfile,
@@ -20,7 +20,11 @@ import {
   generateTrack,
 } from './TrackGenerator';
 import type { TrackData } from './TrackGenerator';
-import { interpolateAtSInto, type InterpolatedNode } from './RacingLine';
+import {
+  buildPersonalRacingLine,
+  interpolateAtSInto,
+  type InterpolatedNode,
+} from './RacingLine';
 import {
   buildVehicleContext,
   computeBrakeAuthority,
@@ -31,6 +35,8 @@ import {
   wallLimitFor,
 } from './Vehicle';
 import type { BrainOutput, CarSimState, VehicleInputs } from './Vehicle';
+import type { BrainIntent, BrainIntentTag } from './BrainIntent';
+import { intentTickerPhrase, isStoryIntentTransition } from './BrainIntent';
 import { effectiveStats } from './stats';
 import type { Modifier } from './modifiers';
 import { addModifier, createModifierStack } from './modifiers';
@@ -49,6 +55,7 @@ import type {
   GameState,
   RaceEvent,
   RaceEventKind,
+  SlotMode,
   VehicleParts,
   VehicleSave,
 } from './types';
@@ -147,15 +154,18 @@ interface RaceCarEntry {
   prevDrift: boolean;
   prevPosition: number;
   prevMistakeActive: boolean;
+  prevSlotMode: SlotMode | '';
+  lastIntentTag: BrainIntentTag | null;
+  lastIntentEventAt: number;
   draft: number;
   contactBlocked: boolean;
   partTiers: VehicleParts;
 }
 
+const INTENT_EVENT_COOLDOWN_SEC = 1.5;
+
 const EVENT_BUFFER_SIZE = 128;
 const GHOST_MAX_SAMPLES_PER_CAR = 1500;
-const GRID_ROW_SPACING = 9;
-const GRID_COL_OFFSET = 3.2;
 const COUNTDOWN_STEP_SEC = 1;
 const GO_FLASH_SEC = 0.5;
 
@@ -376,13 +386,17 @@ function formatEvent(event: RaceEvent): string {
     case 'driftEntry':
       return `${event.time.toFixed(1)}s — ${name} initiates a drift`;
     case 'draftPass':
-      return `${event.time.toFixed(1)}s — ${name} passes on the draft`;
+      return `${event.time.toFixed(1)}s — ${name} slingshots past`;
     case 'wallHit':
       return `${event.time.toFixed(1)}s — ${name} clips the wall`;
     case 'finish':
       return `${event.time.toFixed(1)}s — ${name} crosses the line`;
     case 'lap':
       return `${event.time.toFixed(1)}s — ${name} completes lap ${event.detail ?? ''}`;
+    case 'intent':
+      return `${event.time.toFixed(1)}s — ${intentTickerPhrase(name, event.detail as BrainIntentTag)}`;
+    case 'rejoin':
+      return `${event.time.toFixed(1)}s — ${name} finds the peg`;
     default:
       return `${event.time.toFixed(1)}s — ${name}: ${event.kind}`;
   }
@@ -539,6 +553,48 @@ export class RaceDirector {
     return this.carsView;
   }
 
+  /**
+   * Headless/test harness — stable snapshot so validators need not cast private entries.
+   * Full RaceDirector module split deferred; this is the public seam for feel gates.
+   */
+  debugSnapshot(): {
+    raceTime: number;
+    cars: {
+      id: string;
+      s: number;
+      l: number;
+      v: number;
+      slotMode: string;
+      tyreTemp: number;
+      deslotCount: number;
+      wallHits: number;
+      stunRemaining: number;
+      isPlayerControlled: boolean;
+      intentTag?: string;
+    }[];
+    eventKinds: string[];
+    contactStats: { overlapFrames: number; residualOverlapFrames: number; ticks: number };
+  } {
+    return {
+      raceTime: this.raceTime,
+      cars: this.entries.map((e) => ({
+        id: e.car.id,
+        s: e.car.s,
+        l: e.car.l,
+        v: e.car.v,
+        slotMode: e.car.slotMode,
+        tyreTemp: e.car.tyreTemp,
+        deslotCount: e.car.deslotCount,
+        wallHits: e.car.wallHits,
+        stunRemaining: e.car.stunRemaining,
+        isPlayerControlled: e.car.isPlayerControlled,
+        intentTag: e.brainOut.intent?.tag,
+      })),
+      eventKinds: this.events.map((ev) => ev.kind),
+      contactStats: this.contactStats,
+    };
+  }
+
   /** Monotonic event counter (increments even after the ring buffer is full). */
   get eventSequence(): number {
     return this.eventSeq;
@@ -559,6 +615,12 @@ export class RaceDirector {
 
   get recentEvents(): readonly RaceEvent[] {
     return this.events;
+  }
+
+  /** Live brain intent for HUD (player or any car). */
+  intentForCar(carId: string): BrainIntent | undefined {
+    const entry = this.entries.find((e) => e.car.id === carId);
+    return entry?.brainOut.intent;
   }
 
   get currentStandings(): readonly StandingEntry[] {
@@ -634,6 +696,8 @@ export class RaceDirector {
     if (this.config.opponentDrivers !== undefined && this.config.opponentDrivers.length >= opponentCount) {
       opponentDrivers = this.config.opponentDrivers.slice(0, opponentCount);
     } else {
+      // Roster ids come from SaveManager; field generation must not reuse them.
+      syncDriverIdsFrom(playerTeamDrivers);
       // Stratified weak→strong within the rank band (backmarkers + standouts).
       opponentDrivers = generateFieldDrivers(
         this.rng,
@@ -687,8 +751,9 @@ export class RaceDirector {
     this.entries = carPlans.map((plan, i) => {
       const row = Math.floor(i / 2);
       const col = i % 2;
-      const gridL = col === 0 ? -GRID_COL_OFFSET : GRID_COL_OFFSET;
-      const gridS = (this.track.length - row * GRID_ROW_SPACING + this.track.length) % this.track.length;
+      const gridL = col === 0 ? -PHYSICS.gridColOffset : PHYSICS.gridColOffset;
+      const gridS =
+        (this.track.length - row * PHYSICS.gridRowSpacing + this.track.length) % this.track.length;
 
       const stats = effectiveStats(this.config.discipline, plan.parts, plan.condition, plan.driver);
       const { vProfile, vSafe } = buildSpeedProfiles(this.track, stats, this.muSurface);
@@ -705,6 +770,18 @@ export class RaceDirector {
         buildTraitStack(plan.driver),
       );
 
+      const laneSign = col === 0 ? -1 : 1;
+      const lineO = buildPersonalRacingLine(
+        this.track.nodes,
+        this.track.length,
+        plan.driver.skill,
+        plan.driver.bravery,
+        stats.gripFactor * stats.condGrip,
+        laneSign,
+        gridS,
+        gridL,
+      );
+
       const car = createCarState(
         `car-${i}`,
         plan.driver.id,
@@ -718,6 +795,7 @@ export class RaceDirector {
         gridS,
         gridL,
         authority,
+        lineO,
       );
 
       return {
@@ -734,6 +812,9 @@ export class RaceDirector {
         prevDrift: false,
         prevPosition: i + 1,
         prevMistakeActive: false,
+        prevSlotMode: car.slotMode,
+        lastIntentTag: null,
+        lastIntentEventAt: -Infinity,
         draft: 0,
         contactBlocked: false,
         partTiers: plan.parts,
@@ -1080,7 +1161,12 @@ export class RaceDirector {
               ) {
                 const victim = a.car.v <= b.car.v ? a : b;
                 const pushDir = victim === a ? -sign : sign;
-                contactDeslot(victim.car, pushDir * (1.2 + sideSeverity), sideSeverity);
+                contactDeslot(
+                  victim.car,
+                  pushDir * (1.2 + sideSeverity),
+                  sideSeverity,
+                  this.config.discipline,
+                );
                 if (victim.car.isPlayerControlled) {
                   victim.car.condition = Math.max(
                     BALANCE.conditionMin,
@@ -1136,9 +1222,13 @@ export class RaceDirector {
                     follower.car,
                     Math.sign(follower.car.l || 1) * (0.7 + 0.6 * severity),
                     severity,
+                    this.config.discipline,
                   );
                 }
-                if (follower.car.isPlayerControlled) {
+                if (
+                  follower.car.isPlayerControlled &&
+                  severity >= BALANCE.contactConditionSeverityMin
+                ) {
                   follower.car.condition = Math.max(
                     BALANCE.conditionMin,
                     follower.car.condition - BALANCE.contactCrashConditionLoss * severity,
@@ -1193,6 +1283,14 @@ export class RaceDirector {
       this.pushEvent('deslot', car, name);
     }
 
+    if (
+      entry.prevSlotMode === 'deslot' &&
+      car.slotMode === 'groove' &&
+      car.spinRemaining <= 0
+    ) {
+      this.pushEvent('rejoin', car, name);
+    }
+
     if (car.spinCount > entry.prevSpinCount) {
       this.pushEvent('spin', car, name);
     }
@@ -1202,7 +1300,10 @@ export class RaceDirector {
       this.pushEvent(kind, car, name);
     }
 
-    if (car.driftState && !entry.prevDrift) {
+    // Quarantined with DRIFT_CFG — no driftEntry while latch is dormant.
+    const driftEnabled =
+      (DRIFT_CFG[this.config.discipline]?.enabled ?? DRIFT_CFG.track?.enabled) === true;
+    if (driftEnabled && car.driftState && !entry.prevDrift) {
       this.pushEvent('driftEntry', car, name);
     }
 
@@ -1213,10 +1314,23 @@ export class RaceDirector {
     }
     entry.prevMistakeActive = mistakeActive;
 
+    const intentTag = entry.brainOut.intent?.tag ?? null;
+    if (
+      intentTag !== null &&
+      intentTag !== entry.lastIntentTag &&
+      isStoryIntentTransition(intentTag, entry.lastIntentTag) &&
+      this.raceTime - entry.lastIntentEventAt >= INTENT_EVENT_COOLDOWN_SEC
+    ) {
+      this.pushEvent('intent', car, name, intentTag);
+      entry.lastIntentEventAt = this.raceTime;
+    }
+    entry.lastIntentTag = intentTag;
+
     entry.prevDeslotCount = car.deslotCount;
     entry.prevSpinCount = car.spinCount;
     entry.prevWallHits = car.wallHits;
     entry.prevDrift = car.driftState;
+    entry.prevSlotMode = car.slotMode;
   }
 
   private refreshStandings(force: boolean): void {

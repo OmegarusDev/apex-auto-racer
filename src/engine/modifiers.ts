@@ -13,7 +13,6 @@ export type ModifierTarget =
   | 'draft'
   | 'determination'
   | 'mistakeRate'
-  | 'kUnder'
   | 'lineNoise'
   | 'kBrake'
   | 'authority'

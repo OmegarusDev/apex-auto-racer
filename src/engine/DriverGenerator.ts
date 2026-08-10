@@ -9,15 +9,26 @@ import type { Driver } from './types';
 
 let nextDriverId = 1;
 
-function makeDriverId(): string {
+/** Allocate the next unique `drv-N` id (shared across save + field generation). */
+export function makeDriverId(): string {
   const id = `drv-${nextDriverId}`;
   nextDriverId += 1;
   return id;
 }
 
-/** Sync counter when loading saves (call from SaveManager if needed). */
+/** Sync counter when loading saves or before generating a field against existing roster ids. */
 export function syncDriverIdCounter(maxId: number): void {
   nextDriverId = Math.max(nextDriverId, maxId + 1);
+}
+
+/** Raise the counter above every `drv-N` id in the given drivers. */
+export function syncDriverIdsFrom(drivers: readonly { id: string }[]): void {
+  let max = 0;
+  for (const d of drivers) {
+    const m = /^drv-(\d+)$/.exec(d.id);
+    if (m !== null) max = Math.max(max, Number(m[1]));
+  }
+  syncDriverIdCounter(max);
 }
 
 function pickUniqueName(rng: Rng, used: Set<string>): string {

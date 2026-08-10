@@ -8,7 +8,8 @@ export const BALANCE = {
   repairCostPerPoint: 10,
   conditionMin: 0.6,
   conditionMax: 1.0,
-  wallCrashConditionLoss: 0.035,
+  /** Soft career ding per hard wall — repairable, not race-ending. */
+  wallCrashConditionLoss: 0.022,
   hireCostMultiplier: 12,
   /** Early roster sits under mid-pack so default careers are challenges, not stomps. */
   startingDriverStatMin: 22,
@@ -17,7 +18,7 @@ export const BALANCE = {
   startingPartTier: 1,
   maxPartTier: 5,
   /** Player vDriver pace trim — unupgraded careers should lose to a clean field. */
-  playerPaceMult: 0.75,
+  playerPaceMult: 0.65,
   rainChance: 0.1,
   /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
   rainMuMult: 0.82,
@@ -69,9 +70,9 @@ export const BALANCE = {
   overtakeHoldSec: 0.85,
   overtakeDurationSec: 3.5,
   /** Lateral offset onto a clear lane — sized for ~27–36 m asphalt. */
-  overtakeLateralShift: 3.4,
+  overtakeLateralShift: 3.9,
   /** Bumper clearance used by AI sensing (matches PHYSICS.carLength). */
-  contactGap: 4.5,
+  contactGap: 5.1,
   /** Follower speed cap vs leader on longitudinal contact. */
   contactSpeedCap: 0.92,
   /** Extra lateral separation rate (m/s) while bodies overlap. */
@@ -85,11 +86,13 @@ export const BALANCE = {
   /** Side-impact |Δl| rate / overlap that can pop a peg. */
   contactDeslotClosing: 9,
   /** Condition loss scale on hard car contact (player). */
-  contactCrashConditionLoss: 0.018,
+  contactCrashConditionLoss: 0.012,
+  /** Min rear-end severity before condition is charged (kiss bumps are free). */
+  contactConditionSeverityMin: 0.55,
   /** AI target time gap (s) to the car ahead in the same lane. */
   followTimeGap: 0.38,
   /** AI starts lifting/braking inside this bumper gap (m). */
-  followMinGap: 2.4,
+  followMinGap: 2.6,
   /** Low-skill AI brakes earlier for traffic (extra time-gap mult). */
   followSkillGapSpan: 0.72,
   finishWindowSec: 10,

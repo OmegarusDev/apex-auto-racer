@@ -19,6 +19,7 @@ import {
   DEFAULT_VOLUMES,
   defaultVehicleSave,
 } from './types';
+import { makeDriverId, syncDriverIdCounter, syncDriverIdsFrom } from './DriverGenerator';
 
 const STORAGE_KEY = 'apex-save-v1';
 
@@ -120,14 +121,6 @@ function isValidGameState(obj: Record<string, unknown>): boolean {
   return true;
 }
 
-let nextDriverId = 1;
-
-function makeDriverId(): string {
-  const id = `drv-${nextDriverId}`;
-  nextDriverId += 1;
-  return id;
-}
-
 function defaultRankUnlocked(): RankUnlocked {
   return { track: 0, street: 0, rally: 0 };
 }
@@ -227,6 +220,8 @@ export function createNewGame(rng: Rng, seed: number): GameState {
   for (let i = 0; i < BALANCE.startingRosterSize; i++) {
     roster.push(createDriver(rng, usedNames));
   }
+  // Field generation shares this counter — keep it above roster ids.
+  syncDriverIdsFrom(roster);
 
   return {
     version: SAVE_VERSION,
@@ -243,6 +238,8 @@ export function createNewGame(rng: Rng, seed: number): GameState {
       shownPedalControls: false,
       shownBrakeHint: false,
       shownCrashHint: false,
+      shownDeslotHint: false,
+      shownAuthorityHint: false,
     },
     options: {
       volumes: { ...DEFAULT_VOLUMES },
@@ -259,6 +256,15 @@ function migrate(raw: unknown): GameState | null {
 
   if (version < SAVE_VERSION) {
     obj.version = SAVE_VERSION;
+  }
+
+  if (isRecord(obj.onboarding)) {
+    if (typeof obj.onboarding.shownDeslotHint !== 'boolean') {
+      obj.onboarding.shownDeslotHint = false;
+    }
+    if (typeof obj.onboarding.shownAuthorityHint !== 'boolean') {
+      obj.onboarding.shownAuthorityHint = false;
+    }
   }
 
   if (!isValidGameState(obj)) return null;
@@ -392,21 +398,14 @@ export class SaveManager {
   }
 
   private syncDriverIdCounter(state: GameState): void {
-    let max = 0;
-    for (const d of state.roster) {
-      const m = /^drv-(\d+)$/.exec(d.id);
-      if (m !== null) {
-        max = Math.max(max, Number(m[1]));
-      }
-    }
+    const known: { id: string }[] = [...state.roster];
     for (const key of ['track', 'street', 'rally'] as DisciplineId[]) {
       const t = state.inProgressTournaments[key];
       if (t === null) continue;
-      for (const d of t.opponentDrivers) {
-        const m = /^drv-(\d+)$/.exec(d.id);
-        if (m !== null) max = Math.max(max, Number(m[1]));
-      }
+      known.push(...t.opponentDrivers);
     }
-    nextDriverId = max + 1;
+    syncDriverIdsFrom(known);
+    // Keep absolute floor in case a save only had non-drv ids.
+    syncDriverIdCounter(0);
   }
 }

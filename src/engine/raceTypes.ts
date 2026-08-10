@@ -82,10 +82,28 @@ export interface RaceObjectiveStats {
   playerBrakeUsed: boolean;
   playerWallHits: number;
   playerSpinCount: number;
+  playerDeslotCount: number;
   playerOvertakes: number;
   startGridPosition: number;
   vehicleConditionAtStart: number;
   vehicleRepairedBeforeRace: boolean;
+}
+
+/** Championship standings row count follows format.teamCount. */
+export function buildTournamentStandings(
+  teamCount: number,
+  rivalNames?: readonly string[],
+): TournamentStandingsEntry[] {
+  const standings: TournamentStandingsEntry[] = [{ teamId: 0, points: 0, name: 'You' }];
+  for (let t = 1; t < teamCount; t++) {
+    const named = rivalNames?.[t - 1];
+    standings.push({
+      teamId: t,
+      points: 0,
+      name: named && named.length > 0 ? named : `Rival ${t}`,
+    });
+  }
+  return standings;
 }
 
 let storedGhost: GhostTrace | null = null;
@@ -202,6 +220,9 @@ function evaluateObjectives(
       case 'team_win':
         met = playerTeamWon && launch.playerLineup.length >= 2;
         break;
+      case 'max_two_deslots':
+        met = playerFinished && stats.playerDeslotCount <= 2;
+        break;
       default:
         break;
     }
@@ -314,7 +335,10 @@ export function buildResultsPayload(
     isPlayer: p.teamId === 0,
   }));
 
-  const leadFinisher = finishers.find((f) => f.driverId === launch.leadDriverId);
+  // Prefer team-0 lead; driverId alone is ambiguous if ids ever collide.
+  const leadFinisher =
+    finishers.find((f) => f.driverId === launch.leadDriverId && f.teamId === 0) ??
+    finishers.find((f) => f.driverId === launch.leadDriverId);
   const bestPlayer = finishers.filter((f) => f.teamId === 0).sort((a, b) => a.position - b.position)[0];
   const playerPosition = leadFinisher?.position ?? bestPlayer?.position ?? finishers.length;
 
@@ -358,10 +382,16 @@ export function buildResultsPayload(
       tournamentRaceCount = def.races.length;
 
       for (const ts of teamScores) {
-        const entry = progress.standings.find((s) => s.teamId === ts.teamId);
-        if (entry !== undefined) {
-          entry.points += ts.points;
+        let entry = progress.standings.find((s) => s.teamId === ts.teamId);
+        if (entry === undefined) {
+          entry = {
+            teamId: ts.teamId,
+            points: 0,
+            name: ts.teamId === 0 ? 'You' : `Rival ${ts.teamId}`,
+          };
+          progress.standings.push(entry);
         }
+        entry.points += ts.points;
       }
       standings = [...progress.standings];
 

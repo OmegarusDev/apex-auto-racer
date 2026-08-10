@@ -4,8 +4,10 @@ import type { DisciplineId } from '../data/disciplines';
 import type { Driver, EffectiveStats, SlotMode, VehicleState } from './types';
 import type { Modifier, ModifierContext } from './modifiers';
 import { applyModifiers } from './modifiers';
+import { conditionLiveMods } from './stats';
 import type { TrackData } from './TrackGenerator';
 import { interpolateAtSInto, outwardSign, type InterpolatedNode } from './RacingLine';
+import type { BrainIntent } from './BrainIntent';
 
 const nodeScratch: InterpolatedNode = {
   pos: { x: 0, y: 0 },
@@ -23,6 +25,8 @@ export interface BrainOutput {
   desiredThrottle: number;
   desiredBrake: number;
   lTarget: number;
+  /** Optional storytelling tag from DriverBrain (not consumed by physics). */
+  intent?: BrainIntent;
 }
 
 export interface VehicleInputs {
@@ -51,8 +55,13 @@ export interface VehicleUpdateContext {
 export interface CarSimState extends VehicleState {
   stats: EffectiveStats;
   lTarget: number;
-  /** Starting-grid lateral column — held briefly after GO so pack doesn't collapse to o(s). */
+  /** Starting-grid lateral column — held briefly after GO so pack doesn't collapse. */
   gridL: number;
+  /**
+   * Personal racing-line offsets (m from centerline), one sample per track node.
+   * Centerline (l=0) is for bounds/graphics; cars magnetize to this profile.
+   */
+  lineO: number[];
   dl: number;
   aLong: number;
   gripUsage: number;
@@ -169,10 +178,10 @@ export function computeAuthority(skill: number): number {
   return computeBrakeAuthority(skill);
 }
 
-/** Low Skill → stronger auto-brake; elites manage braking themselves. */
+/** Low Skill → light auto-brake assist; elites manage braking themselves. */
 export function computeBrakeAuthority(skill: number): number {
   return Math.max(
-    0.2,
+    0.12,
     Math.min(1, PHYSICS.brakeAuthorityBase + PHYSICS.brakeAuthoritySpan * (skill / 100)),
   );
 }
@@ -183,6 +192,23 @@ export function computeThrottleAuthority(skill: number): number {
     0,
     Math.min(1, PHYSICS.throttleAuthorityBase + PHYSICS.throttleAuthoritySpan * (skill / 100)),
   );
+}
+
+/**
+ * Player Authority blend — shared by Vehicle and feel gates so pin ratios cannot drift.
+ * Pin-throttle (pT>0.85, pB<0.08) nearly kills brake assist.
+ */
+export function computePinAuthorityBlend(
+  skill: number,
+  pT: number,
+  pB: number,
+): { brakeAuth: number; throttleAuth: number; pinOverrule: boolean; brakeBlend: number; trim: number } {
+  const brakeAuth = computeBrakeAuthority(skill);
+  const throttleAuth = computeThrottleAuthority(skill);
+  const pinOverrule = pT > 0.85 && pB < 0.08;
+  const brakeBlend = pinOverrule ? brakeAuth * 0.015 : brakeAuth;
+  const trim = pinOverrule ? throttleAuth * 0.25 : throttleAuth;
+  return { brakeAuth, throttleAuth, pinOverrule, brakeBlend, trim };
 }
 
 function interpolateProfile(profile: readonly number[], track: TrackData, s: number): number {
@@ -208,6 +234,12 @@ function interpolateProfile(profile: readonly number[], track: TrackData, s: num
   const ds = s1 - s0;
   const t = ds > 1e-6 ? (distS - s0) / ds : 0;
   return profile[i0]! * (1 - t) + profile[i1]! * t;
+}
+
+/** Personal racing-line lateral offset at arc length s. */
+export function personalLineAt(car: CarSimState, track: TrackData, s: number): number {
+  if (car.lineO.length === 0) return 0;
+  return interpolateProfile(car.lineO, track, s);
 }
 
 function easePedal(current: number, target: number, dt: number): number {
@@ -289,6 +321,7 @@ export function createCarState(
   gridS: number,
   gridL: number,
   authority: number,
+  lineO: number[] = [],
 ): CarSimState {
   return {
     id,
@@ -299,7 +332,7 @@ export function createCarState(
     l: gridL,
     v: 0,
     slipAngle: 0,
-    tyreTemp: 0,
+    tyreTemp: PHYSICS.tyreStartTemp,
     balanceB: 0,
     driftState: false,
     slotMode: 'groove',
@@ -320,6 +353,7 @@ export function createCarState(
     stats,
     lTarget: gridL,
     gridL,
+    lineO,
     dl: 0,
     aLong: 0,
     gripUsage: 0,
@@ -347,9 +381,18 @@ function outwardDir(kappa: number, l: number): number {
  * centripetal demand integrated below — only a small overspeed-scaled impulse
  * seeds the release (lost constraint force), not a scripted eject.
  */
-export function enterDeslot(car: CarSimState, kappa: number, vDeslot: number): void {
+function deslotMinTimeFor(discipline: DisciplineId = 'track'): number {
+  return discipline === 'rally' ? PHYSICS.deslotMinTime * 1.35 : PHYSICS.deslotMinTime;
+}
+
+export function enterDeslot(
+  car: CarSimState,
+  kappa: number,
+  vDeslot: number,
+  discipline: DisciplineId = 'track',
+): void {
   car.slotMode = 'deslot';
-  car.deslotRemaining = PHYSICS.deslotMinTime;
+  car.deslotRemaining = deslotMinTimeFor(discipline);
   car.deslotCount += 1;
   car.driftState = false;
   const dir = outwardDir(kappa, car.l);
@@ -362,11 +405,16 @@ export function enterDeslot(car: CarSimState, kappa: number, vDeslot: number): v
 }
 
 /** Side/rear contact can yank a car out of the groove (deterministic). */
-export function contactDeslot(car: CarSimState, lateralPush: number, severity: number): void {
+export function contactDeslot(
+  car: CarSimState,
+  lateralPush: number,
+  severity: number,
+  discipline: DisciplineId = 'track',
+): void {
   if (car.slotMode !== 'groove' || car.deslotImmunity > 0) return;
   if (severity < 0.45) return;
   car.slotMode = 'deslot';
-  car.deslotRemaining = PHYSICS.deslotMinTime * (0.7 + 0.5 * severity);
+  car.deslotRemaining = deslotMinTimeFor(discipline) * (0.7 + 0.5 * severity);
   car.deslotCount += 1;
   car.driftState = false;
   car.dl += lateralPush * (2.2 + 3.5 * severity);
@@ -382,10 +430,14 @@ function tryRejoinGroove(
   vDeslot: number,
 ): void {
   if (car.deslotRemaining > 0) return;
-  if (Math.abs(car.l - lineOffset) > PHYSICS.deslotRejoinL) return;
-  if (car.v > vDeslot * PHYSICS.deslotRejoinVFrac) return;
+  // AI crawlers: wider catch so wall wrecks can reslot; player keeps the tight peg.
+  const aiWiden = !car.isPlayerControlled && car.v < 7;
+  const rejoinL = aiWiden ? PHYSICS.deslotRejoinL * 1.85 : PHYSICS.deslotRejoinL;
+  if (Math.abs(car.l - lineOffset) > rejoinL) return;
+  if (car.v > vDeslot * (aiWiden ? PHYSICS.deslotRejoinVFrac * 1.1 : PHYSICS.deslotRejoinVFrac))
+    return;
   // Still washing out hard — magnet can't grab yet.
-  if (Math.abs(car.dl) > 4.5) return;
+  if (Math.abs(car.dl) > (aiWiden ? 8 : 4.5)) return;
   car.slotMode = 'groove';
   car.slipAngle = 0;
   car.dl = 0;
@@ -410,9 +462,9 @@ function computeDeslotLateralAccel(
 
   let aL = dir * excess;
   if (excess <= 1e-6) {
-    // Spare adhesion steers back toward o(s) — needs rolling speed (tires, not magic).
-    const roll = Math.min(1, car.v / 8);
-    const spare = Math.max(0, aLatCap - aReq) * PHYSICS.deslotSteerFrac * roll;
+    // Spare adhesion steers home — keep a crawl floor so wall-pinned cars can recover.
+    const roll = Math.max(PHYSICS.deslotSteerMinRoll, Math.min(1, car.v / 8));
+    const spare = Math.max(0.8, (aLatCap - aReq) * PHYSICS.deslotSteerFrac) * roll;
     const err = lineOffset - car.l;
     const steer = err * PHYSICS.deslotSteerGain;
     aL = Math.max(-spare, Math.min(spare, steer));
@@ -445,6 +497,18 @@ export function updateVehicle(
     car.v = Math.max(0, car.v * (1 - dt / PHYSICS.spinDecelTime));
     // Keep washing / scraping — no teleport back to the groove.
     car.dl *= Math.exp(-2.5 * dt);
+    // Still advance along the track so a tumble is not a hard freeze.
+    car.s = (car.s + car.v * dt) % track.length;
+    if (car.s < 0) car.s += track.length;
+    car.l += car.dl * dt;
+    // Respect barriers during tumble — do not tunnel past the painted wall.
+    const spinNode = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
+    const spinWall = wallLimitFor(spinNode.width, spinNode.runoffWidth);
+    if (Math.abs(car.l) > spinWall) {
+      const into = Math.sign(car.l) || 1;
+      car.l = into * spinWall;
+      car.dl = -Math.abs(car.dl) * into * PHYSICS.wallRestitution;
+    }
     if (car.spinRemaining <= 0) {
       car.slipAngle = 0;
       car.slotMode = 'deslot';
@@ -474,13 +538,12 @@ export function updateVehicle(
     const pB = car.easedBrake;
     // Split Authority: rookies get brake assist; elites get throttle trim.
     // Pin-throttle overrule nearly kills the brake nanny — washouts must hurt.
-    const brakeAuth = computeBrakeAuthority(ctx.skill);
-    const throttleAuth = computeThrottleAuthority(ctx.skill);
-    pinOverrule = pT > 0.85 && pB < 0.08;
+    const blend = computePinAuthorityBlend(ctx.skill, pT, pB);
+    pinOverrule = blend.pinOverrule;
     // Pin-throttle: almost no brake nanny. Low Skill keeps low throttle trim so
     // washouts happen; pace loss comes from deslot/wall, not a soft lift.
-    const brakeBlend = pinOverrule ? brakeAuth * 0.015 : brakeAuth;
-    const trim = pinOverrule ? throttleAuth * 0.25 : throttleAuth;
+    const brakeBlend = blend.brakeBlend;
+    const trim = blend.trim;
     throttle = pT - trim * Math.max(0, pT - brainOut.desiredThrottle);
     brake = Math.max(pB, brakeBlend * brainOut.desiredBrake);
   } else {
@@ -488,9 +551,16 @@ export function updateVehicle(
     brake = brainOut.desiredBrake;
   }
 
+  // Stun hurts drive, but deslot/wall recovery must still crawl — not park forever.
   if (recovering) {
-    throttle *= 0.15;
-    brake = Math.max(brake, 0.35);
+    const deslotRecover = car.slotMode === 'deslot';
+    throttle *= deslotRecover ? 0.55 : 0.28;
+    if (!deslotRecover) {
+      brake = Math.max(brake, 0.22);
+    } else {
+      brake = Math.min(brake, 0.12);
+      throttle = Math.max(throttle, 0.3);
+    }
   }
 
   car.throttle = throttle;
@@ -514,19 +584,20 @@ export function updateVehicle(
     condTop: car.stats.condTop,
     tempGrip: computeTempGrip(car.tyreTemp),
     draft: ctx.draft,
-    kUnder: car.stats.kUnder,
   };
 
   const mods = applyModifiers(baseMods, ctx.modifierStack, modCtx);
   const muSurface = mods.muSurface ?? ctx.muSurface;
   const gripFactor = mods.gripFactor ?? car.stats.gripFactor;
-  const condGrip = mods.condGrip ?? car.stats.condGrip;
-  const condTop = mods.condTop ?? car.stats.condTop;
+  // Live condition — mid-race wall/contact damage must bite grip now, not only next race.
+  const liveCond = conditionLiveMods(car.condition);
+  const condGrip = mods.condGrip ?? liveCond.condGrip;
+  const condTop = mods.condTop ?? liveCond.condTop;
   let tempGrip = mods.tempGrip ?? computeTempGrip(car.tyreTemp);
-  // Low-tier / damaged cars: colder adhesion window — pin-throttle hurts more early.
+  // Low-tier cars: mild cold window — not an ice-floor after a stall.
   if (car.tyreTemp < 0.5) {
-    const tierCold = Math.max(0, 1.02 - gripFactor * condGrip) * 0.08;
-    tempGrip = Math.max(0.82, tempGrip - tierCold * (1 - car.tyreTemp / 0.5));
+    const tierCold = Math.max(0, 1.02 - gripFactor * condGrip) * 0.06;
+    tempGrip = Math.max(0.84, tempGrip - tierCold * (1 - car.tyreTemp / 0.5));
   }
   const draft = mods.draft ?? ctx.draft;
 
@@ -552,7 +623,7 @@ export function updateVehicle(
   // Pin-throttle commitment: low-Skill cars lose adhesion margin (no nanny grip).
   const pinGrip =
     pinOverrule && car.isPlayerControlled
-      ? 0.76 + 0.16 * Math.min(1, ctx.skill / 75)
+      ? 0.7 + 0.18 * Math.min(1, ctx.skill / 75)
       : 1;
   const muEff =
     muSurface * gripFactor * condGrip * tempGrip * pinGrip *
@@ -577,7 +648,20 @@ export function updateVehicle(
   const aBrakeApplied = Math.min(aBrakeAppliedUncapped, aBudget);
   let aLong = aDrive - aBrakeApplied - aCoast;
   if (recovering) {
-    aLong -= PHYSICS.crashRecoveryDecel;
+    aLong -=
+      car.slotMode === 'deslot'
+        ? PHYSICS.crashRecoveryDecelDeslot
+        : PHYSICS.crashRecoveryDecel;
+  }
+  // Pin-throttle through bends: drive collapses on the peg even before a deslot pop.
+  // (Authority is already nearly zero — pace loss must come from the slot, not a soft lift.)
+  if (pinOverrule && car.isPlayerControlled && curved) {
+    const cl = Math.min(1, aLat / Math.max(aGrip, 1e-6));
+    if (cl > 0.28) {
+      const kill = Math.min(1, (cl - 0.28) / 0.72);
+      aLong -= Math.max(0, aDrive) * (0.45 + 0.5 * kill);
+      aLong -= (0.22 + 0.4 * kill) * PHYSICS.g;
+    }
   }
 
   const balanceTarget = Math.max(-1, Math.min(1, aLong / PHYSICS.loadTransferScale));
@@ -588,14 +672,23 @@ export function updateVehicle(
   const O = Math.sqrt(aLat * aLat + aLongDemand * aLongDemand) / Math.max(aGrip, 1e-6);
   car.gripUsage = O;
 
-  const vDeslot =
-    computeVDeslot(car, track, ctx.skill, ctx.focus, tempGrip, ctx.bravery) *
-    (pinOverrule && car.isPlayerControlled ? pinGrip : 1);
+  // Peg stays on driver/car margins — do not scale vDeslot with pinGrip.
+  // Pinning already cuts adhesion; shrinking the peg in lockstep hid overspeed pops.
+  const vDeslot = computeVDeslot(
+    car,
+    track,
+    ctx.skill,
+    ctx.focus,
+    tempGrip,
+    ctx.bravery,
+  );
   car.vDeslot = vDeslot;
   if (car.deslotImmunity > 0) {
     car.deslotImmunity = Math.max(0, car.deslotImmunity - dt);
   }
-  const lineOffset = node.o;
+  // Personal line (not shared geometric o) — centerline is only for walls/graphics.
+  const lineOffset =
+    car.lineO.length > 0 ? personalLineAt(car, track, car.s) : node.o;
   let mode: SlotMode = car.slotMode;
 
   // Lateral tire capacity left after longitudinal use (deslot washout).
@@ -603,25 +696,74 @@ export function updateVehicle(
   const aLatCap = Math.sqrt(Math.max(0, aGrip * aGrip - aLongUsed * aLongUsed));
 
   // Step 7: groove / deslot lateral layer
+  // Magnet = restoring lateral accel (speed + long load + corner load), not a position servo.
+  let magnet = 0;
   if (mode === 'groove') {
-    // Magnetic hold to brain line target (≈ o(s) ± small wobble / overtake)
-    const follow = PHYSICS.grooveFollowGain;
-    const maxDl = Math.max(2.5, 0.35 * car.v);
-    car.dl = Math.max(-maxDl, Math.min(maxDl, follow * (car.lTarget - car.l)));
+    const roll = Math.max(
+      0,
+      Math.min(
+        1,
+        (car.v - PHYSICS.grooveLatMinV) /
+          Math.max(1e-3, PHYSICS.grooveLatFullV - PHYSICS.grooveLatMinV),
+      ),
+    );
+    const longLoad = Math.min(1, aLongDemand / Math.max(aGrip, 1e-6));
+    const cornerLoad = Math.min(1, aLat / Math.max(aGrip, 1e-6));
+    magnet =
+      roll *
+      (1 - PHYSICS.grooveLoadKill * longLoad) *
+      (1 - PHYSICS.grooveCornerKill * cornerLoad);
+
+    if (roll <= 1e-4) {
+      car.dl = 0;
+    } else {
+      let spring = PHYSICS.grooveSpring * magnet;
+      let maxDl = car.v * PHYSICS.grooveMaxDlPerV;
+      // Soft pack-clear aid after GO — not the main anti-slide fix.
+      if (ctx.raceTime < PHYSICS.gridHoldSec) {
+        spring *= PHYSICS.gridFollowGainMult;
+        maxDl = Math.min(maxDl, PHYSICS.gridMaxDl * roll);
+      }
+      const err = car.lTarget - car.l;
+      const aLatRestore = spring * err - PHYSICS.grooveDamp * car.dl;
+      car.dl += aLatRestore * dt;
+      car.dl = Math.max(-maxDl, Math.min(maxDl, car.dl));
+    }
     car.slipAngle *= Math.exp(-PHYSICS.slipDecay * dt);
 
-    // Slot peg limit: overspeed in curvature pops the groove.
-    // O alone must not deslot at safe corner speeds (longitudinal spikes).
+    // Deslot: overspeed peg, friction-circle overload near peg, or capacity fail
+    // (magnet collapsed while off personal line in a loaded bend — pin-throttle path).
     const overspeed = car.v > vDeslot;
     const gripBreak =
       car.v > vDeslot * PHYSICS.oDeslotSpeedFrac && O > PHYSICS.oDeslot;
-    if (curved && car.deslotImmunity <= 0 && (overspeed || gripBreak)) {
-      enterDeslot(car, kappaUse, vDeslot);
+    const offLine = Math.abs(car.l - lineOffset) > PHYSICS.grooveCapacityDeslotL;
+    // Capacity fail is the pin / heavy-long path — not traffic offset at light throttle.
+    const capacityFail =
+      curved &&
+      car.v > vDeslot * PHYSICS.oDeslotSpeedFrac &&
+      magnet < PHYSICS.grooveCapacityMagnetMin &&
+      offLine &&
+      cornerLoad > 0.55 &&
+      longLoad > 0.4;
+    // Player pin through a loaded bend: pop earlier than the shared peg story.
+    const pinBendPop =
+      pinOverrule &&
+      car.isPlayerControlled &&
+      curved &&
+      cornerLoad > 0.48 &&
+      longLoad > 0.45 &&
+      car.v > vDeslot * 0.82;
+    if (
+      curved &&
+      car.deslotImmunity <= 0 &&
+      (overspeed || gripBreak || capacityFail || pinBendPop)
+    ) {
+      enterDeslot(car, kappaUse, vDeslot, ctx.discipline);
       // Pinning through the peg: longer scrub so held-Go cannot soft-recover into a win.
       if (pinOverrule) {
         car.deslotRemaining = Math.max(
           car.deslotRemaining,
-          PHYSICS.deslotMinTime * (1.55 - 0.35 * Math.min(1, ctx.skill / 80)),
+          deslotMinTimeFor(ctx.discipline) * (1.85 - 0.45 * Math.min(1, ctx.skill / 80)),
         );
       }
       mode = 'deslot';
@@ -638,7 +780,9 @@ export function updateVehicle(
 
     // Sliding scrub scales with how far past adhesion you are — not a flat g cheat.
     const excess = Math.max(0, aLat - aLatCap);
-    const scrub = Math.min(PHYSICS.deslotScrubMaxG * PHYSICS.g, PHYSICS.deslotScrubGain * excess);
+    const scrubGain =
+      ctx.discipline === 'rally' ? PHYSICS.deslotScrubGain * 1.2 : PHYSICS.deslotScrubGain;
+    const scrub = Math.min(PHYSICS.deslotScrubMaxG * PHYSICS.g, scrubGain * excess);
     aLong -= scrub;
 
     // Cosmetic yaw tracks washout; does not drive the failure.
@@ -653,14 +797,16 @@ export function updateVehicle(
     mode = car.slotMode;
   }
 
-  // Drift kept dormant (DRIFT_CFG.enabled false for Scalextric base loop)
-  if (driftCfg.enabled && brake >= 0.5 && Math.abs(car.slipAngle) > driftCfg.initiate) {
-    car.driftState = true;
-  }
-  if (car.driftState) {
-    const slipTarget = driftCfg.target * Math.sign(car.slipAngle || 1);
-    car.slipAngle += (slipTarget - car.slipAngle) * (1 - Math.exp(-6 * dt));
-    if (O < 0.6) car.driftState = false;
+  // Quarantined: only runs when DRIFT_CFG[discipline].enabled (currently false).
+  if (driftCfg.enabled) {
+    if (brake >= 0.5 && Math.abs(car.slipAngle) > driftCfg.initiate) {
+      car.driftState = true;
+    }
+    if (car.driftState) {
+      const slipTarget = driftCfg.target * Math.sign(car.slipAngle || 1);
+      car.slipAngle += (slipTarget - car.slipAngle) * (1 - Math.exp(-6 * dt));
+      if (O < 0.6) car.driftState = false;
+    }
   }
 
   car.prevThrottle = throttle;
@@ -669,19 +815,29 @@ export function updateVehicle(
   car.v = Math.max(0, car.v + aLong * dt);
   car.s = (car.s + car.v * dt) % track.length;
   if (car.s < 0) car.s += track.length;
+  // No lateral travel when effectively stationary (belt-and-braces vs magnet bugs).
+  if (car.v < PHYSICS.grooveLatMinV * 0.5 && mode === 'groove') {
+    car.dl = 0;
+  }
   car.l += car.dl * dt;
   car.aLong = aLong;
 
-  // Tyre temperature
+  // Tyre temperature — warm with work; do not ice-cool while recovering from a crash.
+  const recoveringTyres = recovering || car.slotMode === 'deslot' || car.spinRemaining > 0;
+  const cool =
+    recoveringTyres || car.v > 2 ? PHYSICS.tyreCool * 0.35 : PHYSICS.tyreCool;
   car.tyreTemp = Math.max(
-    0,
-    car.tyreTemp +
-      (PHYSICS.tyreHeatSpeed * (car.v / Math.max(car.stats.vMax, 0.1)) +
-        PHYSICS.tyreHeatOver * Math.max(0, O - 1) +
-        (car.driftState ? PHYSICS.tyreHeatDrift : 0) +
-        (car.slotMode === 'deslot' ? PHYSICS.tyreHeatOver * 0.5 : 0) -
-        PHYSICS.tyreCool) *
-        dt,
+    recoveringTyres ? PHYSICS.tyreRecoveryFloor : 0,
+    Math.min(
+      PHYSICS.tyreTempMax,
+      car.tyreTemp +
+        (PHYSICS.tyreHeatSpeed * (car.v / Math.max(car.stats.vMax, 0.1)) +
+          PHYSICS.tyreHeatOver * Math.max(0, O - 1) +
+          (car.driftState ? PHYSICS.tyreHeatDrift : 0) +
+          (car.slotMode === 'deslot' ? PHYSICS.tyreHeatOver * 0.35 : 0) -
+          cool) *
+          dt,
+    ),
   );
 
   // Step 11: zones & walls (re-evaluate after lateral integrate)
@@ -721,17 +877,19 @@ export function updateVehicle(
             impactSpeed / 90,
         ),
       );
-      // Inelastic smash: retain little speed at high severity; scrub scales with energy.
+      // Inelastic smash: retain some crawl speed so recovery is possible.
       car.v = Math.max(
-        0,
+        hard && car.slotMode === 'deslot' ? 1.2 : 0,
         car.v * (1 - (1 - PHYSICS.crashSpeedMult) * severity) -
           PHYSICS.wallImpactScrub * severity * dt * 8,
       );
       // Focus recovers cleaner (shorter stun); Bravery accepts a harder hit for pace.
-      const stunScale = 1.12 - 0.28 * (ctx.focus / 100) + 0.1 * (ctx.bravery / 100);
+      const stunScale = 1.05 - 0.3 * (ctx.focus / 100) + 0.08 * (ctx.bravery / 100);
+      const streetStun =
+        ctx.discipline === 'street' ? PHYSICS.streetWallStunMult : 1;
       car.stunRemaining = Math.max(
         car.stunRemaining,
-        PHYSICS.crashStun * severity * stunScale,
+        PHYSICS.crashStun * severity * stunScale * streetStun,
       );
       car.wallHits += 1;
       if (car.isPlayerControlled) {
@@ -748,13 +906,26 @@ export function updateVehicle(
         car.spinRemaining <= 0
       ) {
         car.spinRemaining = PHYSICS.spinStun;
-        car.stunRemaining = Math.max(car.stunRemaining, PHYSICS.spinStun);
+        car.stunRemaining = Math.max(car.stunRemaining, PHYSICS.spinStun * 0.85);
         car.spinCount += 1;
         car.driftState = false;
       }
     } else {
       car.v *= 1 - PHYSICS.scrapeSpeedMultPerSec * dt;
+      // Only peel when truly stuck on the barrier — keep |l| at the wall while sliding.
+      if (car.slotMode === 'deslot' && car.v < 2.2 && Math.abs(car.dl) < 0.8) {
+        car.dl = -into * Math.min(PHYSICS.deslotWallPush, 3.2);
+      }
     }
+  } else if (
+    car.slotMode === 'deslot' &&
+    Math.abs(car.l) > wallLimit - 0.8 &&
+    car.v < 2.5 &&
+    Math.abs(car.dl) < 1
+  ) {
+    // Near-wall crawl: peel inward only when parked against the fence.
+    const into = Math.sign(car.l) || 1;
+    car.dl += -into * PHYSICS.deslotWallPush * 0.4 * dt;
   }
 
   updateCosmeticRpm(car, dt);

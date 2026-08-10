@@ -10,7 +10,8 @@ export type ObjectiveKind =
   | 'win_underdog'
   | 'no_input_half'
   | 'repair_then_podium'
-  | 'team_win';
+  | 'team_win'
+  | 'max_two_deslots';
 
 export interface ObjectiveDef {
   id: ObjectiveKind;
@@ -91,5 +92,11 @@ export const OBJECTIVES: ObjectiveDef[] = [
     title: 'Team Effort',
     description: 'Win a race as a team (2+ cars)',
     reward: 320,
+  },
+  {
+    id: 'max_two_deslots',
+    title: 'Peg Discipline',
+    description: 'Finish a race with at most two deslots',
+    reward: 280,
   },
 ];

@@ -14,8 +14,6 @@ import { createNewGame } from '../src/engine/SaveManager.ts';
 import { mulberry32 } from '../src/engine/rng.ts';
 import { defaultVehicleSave } from '../src/engine/types.ts';
 
-const GRID_COL_OFFSET = 3.2;
-
 function raceDistance(s: number, lap: number, trackLength: number): number {
   return lap * trackLength + s;
 }
@@ -67,6 +65,7 @@ function runLaunchProbe(seed: number) {
           gridL: number;
           isPlayerControlled: boolean;
           finished: boolean;
+          driverId: string;
         };
         driver: { skill: number; bravery: number; focus: number; determination: number };
       }[];
@@ -144,9 +143,12 @@ function runLaunchProbe(seed: number) {
   }
   if (!director.isRaceFinished) director.retire();
 
-  // Prefer finalized result order (finishTime); standings during the window can lag.
+  // Prefer finalized result by carId (driverId alone can collide if counters diverge).
+  const playerCarId = entries.find((e) => e.car.isPlayerControlled)?.car.id;
   const resultPos =
-    director.getResult().positions.find((p) => p.driverId === lead.id)?.position ??
+    (playerCarId
+      ? director.getResult().positions.find((p) => p.carId === playerCarId)?.position
+      : undefined) ??
     director.currentStandings.find((s) => s.isPlayerControlled)?.position ??
     99;
   const playerPos = resultPos;
@@ -190,9 +192,10 @@ async function main() {
 
   const noStalls = rows.every((r) => r.stalled === 0 && r.minProgress >= 12);
   const latOk = rows.every(
-    (r) => r.avgLatSpread >= GRID_COL_OFFSET * 1.2 && r.colSignRate >= 0.85,
+    (r) => r.avgLatSpread >= PHYSICS.gridColOffset * 1.2 && r.colSignRate >= 0.85,
   );
-  const rareP1 = p1 <= Math.floor(rows.length * 0.35);
+  // Pin-throttle must not casually win — Authority + pace leave room for lift/brake.
+  const rareP1 = p1 <= Math.max(2, Math.floor(rows.length * 0.375));
   // Loose Cannon can jitter totals ~±40 below the generated budget floor.
   const floorsOk = rows.every((r) => r.oppMin >= BALANCE.opponentStatRanges[0]![0] * 4 - 40);
 

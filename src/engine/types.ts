@@ -51,7 +51,6 @@ export interface EffectiveStats {
   aBrake: number;
   gripFactor: number;
   D: number;
-  kUnder: number;
   lineNoise: number;
   condGrip: number;
   condTop: number;
@@ -100,7 +99,9 @@ export type RaceEventKind =
   | 'draftPass'
   | 'wallHit'
   | 'finish'
-  | 'lap';
+  | 'lap'
+  | 'intent'
+  | 'rejoin';
 
 export interface RaceEvent {
   kind: RaceEventKind;
@@ -158,6 +159,8 @@ export interface OnboardingFlags {
   shownPedalControls: boolean;
   shownBrakeHint: boolean;
   shownCrashHint: boolean;
+  shownDeslotHint?: boolean;
+  shownAuthorityHint?: boolean;
 }
 
 export interface GameState {

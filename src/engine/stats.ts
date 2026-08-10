@@ -13,8 +13,19 @@ interface DisplayStats {
   downforce: number;
 }
 
-function clampCondition(condition: number): number {
+export function clampCondition(condition: number): number {
   return Math.max(BALANCE.conditionMin, Math.min(BALANCE.conditionMax, condition));
+}
+
+/** Live condition → grip/top-speed multipliers (same curve as effectiveStats). */
+export function conditionLiveMods(condition: number): { condGrip: number; condTop: number } {
+  const clamped = clampCondition(condition);
+  const normalized =
+    (clamped - BALANCE.conditionMin) / (BALANCE.conditionMax - BALANCE.conditionMin);
+  return {
+    condGrip: 0.88 + 0.12 * normalized,
+    condTop: 0.97 + 0.03 * normalized,
+  };
 }
 
 function sumPartIncrements(partTiers: VehicleParts): DisplayStats {
@@ -50,16 +61,14 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
   const gripFactor = 0.75 + 0.005 * grip;
   const D = 0.006 * downforce;
 
-  let kUnder = PHYSICS.kUnderBase * (1 - 0.06 * suspTier);
   let lineNoise = PHYSICS.lineNoiseBase * (1 - 0.08 * suspTier);
 
   const clamped = clampCondition(condition);
-  const normalized = (clamped - BALANCE.conditionMin) / (BALANCE.conditionMax - BALANCE.conditionMin);
-  const condGrip = 0.88 + 0.12 * normalized;
-  const condTop = 0.97 + 0.03 * normalized;
+  const normalized =
+    (clamped - BALANCE.conditionMin) / (BALANCE.conditionMax - BALANCE.conditionMin);
+  const { condGrip, condTop } = conditionLiveMods(condition);
 
   lineNoise *= 2 - normalized;
-  kUnder *= 1 + 0.5 * (1 - normalized);
 
   return {
     topSpeed,
@@ -72,7 +81,6 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
     aBrake,
     gripFactor,
     D,
-    kUnder,
     lineNoise,
     condGrip,
     condTop,

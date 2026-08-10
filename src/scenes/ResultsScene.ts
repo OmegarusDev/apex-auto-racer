@@ -3,6 +3,7 @@ import { getGameContext } from '../engine/GameContext';
 import { refillObjectives } from '../engine/SaveManager';
 import { RANK_NAMES } from '../data/balance';
 import type { ResultsPayload } from '../engine/raceTypes';
+import { effectiveStats } from '../engine/stats';
 import type { DriverStatKey } from '../ui/components';
 import {
   drawButton,
@@ -132,9 +133,10 @@ export class ResultsScene implements Scene {
 
   private showUnlockToasts(): void {
     const accent = disciplineAccent(this.payload.discipline);
+    const state = getGameContext().state;
     for (const grant of this.payload.driverXp) {
       if (grant.leveledUp) {
-        const driver = findDriver(getGameContext().state!, grant.driverId);
+        const driver = findDriver(state!, grant.driverId);
         this.toasts.push(`${driver?.name ?? 'Driver'} reached Lv ${grant.newLevel}!`, accent, 3.5);
       }
     }
@@ -144,6 +146,18 @@ export class ResultsScene implements Scene {
         accent,
         3.5,
       );
+    }
+    if (state !== null && !state.onboarding.shownAuthorityHint) {
+      const lead = findDriver(state, this.payload.config.leadDriverId);
+      if ((lead?.skill ?? 0) >= 55) {
+        this.toasts.push(
+          'Skill trims pin-throttle — lift less; trust Authority in bends',
+          accent,
+          4.5,
+        );
+        state.onboarding.shownAuthorityHint = true;
+        getGameContext().autosave();
+      }
     }
   }
 
@@ -465,7 +479,33 @@ export class ResultsScene implements Scene {
         this.upgradeCollapsed = !this.upgradeCollapsed;
       },
       onBuy: (part: import('../data/parts').PartCategory) => {
-        if (buyPartTier(state, this.payload.discipline, part)) getGameContext().autosave();
+        const before = effectiveStats(
+          this.payload.discipline,
+          vehicle.partTiers,
+          vehicle.condition,
+        );
+        if (buyPartTier(state, this.payload.discipline, part)) {
+          const after = effectiveStats(
+            this.payload.discipline,
+            vehicle.partTiers,
+            vehicle.condition,
+          );
+          const dGrip = after.gripFactor - before.gripFactor;
+          const dV = after.vMax - before.vMax;
+          const bits: string[] = [];
+          if (Math.abs(dGrip) >= 0.001) {
+            bits.push(`grip ${dGrip >= 0 ? '+' : ''}${dGrip.toFixed(3)}`);
+          }
+          if (Math.abs(dV) >= 0.05) {
+            bits.push(`vMax ${dV >= 0 ? '+' : ''}${dV.toFixed(1)}`);
+          }
+          this.toasts.push(
+            bits.length > 0 ? `Upgrade: ${bits.join(' · ')}` : 'Part upgraded',
+            disciplineAccent(this.payload.discipline),
+            3,
+          );
+          getGameContext().autosave();
+        }
       },
       onRepair: () => {
         if (repairVehicle(state, this.payload.discipline)) getGameContext().autosave();

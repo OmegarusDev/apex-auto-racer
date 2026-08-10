@@ -329,6 +329,94 @@ export function relaxCenterlineMinRadius(
   return rebuildClosedSamples(positions);
 }
 
+/**
+ * Per-driver racing line as a *lane corridor*, not a rush to shared geometric o(s).
+ * Track node.o stays decorative; centerline (l=0) is bounds/graphics only.
+ *
+ * - Lane identity from grid column (left stays left, right stays right)
+ * - Skill → cut farther toward the apex *within* that side of the track
+ * - Bravery → carry a bit wider through the corner
+ * - Anchored to gridL near the start so launch does not yank laterally
+ */
+export function buildPersonalRacingLine(
+  nodes: readonly RacingLineNode[],
+  trackLength: number,
+  skill: number,
+  bravery: number,
+  gripFactor: number,
+  laneSign: number,
+  gridS: number,
+  gridL: number,
+): number[] {
+  const n = nodes.length;
+  if (n === 0) return [];
+
+  const skill01 = Math.max(0, Math.min(1, skill / 100));
+  const bravery01 = Math.max(0, Math.min(1, bravery / 100));
+  const sign = Math.sign(laneSign || gridL || 1) || 1;
+  // Preferred lane center — stays near the grid column, not the track centerline.
+  const laneBase = sign * PHYSICS.gridColOffset * (0.92 + 0.08 * (1 - skill01));
+  // How far elites may ease toward center for an apex (still mostly on their side).
+  const crossCap = 0.4 + 2.2 * skill01;
+  const gripUse = 0.85 + 0.2 * Math.max(0.5, Math.min(1.2, gripFactor));
+  const out = new Array<number>(n);
+
+  for (let i = 0; i < n; i++) {
+    const node = nodes[i]!;
+    const half = Math.max(0.5, node.width / 2 - PHYSICS.racingLineMargin);
+    const k = node.kappaLine;
+    const kAbs = Math.abs(k);
+    const corner = Math.min(1, kAbs / Math.max(PHYSICS.grooveKappaMin * 2.2, 1e-3));
+
+    // Inside of the corner (toward apex). Geometric o() is only a hint for magnitude.
+    const insideDir = kAbs > 1e-5 ? -Math.sign(k) : 0;
+    const apexCut =
+      insideDir * corner * (0.9 + 2.4 * skill01) * gripUse;
+    // Bravery holds a touch wider (less cut / slight outside bias).
+    const wideCarry = sign * corner * bravery01 * (0.7 + 0.6 * (1 - skill01));
+
+    let line = laneBase + apexCut * (0.55 + 0.45 * skill01) + wideCarry * 0.35;
+
+    // Soft hint from geometric ideal — only the component that keeps lane identity.
+    const idealHint = node.o * (0.15 + 0.25 * skill01);
+    if (sign < 0) {
+      line = line * 0.82 + Math.min(idealHint, 0) * 0.18;
+      line = Math.min(line, crossCap);
+    } else {
+      line = line * 0.82 + Math.max(idealHint, 0) * 0.18;
+      line = Math.max(line, -crossCap);
+    }
+
+    out[i] = Math.max(-half, Math.min(half, line));
+  }
+
+  // Light smooth.
+  const smoothed = out.slice();
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < n; i++) {
+      const im = wrapIndex(i - 1, n);
+      const ip = wrapIndex(i + 1, n);
+      smoothed[i] = out[i]! * 0.5 + (out[im]! + out[ip]!) * 0.25;
+    }
+    for (let i = 0; i < n; i++) out[i] = smoothed[i]!;
+  }
+
+  // Hard-anchor near the grid stub — launch line == starting column.
+  const anchorDist = 70;
+  for (let i = 0; i < n; i++) {
+    const node = nodes[i]!;
+    let ds = Math.abs(node.s - gridS);
+    ds = Math.min(ds, trackLength - ds);
+    if (ds >= anchorDist) continue;
+    const w = 1 - ds / anchorDist;
+    const blend = w * w * (3 - 2 * w);
+    const half = Math.max(0.5, node.width / 2 - PHYSICS.racingLineMargin);
+    out[i] = Math.max(-half, Math.min(half, out[i]! * (1 - blend) + gridL * blend));
+  }
+
+  return out;
+}
+
 /** Plan 5.2: iterative racing-line offsets along centerline normals. */
 export function computeRacingLineOffsets(
   centerline: readonly SplineSample[],

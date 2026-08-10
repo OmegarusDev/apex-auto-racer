@@ -872,6 +872,7 @@ export function drawTopDownCar(
       color: accent,
       isPlayer: true,
       detail: 'hero',
+      discipline,
     },
     true,
   );

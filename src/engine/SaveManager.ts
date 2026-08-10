@@ -241,6 +241,8 @@ export function createNewGame(rng: Rng, seed: number): GameState {
       shownCrashHint: false,
       shownDeslotHint: false,
       shownAuthorityHint: false,
+      shownShiftCue: false,
+      shownPegHint: false,
     },
     options: {
       volumes: { ...DEFAULT_VOLUMES },
@@ -265,6 +267,12 @@ function migrate(raw: unknown): GameState | null {
     }
     if (typeof obj.onboarding.shownAuthorityHint !== 'boolean') {
       obj.onboarding.shownAuthorityHint = false;
+    }
+    if (typeof obj.onboarding.shownShiftCue !== 'boolean') {
+      obj.onboarding.shownShiftCue = false;
+    }
+    if (typeof obj.onboarding.shownPegHint !== 'boolean') {
+      obj.onboarding.shownPegHint = false;
     }
   }
 

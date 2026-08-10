@@ -76,10 +76,13 @@ export class VectorRenderer {
   private track: TrackView | null = null;
   private discipline: DisciplineDef | null = null;
 
-  bakeTrack(track: TrackView, disciplineId: DisciplineId): void {
+  private night = false;
+
+  bakeTrack(track: TrackView, disciplineId: DisciplineId, night = false): void {
     const discipline = getDiscipline(disciplineId);
     this.track = track;
     this.discipline = discipline;
+    this.night = night;
 
     const padM = 6;
     const b = track.bounds;
@@ -112,12 +115,20 @@ export class VectorRenderer {
     this.baked = canvas;
 
     this.bakeMinimap(track, b);
+    if (night) {
+      ctx.fillStyle = '#07070a';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+    }
     this.drawRunoff(ctx, track, discipline, toBake);
     this.drawAsphalt(ctx, track, discipline, toBake);
     this.drawKerbs(ctx, track, discipline, toBake);
     this.drawBarriers(ctx, track, discipline, toBake);
     this.drawStartCheckered(ctx, track, toBake);
     this.drawGridDashes(ctx, track, toBake);
+    if (night) {
+      ctx.fillStyle = 'rgba(8,12,28,0.28)';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+    }
   }
 
   blitTrack(
@@ -149,7 +160,11 @@ export class VectorRenderer {
 
   drawCar(
     ctx: CanvasRenderingContext2D,
-    car: CarRenderState,
+    car: CarRenderState & {
+      tyreTemp?: number;
+      slotMode?: string;
+      condition?: number;
+    },
     color: string,
     isPlayer: boolean,
     camera: CameraTransform,
@@ -163,17 +178,27 @@ export class VectorRenderer {
     const heading = sample.heading;
     const len = PHYSICS.carLength * PX_PER_M * camera.zoom;
     const wid = PHYSICS.carWidth * PX_PER_M * camera.zoom;
+    const deslot = car.slotMode === 'deslot';
 
-    // Ground shadow in screen space (unrotated) — reads as a tabletop miniature.
     ctx.save();
     ctx.translate(x, y);
-    drawSlotCarShadow(ctx, len, wid, isPlayer ? 0.42 : 0.34);
+    drawSlotCarShadow(ctx, len, wid, isPlayer ? 0.42 : 0.34, deslot);
     ctx.restore();
 
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(-heading);
-    drawSlotCarMesh(ctx, { len, wid, color, isPlayer, detail: 'race' });
+    drawSlotCarMesh(ctx, {
+      len,
+      wid,
+      color,
+      isPlayer,
+      detail: 'race',
+      discipline: this.discipline?.id,
+      tyreTemp: car.tyreTemp,
+      deslot,
+      condition: car.condition,
+    });
     ctx.restore();
   }
 
@@ -193,13 +218,20 @@ export class VectorRenderer {
 
     ctx.save();
     ctx.translate(p.x, p.y);
-    drawSlotCarShadow(ctx, len, wid, 0.16);
+    drawSlotCarShadow(ctx, len, wid, 0.12, false);
     ctx.restore();
 
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(-heading);
-    drawSlotCarMesh(ctx, { len, wid, color, alpha: 0.38, detail: 'race' });
+    drawSlotCarMesh(ctx, {
+      len,
+      wid,
+      color,
+      alpha: 0.32,
+      detail: 'race',
+      discipline: this.discipline?.id,
+    });
     ctx.restore();
   }
 
@@ -350,11 +382,49 @@ export class VectorRenderer {
 
     // Soft asphalt rim (path still current after fill).
     const s = this.bakeMeta?.scale ?? 1;
-    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.strokeStyle = this.night ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.4)';
     ctx.lineWidth = Math.max(1.5, 2.4 * s);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.strokeStyle = this.night ? 'rgba(140,180,255,0.05)' : 'rgba(255,255,255,0.06)';
     ctx.lineWidth = Math.max(1, 1.4 * s);
+    ctx.stroke();
+
+    // Slot groove — Scalextric center rail read.
+    ctx.beginPath();
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i]!;
+      const p = toBake(n.pos.x, n.pos.y);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.strokeStyle = this.night ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = Math.max(1.2, 1.8 * s);
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.strokeStyle = this.night ? 'rgba(180,200,255,0.08)' : 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = Math.max(0.6, 0.9 * s);
+    ctx.stroke();
+
+    // Outer bevel ribbon (slightly inset from rim).
+    ctx.beginPath();
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i]!;
+      const px = n.pos.x - n.normal.x * n.width * 0.42;
+      const py = n.pos.y - n.normal.y * n.width * 0.42;
+      const p = toBake(px, py);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    for (let i = nodes.length - 1; i >= 0; i--) {
+      const n = nodes[i]!;
+      const px = n.pos.x + n.normal.x * n.width * 0.42;
+      const py = n.pos.y + n.normal.y * n.width * 0.42;
+      const p = toBake(px, py);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = this.night ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = Math.max(1, 1.2 * s);
     ctx.stroke();
   }
 

@@ -140,8 +140,11 @@ export class GarageScene implements Scene {
       pad(token, 1.5) +
       token.fontCaption +
       pad(token, 1) +
-      btnH +
+      btnH * 1.15 +
       btnGap +
+      pad(token, 0.5) +
+      token.fontCaption +
+      pad(token, 1) +
       btnH +
       pad(token, 2);
 
@@ -240,19 +243,21 @@ export class GarageScene implements Scene {
       lui,
     );
     y += statBarHeight(token) + pad(token, 1.5);
-    y += drawSectionTitle(ctx, 0, y, 'Actions', lui);
+    y += drawSectionTitle(ctx, 0, y, 'Race', lui);
     y += pad(token, 0.5);
 
     const campaignBtn: ButtonDef = {
       x: 0,
       y,
       w: view.w,
-      h: btnH,
-      label: 'Campaign',
+      h: btnH * 1.15,
+      label: 'Enter Campaign',
       primary: true,
       onClick: () => g.scenes.push(new CampaignScene(discipline)),
     };
-    y += btnH + btnGap;
+    y += campaignBtn.h + btnGap + pad(token, 0.5);
+    y += drawSectionTitle(ctx, 0, y, 'Garage', lui);
+    y += pad(token, 0.5);
     const rowW = (view.w - btnGap) * 0.5;
     const tuningBtn: ButtonDef = {
       x: 0,

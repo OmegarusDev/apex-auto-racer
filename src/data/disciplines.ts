@@ -18,6 +18,8 @@ export interface DisciplineDef {
     kerbA: string;
     kerbB: string;
     runoff: string;
+    /** Optional center-groove tint hint (unused by bake; reserved). */
+    groove?: string;
   };
 }
 

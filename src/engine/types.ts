@@ -167,6 +167,8 @@ export interface OnboardingFlags {
   shownCrashHint: boolean;
   shownDeslotHint?: boolean;
   shownAuthorityHint?: boolean;
+  shownShiftCue?: boolean;
+  shownPegHint?: boolean;
 }
 
 export interface GameState {

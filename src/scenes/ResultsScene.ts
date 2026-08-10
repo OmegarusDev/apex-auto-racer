@@ -189,7 +189,9 @@ export class ResultsScene implements Scene {
   }
 
   private advancePhase(): void {
-    const order: ResultsPhase[] = ['podium', 'standings', 'payout', 'xp', 'done'];
+    const order: ResultsPhase[] = this.tournamentMode
+      ? ['podium', 'standings', 'payout', 'xp', 'done']
+      : ['podium', 'payout', 'xp', 'done'];
     const idx = order.indexOf(this.phase);
     if (idx < order.length - 1) {
       this.phase = order[idx + 1]!;
@@ -232,12 +234,14 @@ export class ResultsScene implements Scene {
     state: NonNullable<ReturnType<typeof getGameContext>['state']>,
   ): number {
     const { token } = ui;
-    let h = this.podiumH(token) + pad(token, 1.5);
+    let h = token.fontCaption + pad(token, 1.25);
+    h += this.podiumH(token) + pad(token, 1.5);
     if (this.tournamentMode) {
       h += token.fontCaption + pad(token, 1.5);
       h += this.payload.standings.length * pad(token, 4) + pad(token, 1.5);
     }
     h += this.payoutBlockH(token);
+    h += token.fontCaption + pad(token, 1.25);
     h += this.xpBlockH(ui, state);
     h += pad(token, 2);
     return h;
@@ -326,11 +330,21 @@ export class ResultsScene implements Scene {
 
       this.scroller.begin(ctx, view);
       let y = 0;
+      ctx.save();
+      ctx.font = `800 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      ctx.fillStyle = accent;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('FULL RESULTS', 0, y);
+      ctx.restore();
+      y += token.fontCaption + pad(token, 1.25);
       y += this.drawPodium(ctx, 0, y, view.w, lui) + pad(token, 1.5);
       if (this.tournamentMode) {
         y = this.drawStandings(ctx, 0, y, view.w, lui);
       }
       y = this.drawPayout(ctx, 0, y, view.w, lui);
+      y += drawSectionTitle(ctx, 0, y, 'Invest', lui);
+      y += pad(token, 0.5);
       y = this.drawXpSection(ctx, 0, y, view.w, lui, state);
       this.scroller.end(ctx);
 
@@ -370,20 +384,33 @@ export class ResultsScene implements Scene {
       const contentW = shell.contentRect.w;
       let y = shell.contentRect.y;
 
-      // Reveal phases stack: later phases keep earlier panels visible.
-      if (this.phase === 'podium' || this.phase === 'standings' || this.phase === 'payout' || this.phase === 'xp') {
+      const phaseLabel =
+        this.phase === 'podium'
+          ? 'FINISH'
+          : this.phase === 'standings'
+            ? 'STANDINGS'
+            : this.phase === 'payout'
+              ? 'PAYOUT'
+              : 'REWARDS';
+      ctx.save();
+      ctx.font = `800 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      ctx.fillStyle = accent;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(phaseLabel, contentX, y);
+      ctx.restore();
+      y += token.fontCaption + pad(token, 1.25);
+
+      // Theatre: one beat at a time during reveal.
+      if (this.phase === 'podium') {
         y += this.drawPodium(ctx, contentX, y, contentW, ui) + pad(token, 1.5);
-      }
-      if (
-        (this.phase === 'standings' || this.phase === 'payout' || this.phase === 'xp') &&
-        this.tournamentMode
-      ) {
-        y = this.drawStandings(ctx, contentX, y, contentW, ui);
-      }
-      if (this.phase === 'payout' || this.phase === 'xp') {
+      } else if (this.phase === 'standings') {
+        if (this.tournamentMode) {
+          y = this.drawStandings(ctx, contentX, y, contentW, ui);
+        }
+      } else if (this.phase === 'payout') {
         y = this.drawPayout(ctx, contentX, y, contentW, ui);
-      }
-      if (this.phase === 'xp') {
+      } else if (this.phase === 'xp') {
         y = this.drawXpSection(ctx, contentX, y, contentW, ui, state);
       }
 
@@ -391,7 +418,7 @@ export class ResultsScene implements Scene {
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
       ctx.textAlign = 'center';
-      ctx.fillText('Tap to skip', w * 0.5, h - token.safe.bottom - pad(token));
+      ctx.fillText('Tap to continue', w * 0.5, h - token.safe.bottom - pad(token));
       ctx.restore();
     }
 

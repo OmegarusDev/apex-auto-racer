@@ -482,6 +482,8 @@ export class RaceDirector {
   readonly config: RaceConfig;
   readonly track: TrackData;
   readonly rain: boolean;
+  /** Visual-only session mood — does not touch µ / modifiers. */
+  readonly night: boolean;
 
   private entries: RaceCarEntry[] = [];
   private drivers: Driver[] = [];
@@ -525,6 +527,8 @@ export class RaceDirector {
     this.config = config;
     this.rng = mulberry32(config.raceSeed);
     this.rain = this.rng() < BALANCE.rainChance;
+    // Visual-only — hash raceSeed; do NOT consume this.rng (feel/determinism).
+    this.night = ((config.raceSeed * 2654435761) >>> 0) % 100 < 32;
     this.track = generateTrack(config.trackSeed, config.discipline, config.archetypeHint);
     this.globalRainStack = buildRainStack(this.rain);
     this.muSurface = getDiscipline(config.discipline).muSurface;

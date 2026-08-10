@@ -29,6 +29,14 @@ import { Camera } from '../graphics/Camera';
 import { Particles } from '../graphics/Particles';
 import { VectorRenderer, sampleTrack } from '../graphics/VectorRenderer';
 import {
+  drawPegMeter,
+  drawPreRaceCard,
+  nearDeslotThreat,
+  sampleKappaAt,
+  shouldTeachAuthority,
+  wantsShiftCue,
+} from '../graphics/RaceFantasyHud';
+import {
   drawButton,
   handleButton,
   drawModal,
@@ -40,6 +48,7 @@ import {
   type ModalDef,
 } from '../ui/components';
 import { accentForDiscipline, createTheme, type ThemeTokens } from '../ui/theme';
+import { gearboxFor } from '../engine/Gearbox';
 
 /** Avoid importing sceneUtils / ResultsScene here — that cycle breaks dynamic RaceScene load. */
 function disciplineAccent(id: import('../data/disciplines').DisciplineId): string {
@@ -96,6 +105,8 @@ export class RaceScene implements Scene {
   private hintT = 0;
   /** One-shot lift warning before first deslot teaching toast. */
   private warnedDeslotLift = false;
+  private nearDeslotFxCd = 0;
+  private shiftCueArmed = false;
   private ghostCarId: string | null = null;
   private ghostTrace: GhostTrace | null = null;
   private lastDt = 1 / 60;
@@ -147,6 +158,8 @@ export class RaceScene implements Scene {
       this.hintText = null;
       this.hintT = 0;
       this.warnedDeslotLift = false;
+      this.nearDeslotFxCd = 0;
+      this.shiftCueArmed = false;
 
       const vehicle = state.vehicles[this.launch.discipline];
       if (vehicle === undefined) {
@@ -166,17 +179,16 @@ export class RaceScene implements Scene {
 
       const raceConfig = buildRaceConfig(state, this.launch);
       this.director = new RaceDirector(raceConfig);
-      this.renderer.bakeTrack(this.director.track, this.launch.discipline);
+      this.renderer.bakeTrack(this.director.track, this.launch.discipline, this.director.night);
       this.particles.setRaining(this.director.rain);
       this.g.audio.setDiscipline?.(this.launch.discipline);
       this.g.audio.setRain(this.director.rain);
 
-      if (this.launch.again) {
-        const stored = loadGhostTrace();
-        if (stored !== null) {
-          this.ghostTrace = stored.trace;
-          this.ghostCarId = stored.carId;
-        }
+      // Best-lap ghost whenever we have one (Race Again or prior PB).
+      const stored = loadGhostTrace();
+      if (stored !== null) {
+        this.ghostTrace = stored.trace;
+        this.ghostCarId = stored.carId;
       }
 
       const standings = this.director.currentStandings;
@@ -295,6 +307,15 @@ export class RaceScene implements Scene {
     const cam = this.camera.getTransform();
 
     this.renderer.blitTrack(ctx, cam, w, h);
+    if (director.night) {
+      ctx.save();
+      const g = ctx.createRadialGradient(w * 0.5, h * 0.45, h * 0.15, w * 0.5, h * 0.5, h * 0.85);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(4,8,20,0.42)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
 
     if (this.ghostTrace !== null && this.ghostCarId !== null && director.countdown === null) {
       const sample = sampleGhost(this.ghostTrace, this.ghostCarId, director.raceClock);
@@ -328,8 +349,20 @@ export class RaceScene implements Scene {
 
     this.drawHud(ctx, w, h, token, accent, director, cars, playerIdx);
     this.drawPedalTints(ctx, w, h, token);
+    const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
+    const traitName = leadDriver !== undefined ? getTrait(leadDriver.trait).name : 'Driver';
+    drawPreRaceCard(ctx, w, h, token, accent, {
+      discipline: this.launch.discipline,
+      laps: director.config.laps,
+      rain: director.rain,
+      night: director.night,
+      driverName: leadDriver?.name ?? 'Driver',
+      traitName,
+      phase: director.countdown,
+    });
     this.drawCountdownBanner(ctx, w, h, token, director.countdown);
     if (director.rain) this.drawRainChip(ctx, w, h, token);
+    if (director.night) this.drawNightChip(ctx, w, h, token);
     this.drawTicker(ctx, w, h, token);
     this.drawOnboardingHint(ctx, w, h, token, accent);
 
@@ -660,6 +693,40 @@ export class RaceScene implements Scene {
         this.g.audio.playSpin();
       }
 
+      // Near-deslot tell + Authority / peg / shift teach (presentation only).
+      const kappa = sampleKappaAt(director.track.nodes, player.s);
+      this.nearDeslotFxCd = Math.max(0, this.nearDeslotFxCd - this.lastDt);
+      if (nearDeslotThreat(player, kappa) && this.nearDeslotFxCd <= 0) {
+        const renderedP = this.renderer.sampleCar(player);
+        if (renderedP !== null) {
+          this.particles.emitSparks(renderedP.pos.x, renderedP.pos.y, 3, 2);
+          this.particles.emitDust(renderedP.pos.x, renderedP.pos.y, 3, 0.95);
+        }
+        this.nearDeslotFxCd = 0.35;
+        if (!this.g.state!.onboarding.shownPegHint && this.hintText === null) {
+          this.showHint('Peg meter: keep under 100% in bends', 'shownPegHint');
+        }
+      }
+
+      const lead = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
+      const skill = lead?.skill ?? 40;
+      if (
+        !this.g.state!.onboarding.shownAuthorityHint &&
+        this.hintText === null &&
+        shouldTeachAuthority(skill, player, kappa)
+      ) {
+        this.showHint('Authority trims pin-throttle in bends — trust it', 'shownAuthorityHint');
+      }
+
+      this.shiftCueArmed = wantsShiftCue(player, this.launch.discipline);
+      if (
+        this.shiftCueArmed &&
+        !this.g.state!.onboarding.shownShiftCue &&
+        this.hintText === null
+      ) {
+        this.showHint('SHIFT near redline to climb gears', 'shownShiftCue');
+      }
+
       this.stats.playerWallHits = player.wallHits;
       this.stats.playerSpinCount = player.spinCount;
       this.stats.playerDeslotCount = player.deslotCount;
@@ -869,8 +936,20 @@ export class RaceScene implements Scene {
       ctx.fillStyle = accent;
       ctx.fillText(`${speedKmh} km/h`, hudX, hudY);
       ctx.fillStyle = token.textDim;
-      ctx.fillText(`G${player.gear} · ${Math.round(player.rpm)} RPM`, hudX, hudY + token.fontBody);
-      hudY += token.fontBody * 2 + pad(token, 0.5);
+      const box = gearboxFor(this.launch.discipline);
+      const rpmN = Math.round(player.rpm);
+      const shiftMark = this.shiftCueArmed ? ' ▲' : '';
+      ctx.fillText(`G${player.gear}/${box.gearCount} · ${rpmN} RPM${shiftMark}`, hudX, hudY + token.fontBody);
+      hudY += token.fontBody * 2 + pad(token, 0.35);
+      hudY += drawPegMeter(
+        ctx,
+        hudX,
+        hudY,
+        Math.min(pad(token, 12), telemetryMaxW),
+        player,
+        token,
+        accent,
+      );
 
       ctx.fillStyle = token.textMuted;
       const cond = `Cond ${Math.round(player.condition * 100)}%`;
@@ -969,10 +1048,13 @@ export class RaceScene implements Scene {
     const sy = h * 0.78;
     const sw = w * 0.28;
     const sh = h * 0.22;
-    ctx.fillStyle = shifting ? 'rgba(250,204,21,0.28)' : 'rgba(250,204,21,0.1)';
+    const shiftPulse = this.shiftCueArmed ? 0.18 + 0.12 * Math.sin(this.animTime * 12) : 0;
+    ctx.fillStyle = shifting
+      ? 'rgba(250,204,21,0.28)'
+      : `rgba(250,204,21,${0.1 + shiftPulse})`;
     ctx.fillRect(sx, sy, sw, sh);
-    ctx.strokeStyle = 'rgba(250,204,21,0.45)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = this.shiftCueArmed ? 'rgba(250,204,21,0.85)' : 'rgba(250,204,21,0.45)';
+    ctx.lineWidth = this.shiftCueArmed ? 3 : 2;
     ctx.strokeRect(sx + 1, sy + 1, sw - 2, sh - 2);
 
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
@@ -981,9 +1063,12 @@ export class RaceScene implements Scene {
     ctx.textBaseline = 'bottom';
     ctx.fillText('BRAKE', w * 0.25, h - token.safe.bottom - pad(token, 0.5));
     ctx.fillText('GO', w * 0.75, h - token.safe.bottom - pad(token, 0.5));
-    ctx.fillStyle = shifting ? '#facc15' : token.textDim;
+    ctx.fillStyle = shifting || this.shiftCueArmed ? '#facc15' : token.textDim;
+    ctx.font = this.shiftCueArmed
+      ? `700 ${token.fontBody}px ${token.fontDisplayFamily}`
+      : `${token.fontCaption}px ${token.fontFamily}`;
     ctx.textBaseline = 'middle';
-    ctx.fillText('SHIFT', w * 0.5, sy + sh * 0.55);
+    ctx.fillText(this.shiftCueArmed ? 'SHIFT!' : 'SHIFT', w * 0.5, sy + sh * 0.55);
     ctx.restore();
   }
 
@@ -1040,6 +1125,37 @@ export class RaceScene implements Scene {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('RAIN', x + chipW * 0.5, y + chipH * 0.5);
+    ctx.restore();
+    void h;
+  }
+
+  private drawNightChip(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
+    const chipW = pad(token, 7);
+    const chipH = pad(token, 2.6);
+    const mmSize = Math.min(pad(token, 10), w * 0.22, h * 0.18);
+    const pauseSize = ensureMinTouch(pad(token, 4.5), token);
+    const x = w - token.safe.right - pad(token) - chipW;
+    let y =
+      token.safe.top +
+      pad(token) +
+      mmSize * 0.72 +
+      pad(token, 0.5) +
+      pauseSize +
+      pad(token, 0.5);
+    if (this.director?.rain) y += chipH + pad(token, 0.4);
+    ctx.save();
+    ctx.fillStyle = 'rgba(12, 16, 32, 0.88)';
+    ctx.strokeStyle = 'rgba(147, 197, 253, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, chipW, chipH, pad(token, 0.4));
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+    ctx.fillStyle = '#93c5fd';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('NIGHT', x + chipW * 0.5, y + chipH * 0.5);
     ctx.restore();
     void h;
   }

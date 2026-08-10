@@ -28,8 +28,14 @@ import {
   ToastManager,
   hitRect,
   ensureMinTouch,
+  drawSlider,
+  handleSlider,
+  type SliderDef,
 } from '../ui/components';
 import { drawSlotCarMesh } from '../graphics/CarMesh';
+
+export type { SliderDef };
+export { drawSlider, handleSlider };
 
 export const DISCIPLINE_ORDER: DisciplineId[] = ['track', 'street', 'rally'];
 
@@ -730,7 +736,7 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     const menuBudget = innerH * (shortH ? 0.78 : 0.58);
     if (menuH > menuBudget) {
       const s = menuBudget / menuH;
-      btnH = Math.max(36, btnH * s);
+      btnH = Math.max(token.touchMin, btnH * s);
       btnGap = Math.max(4, btnGap * s);
       menuH = btnCount * btnH + (btnCount - 1) * btnGap;
     }
@@ -782,7 +788,7 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
   const menuBudget = innerH * (h < 700 ? 0.36 : 0.34);
   if (menuH > menuBudget) {
     const s = menuBudget / menuH;
-    btnH = Math.max(40, btnH * s);
+    btnH = Math.max(token.touchMin, btnH * s);
     btnGap = Math.max(5, btnGap * s);
     menuH = btnCount * btnH + (btnCount - 1) * btnGap;
   }
@@ -870,61 +876,6 @@ export function drawTopDownCar(
     true,
   );
   ctx.restore();
-}
-
-export interface SliderDef {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  label: string;
-  value: number;
-  onChange?: (v: number) => void;
-}
-
-export function drawSlider(ctx: CanvasRenderingContext2D, slider: SliderDef, ui: UiContext): void {
-  const { token } = ui;
-  ctx.save();
-  ctx.font = `${token.fontBody}px ${token.fontFamily}`;
-  ctx.fillStyle = token.textMuted;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(slider.label, slider.x, slider.y - pad(token, 0.25));
-
-  const trackY = slider.y;
-  const trackH = slider.h;
-  ctx.fillStyle = token.bgElevated;
-  ctx.beginPath();
-  ctx.roundRect(slider.x, trackY, slider.w, trackH, trackH * 0.5);
-  ctx.fill();
-
-  const fillW = slider.w * Math.max(0, Math.min(1, slider.value));
-  ctx.fillStyle = ui.accent;
-  ctx.beginPath();
-  ctx.roundRect(slider.x, trackY, fillW, trackH, trackH * 0.5);
-  ctx.fill();
-
-  const knobX = slider.x + fillW;
-  ctx.beginPath();
-  ctx.arc(knobX, trackY + trackH * 0.5, trackH * 0.75, 0, Math.PI * 2);
-  ctx.fillStyle = token.text;
-  ctx.fill();
-
-  ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-  ctx.fillStyle = token.textDim;
-  ctx.textAlign = 'right';
-  ctx.fillText(`${Math.round(slider.value * 100)}%`, slider.x + slider.w, slider.y - pad(token, 0.25));
-  ctx.restore();
-}
-
-export function handleSlider(slider: SliderDef, ui: UiContext): boolean {
-  if (!ui.pointerDown) return false;
-  if (!hitRect(ui.pointerX, ui.pointerY, slider.x, slider.y - pad(ui.token, 2), slider.w, slider.h + pad(ui.token, 2))) {
-    return false;
-  }
-  const v = Math.max(0, Math.min(1, (ui.pointerX - slider.x) / slider.w));
-  slider.onChange?.(v);
-  return true;
 }
 
 export function disciplineLabel(id: DisciplineId): string {

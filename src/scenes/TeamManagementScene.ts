@@ -15,13 +15,16 @@ import {
   drawModal,
   handleModal,
   layoutModalButtons,
-  headerHeight,
+  layoutShell,
+  ContentScroller,
   pad,
   ensureMinTouch,
   statBarHeight,
   ToastManager,
   type ButtonDef,
   type ModalDef,
+  type ThemeTokens,
+  type UiContext,
 } from '../ui/components';
 import { ACCENT_TRACK } from '../ui/theme';
 import {
@@ -39,6 +42,8 @@ export class TeamManagementScene implements Scene {
   private modal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private freeAgents: Driver[] = [];
   private rerollCount = 0;
+  private scroller = new ContentScroller();
+  private detachWheel: (() => void) | null = null;
 
   enter(): void {
     onSceneEnter();
@@ -47,15 +52,24 @@ export class TeamManagementScene implements Scene {
       this.freeAgents = generateFreeAgents(g.state, this.rerollCount);
     }
     this.modal.open = false;
+    this.scroller.scroll.offset = 0;
+    this.detachWheel = this.scroller.attachWheel(g.canvas, () => !this.modal.open);
   }
 
-  exit(): void {}
+  exit(): void {
+    this.detachWheel?.();
+    this.detachWheel = null;
+  }
 
   onResize(w: number, h: number): void {
     onSceneResize(w, h);
   }
 
   handleBack(): boolean {
+    if (this.modal.open) {
+      this.modal.open = false;
+      return true;
+    }
     getGameContext().scenes.back();
     return true;
   }
@@ -143,13 +157,34 @@ export class TeamManagementScene implements Scene {
     this.toasts.push('Free agents refreshed', ACCENT_TRACK);
   }
 
+  private driverCardH(driver: Driver, token: ThemeTokens, withRelease: boolean): number {
+    const barH = statBarHeight(token);
+    const stats = 4;
+    let h =
+      pad(token, 2) +
+      token.fontTitle +
+      token.fontCaption +
+      pad(token) +
+      barH +
+      pad(token) +
+      stats * (barH + pad(token, 0.5)) +
+      pad(token);
+    if (driver.unspentPoints > 0) h += token.fontCaption + pad(token, 0.5);
+    if (withRelease) h += btnH(token) + pad(token);
+    return h;
+  }
+
+  private agentBlockH(agent: Driver, token: ThemeTokens): number {
+    return this.driverCardH(agent, token, false) + pad(token, 0.5) + btnH(token);
+  }
+
   private drawDriverCard(
     ctx: CanvasRenderingContext2D,
     driver: Driver,
     x: number,
     y: number,
     w: number,
-    ui: ReturnType<typeof buildUi>['ui'],
+    ui: UiContext,
     onRelease?: () => void,
   ): number {
     const { token, accent } = ui;
@@ -157,16 +192,8 @@ export class TeamManagementScene implements Scene {
     const barH = statBarHeight(token);
     const plusSize = ensureMinTouch(pad(token, 4), token);
     const stats: DriverStatKey[] = ['skill', 'bravery', 'focus', 'determination'];
-    const cardH =
-      pad(token, 2) +
-      token.fontTitle +
-      token.fontCaption +
-      pad(token) +
-      barH +
-      pad(token) +
-      stats.length * (barH + pad(token, 0.5)) +
-      (onRelease !== undefined ? btnH(token) + pad(token) : 0) +
-      pad(token);
+    const cardH = this.driverCardH(driver, token, onRelease !== undefined);
+    const interactive = !this.modal.open;
 
     ctx.save();
     ctx.fillStyle = token.card;
@@ -219,7 +246,7 @@ export class TeamManagementScene implements Scene {
           },
         };
         drawButton(ctx, plusBtn, ui);
-        handleButton(plusBtn, ui);
+        if (interactive) handleButton(plusBtn, ui);
       }
       cy += barH + pad(token, 0.5);
     }
@@ -234,7 +261,7 @@ export class TeamManagementScene implements Scene {
         onClick: onRelease,
       };
       drawButton(ctx, relBtn, ui);
-      handleButton(relBtn, ui);
+      if (interactive) handleButton(relBtn, ui);
     }
 
     ctx.restore();
@@ -247,24 +274,26 @@ export class TeamManagementScene implements Scene {
     x: number,
     y: number,
     w: number,
-    ui: ReturnType<typeof buildUi>['ui'],
+    ui: UiContext,
     state: NonNullable<ReturnType<typeof getGameContext>['state']>,
   ): number {
+    const token = ui.token;
     const innerH = this.drawDriverCard(ctx, agent, x, y, w, ui);
+    const gap = pad(token, 0.5);
     const cost = hireCost(agent);
     const hireBtn: ButtonDef = {
-      x: x + w - pad(ui.token, 1.5) - pad(ui.token, 10),
-      y: y + innerH - pad(ui.token, 1) - btnH(ui.token),
-      w: pad(ui.token, 10),
-      h: btnH(ui.token),
+      x,
+      y: y + innerH + gap,
+      w,
+      h: btnH(token),
       label: `Hire $${cost}`,
       disabled: state.cash < cost || state.roster.length >= BALANCE.rosterCap,
       primary: state.cash >= cost && state.roster.length < BALANCE.rosterCap,
       onClick: () => this.hireAgent(agent),
     };
     drawButton(ctx, hireBtn, ui);
-    handleButton(hireBtn, ui);
-    return innerH;
+    if (!this.modal.open) handleButton(hireBtn, ui);
+    return innerH + gap + btnH(token);
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -273,57 +302,74 @@ export class TeamManagementScene implements Scene {
     if (state === null) return;
 
     const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
+    const shell = layoutShell(w, h, token);
+
     drawBackground(ctx, w, h, token);
 
-    const hh = headerHeight(token);
     const header = {
-      x: 0,
-      y: 0,
-      w,
-      h: hh + token.safe.top,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
       title: 'Team',
       back: true,
       cash: state.cash,
-      onBack: () => g.scenes.back(),
+      onBack: () => this.handleBack(),
     };
     drawHeader(ctx, header, ui);
 
-    const contentX = pad(token, 2) + token.safe.left;
-    const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
-    let y = hh + token.safe.top + pad(token);
+    const view = shell.contentRect;
+    const gap = pad(token, 0.75);
+    let contentH =
+      token.fontCaption +
+      pad(token, 1.5) +
+      state.roster.reduce((sum, d) => sum + this.driverCardH(d, token, true) + gap, 0) +
+      pad(token) +
+      token.fontCaption +
+      pad(token, 1.5) +
+      this.freeAgents.reduce((sum, a) => sum + this.agentBlockH(a, token) + gap, 0) +
+      btnH(token) +
+      pad(token, 2);
 
+    this.scroller.layout(view, contentH);
+    this.scroller.update(ui, view);
+    const lui = this.scroller.localUi(ui, view);
+
+    this.scroller.begin(ctx, view);
+    let y = 0;
     y += drawSectionTitle(
       ctx,
-      contentX,
+      0,
       y,
       `Roster (${state.roster.length}/${BALANCE.rosterCap})`,
-      ui,
+      lui,
     );
 
     for (const driver of state.roster) {
-      const cardH = this.drawDriverCard(ctx, driver, contentX, y, contentW, ui, () => this.releaseDriver(driver));
-      y += cardH + pad(token, 0.75);
+      const cardH = this.drawDriverCard(ctx, driver, 0, y, view.w, lui, () => this.releaseDriver(driver));
+      y += cardH + gap;
     }
 
     y += pad(token);
-    y += drawSectionTitle(ctx, contentX, y, 'Free Agents', ui);
+    y += drawSectionTitle(ctx, 0, y, 'Free Agents', lui);
 
     for (const agent of this.freeAgents) {
-      const agentCardH = this.drawAgentCard(ctx, agent, contentX, y, contentW, ui, state);
-      y += agentCardH + pad(token, 0.75);
+      const agentCardH = this.drawAgentCard(ctx, agent, 0, y, view.w, lui, state);
+      y += agentCardH + gap;
     }
 
     const rerollBtn: ButtonDef = {
-      x: contentX,
-      y: y,
-      w: contentW,
+      x: 0,
+      y,
+      w: view.w,
       h: btnH(token),
       label: `Reroll Agents ($${BALANCE.freeAgentRerollCost})`,
       disabled: state.cash < BALANCE.freeAgentRerollCost,
       onClick: () => this.rerollAgents(),
     };
-    drawButton(ctx, rerollBtn, ui);
-    handleButton(rerollBtn, ui);
+    drawButton(ctx, rerollBtn, lui);
+    if (!this.modal.open) handleButton(rerollBtn, lui);
+    this.scroller.end(ctx);
 
     handleHeader(header, ui);
     if (this.modal.open) layoutModalButtons(this.modal, ui);
@@ -333,6 +379,6 @@ export class TeamManagementScene implements Scene {
   }
 }
 
-function btnH(token: ReturnType<typeof buildUi>['token']): number {
+function btnH(token: ThemeTokens): number {
   return ensureMinTouch(pad(token, 5.5), token);
 }

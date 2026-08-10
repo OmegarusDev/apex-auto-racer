@@ -822,7 +822,9 @@ export class RaceScene implements Scene {
     const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
 
     const safe = token.safe;
-    const mmSize = pad(token, 10);
+    // HUD zones: TL telemetry, TR minimap+pause, BL driver chip, BC SHIFT (pedals), BR clear of chip.
+    const pauseSize = ensureMinTouch(pad(token, 4.5), token);
+    const mmSize = Math.min(pad(token, 10), w * 0.22, h * 0.18);
     const mmX = w - safe.right - pad(token) - mmSize;
     const mmY = safe.top + pad(token);
     this.renderer.drawMinimap(
@@ -832,6 +834,15 @@ export class RaceScene implements Scene {
       playerIdx,
     );
 
+    const pauseBtn: ButtonDef = {
+      x: w - safe.right - pad(token) - pauseSize,
+      y: mmY + mmSize * 0.72 + pad(token, 0.5),
+      w: pauseSize,
+      h: pauseSize,
+      label: '⏸',
+      onClick: () => this.openPause(),
+    };
+
     ctx.save();
     ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
     ctx.fillStyle = token.text;
@@ -840,6 +851,7 @@ export class RaceScene implements Scene {
 
     const hudX = safe.left + pad(token);
     let hudY = safe.top + pad(token);
+    const telemetryMaxW = Math.max(pad(token, 14), mmX - hudX - pad(token));
 
     if (standing !== undefined) {
       ctx.fillText(`P${standing.position}`, hudX, hudY);
@@ -861,12 +873,20 @@ export class RaceScene implements Scene {
       hudY += token.fontBody * 2 + pad(token, 0.5);
 
       ctx.fillStyle = token.textMuted;
-      ctx.fillText(`Cond ${Math.round(player.condition * 100)}%`, hudX, hudY);
-      ctx.fillText(`Tyre ${Math.round(player.tyreTemp * 100)}%`, hudX + pad(token, 7), hudY);
+      const cond = `Cond ${Math.round(player.condition * 100)}%`;
+      const tyre = `Tyre ${Math.round(player.tyreTemp * 100)}%`;
+      ctx.fillText(cond, hudX, hudY);
+      const condW = ctx.measureText(cond).width;
+      const tyreGap = pad(token, 1.25);
+      if (condW + tyreGap + ctx.measureText(tyre).width <= telemetryMaxW) {
+        ctx.fillText(tyre, hudX + condW + tyreGap, hudY);
+      } else {
+        hudY += token.fontBody + pad(token, 0.25);
+        ctx.fillText(tyre, hudX, hudY);
+      }
       hudY += token.fontBody + pad(token, 0.6);
 
-      // Crowd meter — labeled, compact.
-      const barW = pad(token, 12);
+      const barW = Math.min(pad(token, 12), telemetryMaxW);
       const barH = Math.max(4, pad(token, 0.45));
       const hype = this.director?.entertainmentSnapshot.hype ?? 0;
       ctx.fillStyle = token.textDim;
@@ -884,10 +904,11 @@ export class RaceScene implements Scene {
     if (leadDriver !== undefined) {
       const trait = getTrait(leadDriver.trait);
       const playerIntent = player !== undefined ? director.intentForCar(player.id) : undefined;
-      const chipW = pad(token, 14);
+      const chipW = Math.min(pad(token, 14), w * 0.34);
       const chipH = pad(token, playerIntent !== undefined ? 5.2 : 3.5);
+      // Sit above SHIFT pad (bottom-center), left zone — clear of pause (now TR).
       const chipX = hudX;
-      const chipY = h - safe.bottom - pad(token) - chipH;
+      const chipY = h - safe.bottom - h * 0.22 - pad(token, 0.75) - chipH;
       ctx.fillStyle = token.card;
       ctx.strokeStyle = accent;
       ctx.lineWidth = 1;
@@ -910,15 +931,6 @@ export class RaceScene implements Scene {
       }
     }
 
-    const pauseSize = ensureMinTouch(pad(token, 4.5), token);
-    const pauseBtn: ButtonDef = {
-      x: w - safe.right - pad(token) - pauseSize,
-      y: h - safe.bottom - pad(token) - pauseSize,
-      w: pauseSize,
-      h: pauseSize,
-      label: '⏸',
-      onClick: () => this.openPause(),
-    };
     if (!this.paused) {
       const pauseUi = {
         pointerX: this.g.input.pointerX,
@@ -993,7 +1005,7 @@ export class RaceScene implements Scene {
     ctx.fillRect(0, 0, w, h);
     ctx.translate(w * 0.5, h * 0.38);
     ctx.scale(pulse, pulse);
-    ctx.font = `900 ${token.fontDisplay * 2.2}px ${token.fontDisplayFamily}`;
+    ctx.font = `900 ${Math.min(token.fontDisplay * 2.2, h * 0.16)}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = phase === 'go' ? token.success : token.text;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1005,8 +1017,16 @@ export class RaceScene implements Scene {
   private drawRainChip(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
     const chipW = pad(token, 7);
     const chipH = pad(token, 2.6);
+    const mmSize = Math.min(pad(token, 10), w * 0.22, h * 0.18);
+    const pauseSize = ensureMinTouch(pad(token, 4.5), token);
     const x = w - token.safe.right - pad(token) - chipW;
-    const y = token.safe.top + pad(token) + pad(token, 11);
+    const y =
+      token.safe.top +
+      pad(token) +
+      mmSize * 0.72 +
+      pad(token, 0.5) +
+      pauseSize +
+      pad(token, 0.5);
     ctx.save();
     ctx.fillStyle = 'rgba(14, 28, 40, 0.82)';
     ctx.strokeStyle = 'rgba(125, 211, 252, 0.45)';

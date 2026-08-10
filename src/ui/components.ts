@@ -2,10 +2,23 @@ import { BALANCE } from '../data/balance.ts';
 import { PARTS, partCost } from '../data/parts.ts';
 import type { PartCategory } from '../data/parts.ts';
 import type { ThemeTokens } from './theme.ts';
-import { pad } from './theme.ts';
+import {
+  pad,
+  headerContentH,
+  headerContentTop,
+  headerBandH,
+} from './theme.ts';
 
 export type { ThemeTokens };
-export { pad, createTheme, invalidateSafeArea } from './theme.ts';
+export {
+  pad,
+  createTheme,
+  invalidateSafeArea,
+  headerContentH,
+  headerContentTop,
+  headerBandH,
+  contentTop,
+} from './theme.ts';
 
 export interface UiContext {
   pointerX: number;
@@ -352,6 +365,249 @@ export function endClip(ctx: CanvasRenderingContext2D): void {
 export function wheelScroll(state: ScrollState, deltaY: number, page = 48): void {
   state.offset += deltaY > 0 ? page * 0.35 : -page * 0.35;
   clampScroll(state);
+}
+
+// ── Menu shell + content scroller ───────────────────────────────────────────
+
+export interface ShellLayout {
+  headerRect: Rect;
+  /** Vertical center line for header controls (under safe.top). */
+  headerMidY: number;
+  contentRect: Rect;
+  footerRect: Rect | null;
+}
+
+export function layoutShell(
+  w: number,
+  h: number,
+  token: ThemeTokens,
+  opts: { footer?: boolean; footerH?: number } = {},
+): ShellLayout {
+  const band = headerBandH(token);
+  const headerRect: Rect = { x: 0, y: 0, w, h: band };
+  const headerMidY = headerContentTop(token) + headerContentH(token) * 0.5;
+
+  const footerH = opts.footer
+    ? (opts.footerH ?? ensureMinTouch(pad(token, 5.5), token) + pad(token, 2) + token.safe.bottom)
+    : 0;
+  const footerRect: Rect | null = opts.footer
+    ? {
+        x: pad(token, 2) + token.safe.left,
+        y: h - footerH,
+        w: w - pad(token, 4) - token.safe.left - token.safe.right,
+        h: footerH,
+      }
+    : null;
+
+  const contentRect: Rect = {
+    x: pad(token, 2) + token.safe.left,
+    y: band + pad(token, 1),
+    w: w - pad(token, 4) - token.safe.left - token.safe.right,
+    h: Math.max(
+      pad(token, 4),
+      h - band - pad(token, 1) - footerH - (opts.footer ? 0 : token.safe.bottom + pad(token, 1)),
+    ),
+  };
+
+  return { headerRect, headerMidY, contentRect, footerRect };
+}
+
+/**
+ * Clip + scroll region for menu bodies.
+ * Content is drawn in local coords: x=0..view.w, y=0..contentH (after begin).
+ * Use localUi() for hit-testing buttons drawn in that space.
+ */
+export class ContentScroller {
+  readonly scroll: ScrollState = { offset: 0, max: 0 };
+  private dragging = false;
+  private dragStartY = 0;
+  private dragStartX = 0;
+  private scrollAtDrag = 0;
+  private dragDist = 0;
+  private didScroll = false;
+  private suppressClick = false;
+  private bound: Rect = { x: 0, y: 0, w: 0, h: 0 };
+
+  layout(view: Rect, contentH: number): void {
+    this.bound = view;
+    this.scroll.max = Math.max(0, contentH - view.h);
+    clampScroll(this.scroll);
+  }
+
+  onWheel(deltaY: number): void {
+    wheelScroll(this.scroll, deltaY);
+  }
+
+  begin(ctx: CanvasRenderingContext2D, view: Rect = this.bound): void {
+    beginClip(ctx, view.x, view.y, view.w, view.h);
+    ctx.translate(view.x, view.y - this.scroll.offset);
+  }
+
+  end(ctx: CanvasRenderingContext2D): void {
+    endClip(ctx);
+  }
+
+  /** True while this gesture has committed to vertical scrolling. */
+  get isScrolling(): boolean {
+    return this.didScroll;
+  }
+
+  /** Pointer in content-local space; clicks suppressed after a drag scroll. */
+  localUi(ui: UiContext, view: Rect = this.bound): UiContext {
+    const inside = hitRect(ui.pointerX, ui.pointerY, view.x, view.y, view.w, view.h);
+    return {
+      ...ui,
+      pointerX: ui.pointerX - view.x,
+      pointerY: ui.pointerY - view.y + this.scroll.offset,
+      pointerClicked: ui.pointerClicked && inside && !this.suppressClick,
+      // Block controls once the gesture is a scroll (keeps sliders from fighting).
+      pointerDown: ui.pointerDown && inside && !this.didScroll,
+    };
+  }
+
+  /** Call once per frame after measuring content. Handles drag-scroll. */
+  update(ui: UiContext, view: Rect = this.bound): void {
+    const inside = hitRect(ui.pointerX, ui.pointerY, view.x, view.y, view.w, view.h);
+
+    if (ui.pointerDown && !this.dragging && inside) {
+      this.dragging = true;
+      this.dragStartY = ui.pointerY;
+      this.dragStartX = ui.pointerX;
+      this.scrollAtDrag = this.scroll.offset;
+      this.dragDist = 0;
+      this.didScroll = false;
+    }
+
+    if (this.dragging && ui.pointerDown) {
+      const dy = ui.pointerY - this.dragStartY;
+      const dx = ui.pointerX - this.dragStartX;
+      this.dragDist = Math.max(this.dragDist, Math.abs(dy), Math.abs(dx));
+      if (Math.abs(dy) > 8 && Math.abs(dy) >= Math.abs(dx) * 1.15) {
+        this.didScroll = true;
+        this.scroll.offset = this.scrollAtDrag - dy;
+        clampScroll(this.scroll);
+      }
+    }
+
+    if (!ui.pointerDown && this.dragging) {
+      if (this.didScroll || this.dragDist > 10) this.suppressClick = true;
+      this.dragging = false;
+      this.didScroll = false;
+    } else if (!ui.pointerClicked) {
+      this.suppressClick = false;
+    }
+  }
+
+  attachWheel(canvas: HTMLCanvasElement, shouldScroll: () => boolean = () => true): () => void {
+    const onWheel = (ev: WheelEvent): void => {
+      if (!shouldScroll()) return;
+      ev.preventDefault();
+      this.onWheel(ev.deltaY);
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }
+}
+
+// ── Slider (thin track, fat hit) ─────────────────────────────────────────────
+
+export interface SliderDef {
+  x: number;
+  y: number;
+  w: number;
+  /** Visual track height (keep thin — not touchMin). */
+  h: number;
+  label: string;
+  value: number;
+  onChange?: (v: number) => void;
+}
+
+/** Full vertical pitch for one labeled slider row. */
+export function sliderRowH(token: ThemeTokens): number {
+  const track = Math.max(6, pad(token, 0.7));
+  return token.fontCaption + pad(token, 0.5) + track + pad(token, 2.5);
+}
+
+export function drawSlider(ctx: CanvasRenderingContext2D, slider: SliderDef, ui: UiContext): void {
+  const { token } = ui;
+  const trackH = Math.max(6, Math.min(slider.h, pad(token, 1)));
+  const labelH = token.fontCaption + pad(token, 0.35);
+  const trackY = slider.y + labelH;
+
+  ctx.save();
+  setFont(ctx, token, token.fontCaption, '600');
+  ctx.fillStyle = token.textMuted;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(slider.label, slider.x, slider.y);
+
+  setFont(ctx, token, token.fontCaption, '500');
+  ctx.fillStyle = token.textDim;
+  ctx.textAlign = 'right';
+  ctx.fillText(`${Math.round(slider.value * 100)}%`, slider.x + slider.w, slider.y);
+
+  ctx.fillStyle = token.bgElevated;
+  roundRectPath(ctx, slider.x, trackY, slider.w, trackH, trackH * 0.5);
+  ctx.fill();
+
+  const fillW = slider.w * Math.max(0, Math.min(1, slider.value));
+  ctx.fillStyle = ui.accent;
+  roundRectPath(ctx, slider.x, trackY, Math.max(trackH, fillW), trackH, trackH * 0.5);
+  ctx.fill();
+
+  const knobR = Math.max(trackH * 0.85, pad(token, 0.7));
+  const knobX = slider.x + Math.max(knobR, Math.min(slider.w - knobR, fillW));
+  ctx.beginPath();
+  ctx.arc(knobX, trackY + trackH * 0.5, knobR, 0, Math.PI * 2);
+  ctx.fillStyle = token.text;
+  ctx.fill();
+  ctx.restore();
+}
+
+export function handleSlider(slider: SliderDef, ui: UiContext): boolean {
+  const { token } = ui;
+  const trackH = Math.max(6, Math.min(slider.h, pad(token, 1)));
+  const labelH = token.fontCaption + pad(token, 0.35);
+  const trackY = slider.y + labelH;
+  const hitPad = (token.touchMin - trackH) * 0.5;
+  const hitY = trackY - hitPad;
+  const hitH = trackH + hitPad * 2;
+  if (!ui.pointerDown) return false;
+  if (!hitRect(ui.pointerX, ui.pointerY, slider.x, hitY, slider.w, hitH)) return false;
+  const v = Math.max(0, Math.min(1, (ui.pointerX - slider.x) / slider.w));
+  slider.onChange?.(v);
+  return true;
+}
+
+/** Draw a row of footer action buttons; returns true if any handled. */
+export function drawFooterActions(
+  ctx: CanvasRenderingContext2D,
+  footer: Rect,
+  buttons: ButtonDef[],
+  ui: UiContext,
+): void {
+  const { token } = ui;
+  const gap = pad(token, 0.75);
+  const btnH = ensureMinTouch(pad(token, 5.5), token);
+  const n = buttons.length;
+  if (n === 0) return;
+  const btnW = (footer.w - gap * (n - 1)) / n;
+  const y = footer.y + pad(token, 0.75);
+  buttons.forEach((btn, i) => {
+    btn.x = footer.x + i * (btnW + gap);
+    btn.y = y;
+    btn.w = btnW;
+    btn.h = btnH;
+    drawButton(ctx, btn, ui);
+  });
+}
+
+export function handleFooterActions(buttons: ButtonDef[], ui: UiContext): boolean {
+  let handled = false;
+  for (const btn of buttons) {
+    if (handleButton(btn, ui)) handled = true;
+  }
+  return handled;
 }
 
 // ── StatBar ─────────────────────────────────────────────────────────────────
@@ -721,22 +977,25 @@ export class ToastManager {
 export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui: UiContext): void {
   const { token, accent } = ui;
   const btnSize = ensureMinTouch(pad(token, 5.5), token);
+  const midY = headerContentTop(token) + headerContentH(token) * 0.5;
+  const safeL = token.safe.left;
+  const safeR = token.safe.right;
 
   ctx.save();
   ctx.fillStyle = token.bgElevated;
   ctx.fillRect(header.x, header.y, header.w, header.h);
-  // Accent hairline — brand continuity past Title
   ctx.fillStyle = accent;
   ctx.globalAlpha = 0.85;
   ctx.fillRect(header.x, header.y + header.h - 2, header.w, 2);
   ctx.globalAlpha = 1;
 
-  let titleX = header.x + pad(token, 1.5);
+  let titleX = header.x + pad(token, 1.5) + safeL;
+  let rightEdge = header.x + header.w - pad(token, 0.75) - safeR;
 
   if (header.back) {
     const backBtn: ButtonDef = {
-      x: header.x + pad(token, 0.75),
-      y: header.y + (header.h - btnSize) * 0.5,
+      x: header.x + pad(token, 0.75) + safeL,
+      y: midY - btnSize * 0.5,
       w: btnSize,
       h: btnSize,
       label: '←',
@@ -746,38 +1005,37 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
     titleX = backBtn.x + backBtn.w + pad(token, 0.75);
   }
 
-  setFont(ctx, token, token.fontTitle, '700', true);
-  ctx.fillStyle = token.text;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(
-    truncateText(ctx, header.title, header.w * 0.45),
-    titleX,
-    header.y + header.h * 0.5,
-  );
-
-  let rightX = header.x + header.w - pad(token, 0.75);
-
   if (header.settings) {
     const settingsBtn: ButtonDef = {
-      x: rightX - btnSize,
-      y: header.y + (header.h - btnSize) * 0.5,
+      x: rightEdge - btnSize,
+      y: midY - btnSize * 0.5,
       w: btnSize,
       h: btnSize,
       label: '⚙',
       onClick: header.onSettings,
     };
     drawButton(ctx, settingsBtn, ui);
-    rightX -= btnSize + pad(token, 0.75);
+    rightEdge = settingsBtn.x - pad(token, 0.75);
   }
 
+  let cashW = 0;
   if (header.cash !== undefined) {
     setFont(ctx, token, token.fontBody, '700');
+    const cashStr = `$${header.cash.toLocaleString()}`;
+    cashW = ctx.measureText(cashStr).width;
     ctx.fillStyle = accent;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`$${header.cash.toLocaleString()}`, rightX, header.y + header.h * 0.5);
+    ctx.fillText(cashStr, rightEdge, midY);
+    rightEdge -= cashW + pad(token, 1);
   }
+
+  const titleMax = Math.max(pad(token, 8), rightEdge - titleX - pad(token, 0.5));
+  setFont(ctx, token, token.fontTitle, '700', true);
+  ctx.fillStyle = token.text;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(truncateText(ctx, header.title, titleMax), titleX, midY);
 
   ctx.restore();
 }
@@ -785,12 +1043,15 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
 export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
   const { token } = ui;
   const btnSize = ensureMinTouch(pad(token, 5.5), token);
+  const midY = headerContentTop(token) + headerContentH(token) * 0.5;
+  const safeL = token.safe.left;
+  const safeR = token.safe.right;
   let handled = false;
 
   if (header.back) {
     const backBtn: ButtonDef = {
-      x: header.x + pad(token, 0.75),
-      y: header.y + (header.h - btnSize) * 0.5,
+      x: header.x + pad(token, 0.75) + safeL,
+      y: midY - btnSize * 0.5,
       w: btnSize,
       h: btnSize,
       label: '←',
@@ -800,10 +1061,10 @@ export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
   }
 
   if (header.settings) {
-    let rightX = header.x + header.w - pad(token, 0.75);
+    const rightEdge = header.x + header.w - pad(token, 0.75) - safeR;
     const settingsBtn: ButtonDef = {
-      x: rightX - btnSize,
-      y: header.y + (header.h - btnSize) * 0.5,
+      x: rightEdge - btnSize,
+      y: midY - btnSize * 0.5,
       w: btnSize,
       h: btnSize,
       label: '⚙',
@@ -816,7 +1077,7 @@ export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
 }
 
 export function headerHeight(token: ThemeTokens): number {
-  return ensureMinTouch(pad(token, 6.5), token);
+  return headerContentH(token);
 }
 
 // ── DriverSpendPanel ────────────────────────────────────────────────────────

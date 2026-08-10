@@ -9,11 +9,13 @@ import {
   drawStatBar,
   drawRadarChart,
   drawSectionTitle,
-  headerHeight,
+  layoutShell,
+  ContentScroller,
   pad,
   ensureMinTouch,
   statBarHeight,
   hitRect,
+  isPortrait,
   type ButtonDef,
 } from '../ui/components';
 import {
@@ -32,23 +34,32 @@ import { CampaignScene } from './CampaignScene';
 import { TuningScene } from './TuningScene';
 import { TeamManagementScene } from './TeamManagementScene';
 import { OptionsScene } from './OptionsScene';
+import { TitleScene } from './TitleScene';
 
 export class GarageScene implements Scene {
   private disciplineIndex = 0;
+  private scroller = new ContentScroller();
+  private detachWheel: (() => void) | null = null;
 
   enter(): void {
     onSceneEnter();
     this.disciplineIndex = 0;
+    this.scroller.scroll.offset = 0;
+    this.detachWheel = this.scroller.attachWheel(getGameContext().canvas);
   }
 
-  exit(): void {}
+  exit(): void {
+    this.detachWheel?.();
+    this.detachWheel = null;
+  }
 
   onResize(w: number, h: number): void {
     onSceneResize(w, h);
   }
 
   handleBack(): boolean {
-    return false;
+    getGameContext().scenes.replace(new TitleScene());
+    return true;
   }
 
   update(_dt: number): void {}
@@ -77,7 +88,7 @@ export class GarageScene implements Scene {
     let swipeHandled = false;
     if (preClick !== null && ui.pointerClicked) {
       const dx = g.input.pointerX - preClick.x;
-      if (Math.abs(dx) > 60) {
+      if (Math.abs(dx) > Math.max(48, token.touchMin)) {
         if (dx < 0) this.nextDiscipline();
         else this.prevDiscipline();
         swipeHandled = true;
@@ -88,147 +99,188 @@ export class GarageScene implements Scene {
     }
 
     const vehicle = state.vehicles[discipline];
+    const shell = layoutShell(w, h, token);
+    const portrait = isPortrait(w, h);
 
     drawBackground(ctx, w, h, token);
 
-    const hh = headerHeight(token);
     const header = {
-      x: 0,
-      y: 0,
-      w,
-      h: hh + token.safe.top,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
       title: 'Garage',
+      back: true,
       cash: state.cash,
       settings: true,
+      onBack: () => this.handleBack(),
       onSettings: () => g.scenes.push(new OptionsScene()),
     };
     drawHeader(ctx, header, ui);
 
-    const contentTop = hh + token.safe.top + pad(token);
+    const view = shell.contentRect;
     const navSize = ensureMinTouch(pad(token, 5), token);
-    const navY = contentTop + pad(token, 2);
+    const btnH = ensureMinTouch(pad(token, 5.5), token);
+    const btnGap = pad(token, 0.75);
+    const carW = Math.min(view.w * (portrait ? 0.55 : 0.42), pad(token, 20));
+    const carH = carW * 1.15;
+    const radarR = portrait
+      ? Math.min(view.w * 0.22, pad(token, 8))
+      : Math.min(view.w * 0.18, pad(token, 9));
 
+    // Measure content height
+    let contentH = pad(token, 1) + navSize + pad(token, 1.5);
+    if (portrait) {
+      contentH += carH + pad(token, 1) + radarR * 2 + pad(token, 1.5);
+    } else {
+      contentH += Math.max(carH, radarR * 2) + pad(token, 1.5);
+    }
+    contentH +=
+      statBarHeight(token) +
+      pad(token, 1.5) +
+      token.fontCaption +
+      pad(token, 1) +
+      btnH +
+      btnGap +
+      btnH +
+      pad(token, 2);
+
+    this.scroller.layout(view, contentH);
+    this.scroller.update(ui, view);
+    const lui = this.scroller.localUi(ui, view);
+
+    this.scroller.begin(ctx, view);
+    let y = pad(token, 0.5);
+
+    // Discipline nav — draw and hit at same Y
     ctx.save();
     ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = accent;
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText(disciplineLabel(discipline).toUpperCase(), w * 0.5, navY);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(disciplineLabel(discipline).toUpperCase(), view.w * 0.5, y + navSize * 0.5);
     ctx.restore();
 
-    const leftX = pad(token) + token.safe.left;
-    const rightX = w - pad(token) - navSize - token.safe.right;
-    carouselNav(ui, leftX, rightX, navY + token.fontTitle, navSize, () => this.prevDiscipline(), () => this.nextDiscipline());
-
+    const leftX = 0;
+    const rightX = view.w - navSize;
     ctx.save();
     ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
-    ctx.fillStyle = token.text;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    if (hitRect(ui.pointerX, ui.pointerY, leftX, navY, navSize, navSize)) {
-      ctx.fillStyle = accent;
-      ctx.fillText('‹', leftX + navSize * 0.5, navY + navSize * 0.5);
-    } else {
-      ctx.fillText('‹', leftX + navSize * 0.5, navY + navSize * 0.5);
-    }
-    if (hitRect(ui.pointerX, ui.pointerY, rightX, navY, navSize, navSize)) {
-      ctx.fillStyle = accent;
-      ctx.fillText('›', rightX + navSize * 0.5, navY + navSize * 0.5);
-    } else {
-      ctx.fillText('›', rightX + navSize * 0.5, navY + navSize * 0.5);
-    }
+    ctx.fillStyle = hitRect(lui.pointerX, lui.pointerY, leftX, y, navSize, navSize) ? accent : token.text;
+    ctx.fillText('‹', leftX + navSize * 0.5, y + navSize * 0.5);
+    ctx.fillStyle = hitRect(lui.pointerX, lui.pointerY, rightX, y, navSize, navSize) ? accent : token.text;
+    ctx.fillText('›', rightX + navSize * 0.5, y + navSize * 0.5);
     ctx.restore();
+    if (!swipeHandled && !this.scroller.isScrolling) {
+      carouselNav(lui, leftX, rightX, y, navSize, () => this.prevDiscipline(), () => this.nextDiscipline());
+    }
+    y += navSize + pad(token, 1.5);
 
-    const carW = Math.min(w * 0.42, pad(token, 22));
-    const carH = carW * 1.25;
-    const carCx = w * 0.5;
-    const carCy = contentTop + pad(token, 7) + carH * 0.5;
-    // Soft accent wash behind hero car
-    ctx.save();
-    const glow = ctx.createRadialGradient(carCx, carCy, 0, carCx, carCy, carW * 0.85);
-    glow.addColorStop(0, `${accent}28`);
-    glow.addColorStop(0.55, `${accent}0a`);
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(carCx - carW, carCy - carH * 0.7, carW * 2, carH * 1.4);
-    ctx.restore();
-    drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline);
+    if (portrait) {
+      const carCx = view.w * 0.5;
+      const carCy = y + carH * 0.5;
+      ctx.save();
+      const glow = ctx.createRadialGradient(carCx, carCy, 0, carCx, carCy, carW * 0.85);
+      glow.addColorStop(0, `${accent}28`);
+      glow.addColorStop(0.55, `${accent}0a`);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(carCx - carW, carCy - carH * 0.7, carW * 2, carH * 1.4);
+      ctx.restore();
+      drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline);
+      y += carH + pad(token, 1);
+      drawRadarChart(
+        ctx,
+        {
+          x: (view.w - radarR * 2) * 0.5,
+          y,
+          radius: radarR,
+          values: vehicleRadarValues(discipline, vehicle),
+        },
+        lui,
+      );
+      y += radarR * 2 + pad(token, 1.5);
+    } else {
+      const blockH = Math.max(carH, radarR * 2);
+      const carCx = view.w * 0.55;
+      const carCy = y + blockH * 0.5;
+      ctx.save();
+      const glow = ctx.createRadialGradient(carCx, carCy, 0, carCx, carCy, carW * 0.85);
+      glow.addColorStop(0, `${accent}28`);
+      glow.addColorStop(0.55, `${accent}0a`);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(carCx - carW, carCy - carH * 0.7, carW * 2, carH * 1.4);
+      ctx.restore();
+      drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline);
+      drawRadarChart(
+        ctx,
+        {
+          x: pad(token, 0.5),
+          y: y + (blockH - radarR * 2) * 0.5,
+          radius: radarR,
+          values: vehicleRadarValues(discipline, vehicle),
+        },
+        lui,
+      );
+      y += blockH + pad(token, 1.5);
+    }
 
-    const radarR = Math.min(w, h) * 0.14;
-    const radarX = pad(token, 2) + token.safe.left;
-    const radarY = carCy - radarR;
-    drawRadarChart(
-      ctx,
-      {
-        x: radarX,
-        y: radarY,
-        radius: radarR,
-        values: vehicleRadarValues(discipline, vehicle),
-      },
-      ui,
-    );
-
-    const condBarW = w - pad(token, 4) - token.safe.left - token.safe.right;
-    const condY = carCy + carH * 0.5 + pad(token, 2);
     drawStatBar(
       ctx,
       {
-        x: pad(token, 2) + token.safe.left,
-        y: condY,
-        w: condBarW,
+        x: 0,
+        y,
+        w: view.w,
         label: 'Condition',
         value: vehicle.condition * 100,
         color: vehicle.condition < 0.75 ? token.danger : accent,
       },
-      ui,
+      lui,
     );
-
-    const btnH = ensureMinTouch(pad(token, 5.5), token);
-    const btnGap = pad(token, 0.75);
-    const btnW = Math.min(condBarW, pad(token, 22));
-    let btnY = condY + statBarHeight(token) + pad(token, 2);
-    btnY += drawSectionTitle(ctx, pad(token, 2) + token.safe.left, btnY, 'Actions', ui);
-    btnY += pad(token, 0.5);
+    y += statBarHeight(token) + pad(token, 1.5);
+    y += drawSectionTitle(ctx, 0, y, 'Actions', lui);
+    y += pad(token, 0.5);
 
     const campaignBtn: ButtonDef = {
-      x: (w - btnW) * 0.5,
-      y: btnY,
-      w: btnW,
+      x: 0,
+      y,
+      w: view.w,
       h: btnH,
       label: 'Campaign',
       primary: true,
       onClick: () => g.scenes.push(new CampaignScene(discipline)),
     };
-    btnY += btnH + btnGap;
-
-    const rowW = (condBarW - btnGap) * 0.5;
-    const rowX = (w - condBarW) * 0.5;
+    y += btnH + btnGap;
+    const rowW = (view.w - btnGap) * 0.5;
     const tuningBtn: ButtonDef = {
-      x: rowX,
-      y: btnY,
+      x: 0,
+      y,
       w: rowW,
       h: btnH,
       label: 'Tuning',
       onClick: () => g.scenes.push(new TuningScene(discipline)),
     };
     const teamBtn: ButtonDef = {
-      x: rowX + rowW + btnGap,
-      y: btnY,
+      x: rowW + btnGap,
+      y,
       w: rowW,
       h: btnH,
       label: 'Team',
       onClick: () => g.scenes.push(new TeamManagementScene()),
     };
 
-    drawButton(ctx, campaignBtn, ui);
-    drawButton(ctx, tuningBtn, ui);
-    drawButton(ctx, teamBtn, ui);
-
+    drawButton(ctx, campaignBtn, lui);
+    drawButton(ctx, tuningBtn, lui);
+    drawButton(ctx, teamBtn, lui);
     if (!swipeHandled) {
-      handleButton(campaignBtn, ui);
-      handleButton(tuningBtn, ui);
-      handleButton(teamBtn, ui);
+      handleButton(campaignBtn, lui);
+      handleButton(tuningBtn, lui);
+      handleButton(teamBtn, lui);
     }
+    this.scroller.end(ctx);
+
     handleHeader(header, ui);
   }
 }

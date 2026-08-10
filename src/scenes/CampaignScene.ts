@@ -21,18 +21,18 @@ import {
   drawModal,
   handleModal,
   layoutModalButtons,
-  headerHeight,
+  layoutShell,
+  ContentScroller,
   pad,
   ensureMinTouch,
   hitRect,
   beginClip,
   endClip,
-  clampScroll,
-  wheelScroll,
   ToastManager,
   type ButtonDef,
   type ModalDef,
-  type ScrollState,
+  type ThemeTokens,
+  type UiContext,
 } from '../ui/components';
 import {
   buildUi,
@@ -48,6 +48,8 @@ import {
   getObjectiveDef,
 } from './sceneUtils';
 
+const LINEUP_VISIBLE_ROWS = 4;
+
 export class CampaignScene implements Scene {
   private readonly discipline: DisciplineId;
   private toasts = new ToastManager();
@@ -56,12 +58,15 @@ export class CampaignScene implements Scene {
   private pendingTournamentId: string | null = null;
   private lineupSelection: string[] = [];
   private leadDriverId = '';
-  private scroll: ScrollState = { offset: 0, max: 0 };
+  private scroller = new ContentScroller();
+  private detachWheel: (() => void) | null = null;
+  private lineupScroll = 0;
+  private lineupBodyBase = '';
 
-  private onWheel = (ev: WheelEvent): void => {
-    if (this.modal.open) return;
+  private onLineupWheel = (ev: WheelEvent): void => {
+    if (!this.lineupModalOpen || !this.modal.open) return;
     ev.preventDefault();
-    wheelScroll(this.scroll, ev.deltaY);
+    this.lineupScroll += ev.deltaY;
   };
 
   constructor(discipline: DisciplineId) {
@@ -73,12 +78,17 @@ export class CampaignScene implements Scene {
     this.modal.open = false;
     this.lineupModalOpen = false;
     this.pendingTournamentId = null;
-    this.scroll.offset = 0;
-    getGameContext().canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    this.lineupScroll = 0;
+    this.scroller.scroll.offset = 0;
+    const canvas = getGameContext().canvas;
+    this.detachWheel = this.scroller.attachWheel(canvas, () => !this.modal.open);
+    canvas.addEventListener('wheel', this.onLineupWheel, { passive: false });
   }
 
   exit(): void {
-    getGameContext().canvas.removeEventListener('wheel', this.onWheel);
+    this.detachWheel?.();
+    this.detachWheel = null;
+    getGameContext().canvas.removeEventListener('wheel', this.onLineupWheel);
   }
 
   onResize(w: number, h: number): void {
@@ -86,6 +96,13 @@ export class CampaignScene implements Scene {
   }
 
   handleBack(): boolean {
+    if (this.modal.open) {
+      this.modal.open = false;
+      this.lineupModalOpen = false;
+      this.pendingTournamentId = null;
+      this.lineupScroll = 0;
+      return true;
+    }
     getGameContext().scenes.back();
     return true;
   }
@@ -114,10 +131,12 @@ export class CampaignScene implements Scene {
     this.lineupSelection = defaultLineup(g.state, teamSize);
     this.leadDriverId = defaultLeadDriver(g.state, this.lineupSelection);
     this.lineupModalOpen = true;
+    this.lineupScroll = 0;
+    this.lineupBodyBase = `Pick ${teamSize} driver${teamSize > 1 ? 's' : ''} for this series.\nTap drivers to toggle.`;
     this.modal = {
       open: true,
       title: 'Select Lineup',
-      body: `Pick ${teamSize} driver${teamSize > 1 ? 's' : ''} for this series.\nTap drivers to toggle.`,
+      body: this.lineupBodyBase,
       buttons: [
         {
           x: 0,
@@ -129,6 +148,7 @@ export class CampaignScene implements Scene {
             this.lineupModalOpen = false;
             this.modal.open = false;
             this.pendingTournamentId = null;
+            this.lineupScroll = 0;
           },
         },
         {
@@ -177,6 +197,7 @@ export class CampaignScene implements Scene {
     this.lineupModalOpen = false;
     this.modal.open = false;
     this.pendingTournamentId = null;
+    this.lineupScroll = 0;
     this.toasts.push(`${def.name} started`, disciplineAccent(this.discipline));
   }
 
@@ -223,6 +244,125 @@ export class CampaignScene implements Scene {
     }
   }
 
+  /** Mirror drawModal / layoutModalButtons box math. */
+  private modalLayout(ui: UiContext) {
+    const { token, w, h } = ui;
+    const boxW = Math.min(w - pad(token, 4), pad(token, 40));
+    const btnH = ensureMinTouch(pad(token, 5.5), token);
+    const btnGap = pad(token, 0.75);
+    const btnRowH = this.modal.buttons.length > 0 ? btnH + pad(token, 2) : 0;
+    const bodyLines = this.modal.body.split('\n').length;
+    const bodyH = bodyLines * token.fontBody * 1.35 + pad(token);
+    const boxH = pad(token, 3) + token.fontTitle + pad(token) + bodyH + btnRowH + pad(token);
+    const boxX = (w - boxW) * 0.5;
+    const boxY = (h - boxH) * 0.5;
+    const bodyY = boxY + pad(token, 1.5) + token.fontTitle + pad(token, 0.75);
+    return { boxX, boxY, boxW, boxH, bodyY, btnH, btnGap, token };
+  }
+
+  private reserveLineupBody(token: ThemeTokens, rosterLen: number): number {
+    const rowH = pad(token, 5);
+    const listH = Math.min(LINEUP_VISIBLE_ROWS, Math.max(1, rosterLen)) * rowH;
+    const lineH = token.fontBody * 1.35;
+    const blankLines = Math.ceil(listH / lineH);
+    this.modal.body = this.lineupBodyBase + '\n'.repeat(blankLines);
+    return listH;
+  }
+
+  private drawLineupList(
+    ctx: CanvasRenderingContext2D,
+    ui: UiContext,
+    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
+  ): void {
+    if (!this.lineupModalOpen || this.pendingTournamentId === null) return;
+    const def = TOURNAMENTS.find((t) => t.id === this.pendingTournamentId);
+    if (def === undefined) return;
+
+    const accent = ui.accent;
+    const { token } = ui;
+    const rowH = pad(token, 5);
+    const listH = Math.min(LINEUP_VISIBLE_ROWS, Math.max(1, state.roster.length)) * rowH;
+    const layout = this.modalLayout(ui);
+    const baseLines = this.lineupBodyBase.split('\n').length;
+    const listTop = layout.bodyY + baseLines * token.fontBody * 1.35 + pad(token, 0.5);
+    const listX = layout.boxX + pad(token, 1.5);
+    const listW = layout.boxW - pad(token, 3);
+    const contentH = state.roster.length * rowH;
+    const maxScroll = Math.max(0, contentH - listH);
+    this.lineupScroll = Math.max(0, Math.min(maxScroll, this.lineupScroll));
+
+    beginClip(ctx, listX, listTop, listW, listH);
+    let rowY = listTop - this.lineupScroll;
+    for (const driver of state.roster) {
+      const selected = this.lineupSelection.includes(driver.id);
+      const isLead = driver.id === this.leadDriverId;
+      const rowVisible = rowY + rowH > listTop && rowY < listTop + listH;
+
+      if (rowVisible && ui.pointerClicked && hitRect(ui.pointerX, ui.pointerY, listX, rowY, listW, rowH)) {
+        const leadHit = hitRect(
+          ui.pointerX,
+          ui.pointerY,
+          listX + listW - pad(token, 8),
+          rowY,
+          pad(token, 8),
+          rowH,
+        );
+        if (selected && leadHit) {
+          this.leadDriverId = driver.id;
+        } else {
+          this.toggleLineupDriver(driver.id, def.teamSize);
+        }
+      }
+
+      ctx.save();
+      ctx.fillStyle = selected ? `${accent}33` : 'transparent';
+      ctx.fillRect(listX, rowY, listW, rowH);
+      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+      ctx.fillStyle = selected ? token.text : token.textMuted;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        `${selected ? '✓ ' : ''}${driver.name}${isLead ? ' ★' : ''}`,
+        listX + pad(token),
+        rowY + rowH * 0.5,
+      );
+      if (selected) {
+        ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+        ctx.fillStyle = isLead ? accent : token.textDim;
+        ctx.textAlign = 'right';
+        ctx.fillText(isLead ? 'Lead' : 'Set lead', listX + listW - pad(token, 0.5), rowY + rowH * 0.5);
+      }
+      ctx.restore();
+      rowY += rowH;
+    }
+    endClip(ctx);
+  }
+
+  private drawDisciplineChip(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    ui: UiContext,
+  ): number {
+    const { token, accent } = ui;
+    const label = disciplineLabel(this.discipline);
+    const chipH = token.fontCaption + pad(token, 1);
+    ctx.save();
+    ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+    const tw = ctx.measureText(label).width;
+    const chipW = tw + pad(token, 2);
+    ctx.fillStyle = `${accent}33`;
+    ctx.beginPath();
+    ctx.roundRect(x, y, chipW, chipH, chipH * 0.5);
+    ctx.fill();
+    ctx.fillStyle = accent;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + pad(token), y + chipH * 0.5);
+    ctx.restore();
+    return chipH;
+  }
+
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
     const state = g.state;
@@ -230,42 +370,39 @@ export class CampaignScene implements Scene {
 
     const accent = disciplineAccent(this.discipline);
     const { ui, token } = buildUi(w, h, 0, accent);
+    const shell = layoutShell(w, h, token);
+
     drawBackground(ctx, w, h, token);
 
-    const hh = headerHeight(token);
     const header = {
-      x: 0,
-      y: 0,
-      w,
-      h: hh + token.safe.top,
-      title: `${disciplineLabel(this.discipline)} Campaign`,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
+      title: 'Campaign',
       back: true,
       cash: state.cash,
-      onBack: () => g.scenes.back(),
+      onBack: () => this.handleBack(),
     };
     drawHeader(ctx, header, ui);
 
-    const contentTop = hh + token.safe.top + pad(token);
-    const contentBottom = h - token.safe.bottom - pad(token);
-    const contentX = pad(token, 2) + token.safe.left;
-    const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
+    const view = shell.contentRect;
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const objGap = pad(token, 0.5);
-
-    // Layout in content space (y=0 at top of scrollable region)
-    let contentH = 0;
     const heroH = pad(token, 12);
-    contentH += heroH + pad(token, 1.5);
-    contentH += token.fontCaption + pad(token, 0.75); // objectives title
     const objH = pad(token, 5.5);
-    const objCount = Math.min(state.objectives.active.length, BALANCE.activeObjectives);
-    contentH += objCount * (objH + objGap);
-    contentH += pad(token, 0.75);
-    contentH += token.fontCaption + pad(token, 0.75); // tournaments title
     const cardH = pad(token, 10);
     const lockedH = cardH * 0.55;
+    const objCount = Math.min(state.objectives.active.length, BALANCE.activeObjectives);
     const tournaments = this.tournamentsForDiscipline();
     const progress = this.inProgress();
+    const chipH = token.fontCaption + pad(token, 1);
+
+    let contentH = chipH + pad(token, 1) + heroH + pad(token, 1.5);
+    contentH += token.fontCaption + pad(token, 0.75);
+    contentH += objCount * (objH + objGap);
+    contentH += pad(token, 0.75);
+    contentH += token.fontCaption + pad(token, 0.75);
     for (const t of tournaments) {
       const unlocked = state.rankUnlocked[this.discipline] >= t.rank;
       const isActive = progress?.defId === t.id;
@@ -274,31 +411,29 @@ export class CampaignScene implements Scene {
     }
     contentH += pad(token);
 
-    this.scroll.max = Math.max(0, contentH - (contentBottom - contentTop));
-    clampScroll(this.scroll);
+    this.scroller.layout(view, contentH);
+    this.scroller.update(ui, view);
+    const lui = this.scroller.localUi(ui, view);
+    const interactive = !this.modal.open;
 
-    beginClip(ctx, 0, contentTop, w, contentBottom - contentTop);
-    let y = contentTop - this.scroll.offset;
-    const inScroll =
-      !this.modal.open &&
-      ui.pointerY >= contentTop &&
-      ui.pointerY <= contentBottom;
+    this.scroller.begin(ctx, view);
+    let y = 0;
+    y += this.drawDisciplineChip(ctx, 0, y, lui) + pad(token, 1);
 
-    // Quick Race — single interactive hero (kept as card: primary CTA)
-    drawCard(ctx, { x: contentX, y, w: contentW, h: heroH }, ui);
+    drawCard(ctx, { x: 0, y, w: view.w, h: heroH }, lui);
     ctx.save();
     ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = token.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText('Quick Race', contentX + pad(token, 1.5), y + pad(token, 1.5));
+    ctx.fillText('Quick Race', pad(token, 1.5), y + pad(token, 1.5));
     ctx.font = `${token.fontBody}px ${token.fontFamily}`;
     ctx.fillStyle = token.textMuted;
-    ctx.fillText('Jump in for cash and XP', contentX + pad(token, 1.5), y + pad(token, 1.5) + token.fontTitle);
+    ctx.fillText('Jump in for cash and XP', pad(token, 1.5), y + pad(token, 1.5) + token.fontTitle);
     ctx.restore();
 
     const startBtn: ButtonDef = {
-      x: contentX + contentW - pad(token, 1.5) - pad(token, 12),
+      x: view.w - pad(token, 1.5) - pad(token, 12),
       y: y + heroH - pad(token, 1.5) - btnH,
       w: pad(token, 12),
       h: btnH,
@@ -313,34 +448,34 @@ export class CampaignScene implements Scene {
         launchRace(config, this.toasts);
       },
     };
-    drawButton(ctx, startBtn, ui);
-    if (inScroll) handleButton(startBtn, ui);
+    drawButton(ctx, startBtn, lui);
+    if (interactive) handleButton(startBtn, lui);
     y += heroH + pad(token, 1.5);
 
-    y += drawSectionTitle(ctx, contentX, y, 'Objectives', ui);
+    y += drawSectionTitle(ctx, 0, y, 'Objectives', lui);
 
     for (const objId of state.objectives.active.slice(0, BALANCE.activeObjectives)) {
       const def = getObjectiveDef(objId);
-      drawRow(ctx, { x: contentX, y, w: contentW, h: objH }, ui);
+      drawRow(ctx, { x: 0, y, w: view.w, h: objH }, lui);
       ctx.save();
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(def?.title ?? objId, contentX + pad(token, 1), y + objH * 0.35);
+      ctx.fillText(def?.title ?? objId, pad(token, 1), y + objH * 0.35);
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
-      ctx.fillText(def?.description ?? '', contentX + pad(token, 1), y + objH * 0.68);
+      ctx.fillText(def?.description ?? '', pad(token, 1), y + objH * 0.68);
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = accent;
       ctx.textAlign = 'right';
-      ctx.fillText(`$${def?.reward ?? 0}`, contentX + contentW - pad(token, 1), y + objH * 0.5);
+      ctx.fillText(`$${def?.reward ?? 0}`, view.w - pad(token, 1), y + objH * 0.5);
       ctx.restore();
       y += objH + objGap;
     }
 
     y += pad(token, 0.75);
-    y += drawSectionTitle(ctx, contentX, y, 'Tournaments', ui);
+    y += drawSectionTitle(ctx, 0, y, 'Tournaments', lui);
 
     for (const t of tournaments) {
       const rank = t.rank as RankId;
@@ -348,36 +483,35 @@ export class CampaignScene implements Scene {
       const isActive = progress?.defId === t.id;
       const locked = !unlocked && !isActive;
 
-      // Interactive series cards kept; locked rows stay quieter
       if (locked) {
-        drawRow(ctx, { x: contentX, y, w: contentW, h: lockedH }, ui);
+        drawRow(ctx, { x: 0, y, w: view.w, h: lockedH }, lui);
         ctx.save();
         ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
         ctx.fillStyle = token.disabled;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(t.name, contentX + pad(token, 1), y + lockedH * 0.5);
+        ctx.fillText(t.name, pad(token, 1), y + lockedH * 0.5);
         ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
         ctx.fillStyle = token.disabled;
         ctx.textAlign = 'right';
-        ctx.fillText('Locked', contentX + contentW - pad(token, 1), y + lockedH * 0.5);
+        ctx.fillText('Locked', view.w - pad(token, 1), y + lockedH * 0.5);
         ctx.restore();
         y += lockedH + objGap;
         continue;
       }
 
-      drawCard(ctx, { x: contentX, y, w: contentW, h: cardH }, ui);
+      drawCard(ctx, { x: 0, y, w: view.w, h: cardH }, lui);
       ctx.save();
       ctx.font = `700 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(t.name, contentX + pad(token, 1.5), y + pad(token, 1));
+      ctx.fillText(t.name, pad(token, 1.5), y + pad(token, 1));
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
       ctx.fillText(
         `${RANK_NAMES[rank]} · ${t.races.length} races · ${t.teamSize}-car team`,
-        contentX + pad(token, 1.5),
+        pad(token, 1.5),
         y + pad(token, 1) + token.fontBody,
       );
       if (isActive && progress !== null) {
@@ -385,7 +519,7 @@ export class CampaignScene implements Scene {
         ctx.textAlign = 'right';
         ctx.fillText(
           `Race ${progress.raceIndex + 1}/${t.races.length}`,
-          contentX + contentW - pad(token, 1.5),
+          view.w - pad(token, 1.5),
           y + pad(token, 1),
         );
       }
@@ -394,18 +528,18 @@ export class CampaignScene implements Scene {
       const actionY = y + cardH - pad(token, 1) - btnH;
       if (isActive && progress !== null) {
         const resumeBtn: ButtonDef = {
-          x: contentX + pad(token, 1.5),
+          x: pad(token, 1.5),
           y: actionY,
-          w: (contentW - pad(token, 4)) * 0.55,
+          w: (view.w - pad(token, 4)) * 0.55,
           h: btnH,
           label: 'Resume',
           primary: true,
           onClick: () => this.startTournamentRace(),
         };
         const abandonBtn: ButtonDef = {
-          x: contentX + pad(token, 2) + (contentW - pad(token, 4)) * 0.55,
+          x: pad(token, 2) + (view.w - pad(token, 4)) * 0.55,
           y: actionY,
-          w: (contentW - pad(token, 4)) * 0.4,
+          w: (view.w - pad(token, 4)) * 0.4,
           h: btnH,
           label: 'Abandon',
           onClick: () => {
@@ -420,15 +554,15 @@ export class CampaignScene implements Scene {
             };
           },
         };
-        drawButton(ctx, resumeBtn, ui);
-        drawButton(ctx, abandonBtn, ui);
-        if (inScroll) {
-          handleButton(resumeBtn, ui);
-          handleButton(abandonBtn, ui);
+        drawButton(ctx, resumeBtn, lui);
+        drawButton(ctx, abandonBtn, lui);
+        if (interactive) {
+          handleButton(resumeBtn, lui);
+          handleButton(abandonBtn, lui);
         }
       } else if (!isActive && progress === null) {
         const enterBtn: ButtonDef = {
-          x: contentX + contentW - pad(token, 1.5) - pad(token, 10),
+          x: view.w - pad(token, 1.5) - pad(token, 10),
           y: actionY,
           w: pad(token, 10),
           h: btnH,
@@ -436,47 +570,23 @@ export class CampaignScene implements Scene {
           primary: true,
           onClick: () => this.openLineupPicker(t.id, t.teamSize),
         };
-        drawButton(ctx, enterBtn, ui);
-        if (inScroll) handleButton(enterBtn, ui);
+        drawButton(ctx, enterBtn, lui);
+        if (interactive) handleButton(enterBtn, lui);
       }
 
       y += cardH + objGap;
     }
 
-    endClip(ctx);
-
-    if (this.lineupModalOpen && this.pendingTournamentId !== null) {
-      const def = TOURNAMENTS.find((t) => t.id === this.pendingTournamentId);
-      if (def !== undefined) {
-        const listY = h * 0.5;
-        const rowH = pad(token, 5);
-        let rowY = listY;
-        for (const driver of state.roster) {
-          const selected = this.lineupSelection.includes(driver.id);
-          const isLead = driver.id === this.leadDriverId;
-          if (hitRect(ui.pointerX, ui.pointerY, contentX, rowY, contentW, rowH) && ui.pointerClicked) {
-            this.toggleLineupDriver(driver.id, def.teamSize);
-          }
-          ctx.save();
-          ctx.fillStyle = selected ? `${accent}33` : 'transparent';
-          ctx.fillRect(contentX, rowY, contentW, rowH);
-          ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-          ctx.fillStyle = selected ? token.text : token.textMuted;
-          ctx.textAlign = 'left';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(`${selected ? '✓ ' : ''}${driver.name}${isLead ? ' ★' : ''}`, contentX + pad(token), rowY + rowH * 0.5);
-          if (selected && ui.pointerClicked && hitRect(ui.pointerX, ui.pointerY, contentX + contentW - pad(token, 8), rowY, pad(token, 8), rowH)) {
-            this.leadDriverId = driver.id;
-          }
-          ctx.restore();
-          rowY += rowH;
-        }
-      }
-    }
+    this.scroller.end(ctx);
 
     handleHeader(header, ui);
+
+    if (this.lineupModalOpen) {
+      this.reserveLineupBody(token, state.roster.length);
+    }
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);
+    if (this.lineupModalOpen) this.drawLineupList(ctx, ui, state);
     handleModal(this.modal, ui);
     this.toasts.draw(ctx, ui);
   }

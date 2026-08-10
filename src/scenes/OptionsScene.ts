@@ -10,23 +10,20 @@ import {
   handleModal,
   layoutModalButtons,
   drawSectionTitle,
-  headerHeight,
+  drawSlider,
+  handleSlider,
+  sliderRowH,
+  layoutShell,
+  ContentScroller,
   pad,
   ensureMinTouch,
   ToastManager,
   type ButtonDef,
   type ModalDef,
+  type SliderDef,
 } from '../ui/components';
 import { ACCENT_TRACK } from '../ui/theme';
-import {
-  buildUi,
-  drawBackground,
-  drawSlider,
-  handleSlider,
-  onSceneEnter,
-  onSceneResize,
-  type SliderDef,
-} from './sceneUtils';
+import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneUtils';
 import { TitleScene } from './TitleScene';
 
 type ResetStep = 'none' | 'confirm1' | 'confirm2';
@@ -35,20 +32,32 @@ export class OptionsScene implements Scene {
   private toasts = new ToastManager();
   private resetStep: ResetStep = 'none';
   private modal: ModalDef = { open: false, title: '', body: '', buttons: [] };
+  private scroller = new ContentScroller();
+  private detachWheel: (() => void) | null = null;
 
   enter(): void {
     onSceneEnter();
     this.resetStep = 'none';
     this.modal.open = false;
+    this.scroller.scroll.offset = 0;
+    this.detachWheel = this.scroller.attachWheel(getGameContext().canvas, () => !this.modal.open);
   }
 
-  exit(): void {}
+  exit(): void {
+    this.detachWheel?.();
+    this.detachWheel = null;
+  }
 
   onResize(w: number, h: number): void {
     onSceneResize(w, h);
   }
 
   handleBack(): boolean {
+    if (this.modal.open) {
+      this.modal.open = false;
+      this.resetStep = 'none';
+      return true;
+    }
     getGameContext().scenes.back();
     return true;
   }
@@ -145,97 +154,83 @@ export class OptionsScene implements Scene {
     const g = getGameContext();
     const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
     const vols = this.volumes();
+    const shell = layoutShell(w, h, token);
 
     drawBackground(ctx, w, h, token);
 
-    const hh = headerHeight(token);
     const header = {
-      x: 0,
-      y: 0,
-      w,
-      h: hh + token.safe.top,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
       title: 'Options',
       back: true,
       onBack: () => g.scenes.back(),
     };
     drawHeader(ctx, header, ui);
 
-    const contentX = pad(token, 2) + token.safe.left;
-    const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
-    let y = hh + token.safe.top + pad(token, 2);
-    const sliderH = ensureMinTouch(pad(token, 1.5), token);
-    const sliderGap = pad(token, 4);
+    const view = shell.contentRect;
+    const rowH = sliderRowH(token);
+    const trackH = Math.max(6, pad(token, 0.7));
+    const btnH = ensureMinTouch(pad(token, 5.5), token);
+    const sectionGap = pad(token, 2);
+    const contentH =
+      token.fontCaption +
+      pad(token, 1.5) +
+      rowH * 5 +
+      sectionGap +
+      token.fontCaption +
+      pad(token, 1) +
+      btnH +
+      pad(token, 2);
 
-    y += drawSectionTitle(ctx, contentX, y, 'Audio', ui);
-    y += pad(token, 1.5);
+    this.scroller.layout(view, contentH);
+    this.scroller.update(ui, view);
+    const lui = this.scroller.localUi(ui, view);
 
-    const sliders: SliderDef[] = [
-      {
-        x: contentX,
-        y,
-        w: contentW,
-        h: sliderH,
-        label: 'Master Volume',
-        value: vols.master,
-        onChange: (v) => this.setVolume('master', v),
-      },
-      {
-        x: contentX,
-        y: y + sliderGap,
-        w: contentW,
-        h: sliderH,
-        label: 'Engine Volume',
-        value: vols.engine,
-        onChange: (v) => this.setVolume('engine', v),
-      },
-      {
-        x: contentX,
-        y: y + sliderGap * 2,
-        w: contentW,
-        h: sliderH,
-        label: 'FX Volume',
-        value: vols.fx,
-        onChange: (v) => this.setVolume('fx', v),
-      },
-      {
-        x: contentX,
-        y: y + sliderGap * 3,
-        w: contentW,
-        h: sliderH,
-        label: 'Crowd Volume',
-        value: vols.crowd,
-        onChange: (v) => this.setVolume('crowd', v),
-      },
-      {
-        x: contentX,
-        y: y + sliderGap * 4,
-        w: contentW,
-        h: sliderH,
-        label: 'UI Volume',
-        value: vols.ui,
-        onChange: (v) => this.setVolume('ui', v),
-      },
+    this.scroller.begin(ctx, view);
+    let y = 0;
+    y += drawSectionTitle(ctx, 0, y, 'Audio', lui);
+    y += pad(token, 1);
+
+    const keys: { key: keyof VolumeOptions; label: string }[] = [
+      { key: 'master', label: 'Master Volume' },
+      { key: 'engine', label: 'Engine Volume' },
+      { key: 'fx', label: 'FX Volume' },
+      { key: 'crowd', label: 'Crowd Volume' },
+      { key: 'ui', label: 'UI Volume' },
     ];
 
-    for (const slider of sliders) {
-      drawSlider(ctx, slider, ui);
-      handleSlider(slider, ui);
+    for (const { key, label } of keys) {
+      const slider: SliderDef = {
+        x: 0,
+        y,
+        w: view.w,
+        h: trackH,
+        label,
+        value: vols[key],
+        onChange: (v) => this.setVolume(key, v),
+      };
+      drawSlider(ctx, slider, lui);
+      if (!this.modal.open) handleSlider(slider, lui);
+      y += rowH;
     }
 
-    y += sliderGap * 5 + pad(token, 3);
-    y += drawSectionTitle(ctx, contentX, y, 'Save Data', ui);
+    y += sectionGap;
+    y += drawSectionTitle(ctx, 0, y, 'Save Data', lui);
     y += pad(token, 1);
-    const btnH = ensureMinTouch(pad(token, 5.5), token);
     const resetBtn: ButtonDef = {
-      x: contentX,
+      x: 0,
       y,
-      w: contentW,
+      w: view.w,
       h: btnH,
       label: 'Reset Save',
       onClick: () => this.openResetConfirm(),
     };
-    drawButton(ctx, resetBtn, ui);
-    handleButton(resetBtn, ui);
+    drawButton(ctx, resetBtn, lui);
+    if (!this.modal.open) handleButton(resetBtn, lui);
+    this.scroller.end(ctx);
+
     handleHeader(header, ui);
 
     if (this.modal.open) layoutModalButtons(this.modal, ui);

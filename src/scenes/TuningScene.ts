@@ -13,7 +13,8 @@ import {
   drawRadarChart,
   drawSectionTitle,
   drawRow,
-  headerHeight,
+  layoutShell,
+  ContentScroller,
   pad,
   ensureMinTouch,
   statBarHeight,
@@ -36,6 +37,8 @@ import {
 export class TuningScene implements Scene {
   private readonly discipline: DisciplineId;
   private toasts = new ToastManager();
+  private scroller = new ContentScroller();
+  private detachWheel: (() => void) | null = null;
 
   constructor(discipline: DisciplineId) {
     this.discipline = discipline;
@@ -43,9 +46,14 @@ export class TuningScene implements Scene {
 
   enter(): void {
     onSceneEnter();
+    this.scroller.scroll.offset = 0;
+    this.detachWheel = this.scroller.attachWheel(getGameContext().canvas);
   }
 
-  exit(): void {}
+  exit(): void {
+    this.detachWheel?.();
+    this.detachWheel = null;
+  }
 
   onResize(w: number, h: number): void {
     onSceneResize(w, h);
@@ -69,15 +77,15 @@ export class TuningScene implements Scene {
     const { ui, token } = buildUi(w, h, 0, accent);
     const vehicle = state.vehicles[this.discipline];
     const portrait = isPortrait(w, h);
+    const shell = layoutShell(w, h, token);
 
     drawBackground(ctx, w, h, token);
 
-    const hh = headerHeight(token);
     const header = {
-      x: 0,
-      y: 0,
-      w,
-      h: hh + token.safe.top,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
       title: `${disciplineLabel(this.discipline)} Tuning`,
       back: true,
       cash: state.cash,
@@ -85,43 +93,63 @@ export class TuningScene implements Scene {
     };
     drawHeader(ctx, header, ui);
 
-    const contentX = pad(token, 2) + token.safe.left;
-    const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
-    let y = hh + token.safe.top + pad(token);
+    const view = shell.contentRect;
     const btnH = ensureMinTouch(pad(token, 4.5), token);
-    const rowH = pad(token, 5.5);
+    const rowH = Math.max(btnH + pad(token, 0.5), pad(token, 5.5));
+    const radarR = portrait ? Math.min(view.w * 0.32, pad(token, 10)) : pad(token, 8);
 
-    const radarR = portrait ? Math.min(contentW * 0.35, pad(token, 10)) : pad(token, 8);
-    const radarX = portrait ? contentX + (contentW - radarR * 2) * 0.5 : contentX;
-    y += drawSectionTitle(ctx, contentX, y, 'Performance', ui);
+    const contentH =
+      token.fontCaption +
+      pad(token, 0.75) +
+      radarR * 2 +
+      pad(token, 1.5) +
+      token.fontCaption +
+      pad(token, 0.75) +
+      statBarHeight(token) +
+      pad(token, 0.75) +
+      btnH +
+      pad(token, 1.5) +
+      token.fontCaption +
+      pad(token, 0.75) +
+      PARTS.length * rowH +
+      pad(token, 2);
+
+    this.scroller.layout(view, contentH);
+    this.scroller.update(ui, view);
+    const lui = this.scroller.localUi(ui, view);
+
+    this.scroller.begin(ctx, view);
+    let y = 0;
+    y += drawSectionTitle(ctx, 0, y, 'Performance', lui);
+    const radarX = portrait ? (view.w - radarR * 2) * 0.5 : 0;
     drawRadarChart(
       ctx,
       { x: radarX, y, radius: radarR, values: vehicleRadarValues(this.discipline, vehicle) },
-      ui,
+      lui,
     );
     y += radarR * 2 + pad(token, 1.5);
 
-    y += drawSectionTitle(ctx, contentX, y, 'Condition', ui);
+    y += drawSectionTitle(ctx, 0, y, 'Condition', lui);
     drawStatBar(
       ctx,
       {
-        x: contentX,
+        x: 0,
         y,
-        w: contentW,
+        w: view.w,
         label: 'Condition',
         value: vehicle.condition * 100,
         color: vehicle.condition < BALANCE.conditionMin + 0.05 ? token.danger : accent,
       },
-      ui,
+      lui,
     );
     y += statBarHeight(token) + pad(token, 0.75);
 
     const repairPts = Math.max(0, Math.ceil((BALANCE.conditionMax - vehicle.condition) * 100));
     const repairCost = repairPts * BALANCE.repairCostPerPoint;
     const repairBtn: ButtonDef = {
-      x: contentX,
+      x: 0,
       y,
-      w: contentW,
+      w: view.w,
       h: btnH,
       label: repairPts > 0 ? `Repair ($${repairCost})` : 'Fully Repaired',
       disabled: repairPts <= 0 || state.cash < repairCost,
@@ -132,11 +160,11 @@ export class TuningScene implements Scene {
         }
       },
     };
-    drawButton(ctx, repairBtn, ui);
-    handleButton(repairBtn, ui);
+    drawButton(ctx, repairBtn, lui);
+    handleButton(repairBtn, lui);
     y += btnH + pad(token, 1.5);
 
-    y += drawSectionTitle(ctx, contentX, y, 'Parts', ui);
+    y += drawSectionTitle(ctx, 0, y, 'Parts', lui);
 
     for (const part of PARTS) {
       const tier = vehicle.partTiers[part.id] ?? 0;
@@ -144,18 +172,21 @@ export class TuningScene implements Scene {
       const cost = partCost(part.baseCost, nextTier);
       const atMax = tier >= BALANCE.maxPartTier;
 
-      drawRow(ctx, { x: contentX, y, w: contentW, h: rowH }, ui);
+      drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui);
 
       ctx.save();
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(part.name, contentX + pad(token, 0.5), y + rowH * 0.5);
+      ctx.fillText(part.name, pad(token, 0.5), y + rowH * 0.5);
 
+      const buyW = Math.min(pad(token, 10), view.w * 0.28);
       const pipR = pad(token, 0.4);
-      let pipX = contentX + pad(token, 10);
+      let pipX = pad(token, 0.5) + ctx.measureText(part.name).width + pad(token, 1);
+      const pipMax = view.w - buyW - pad(token, 1.5);
       for (let p = 0; p <= BALANCE.maxPartTier; p++) {
+        if (pipX + pipR > pipMax) break;
         ctx.beginPath();
         ctx.arc(pipX, y + rowH * 0.5, pipR, 0, Math.PI * 2);
         ctx.fillStyle = p <= tier ? accent : token.bgElevated;
@@ -166,9 +197,8 @@ export class TuningScene implements Scene {
       }
       ctx.restore();
 
-      const buyW = pad(token, 10);
       const buyBtn: ButtonDef = {
-        x: contentX + contentW - buyW,
+        x: view.w - buyW,
         y: y + (rowH - btnH) * 0.5,
         w: buyW,
         h: btnH,
@@ -181,11 +211,12 @@ export class TuningScene implements Scene {
           }
         },
       };
-      drawButton(ctx, buyBtn, ui);
-      handleButton(buyBtn, ui);
+      drawButton(ctx, buyBtn, lui);
+      handleButton(buyBtn, lui);
       y += rowH;
     }
 
+    this.scroller.end(ctx);
     handleHeader(header, ui);
     this.toasts.draw(ctx, ui);
   }

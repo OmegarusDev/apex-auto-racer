@@ -111,8 +111,9 @@ export function createTheme(w: number, h: number): ThemeTokens {
     scale,
     grid: 8 * scale,
     touchMin: Math.max(44, Math.min(52, 44 * scale)),
-    fontDisplay: 32 * scale,
-    fontTitle: 24 * scale,
+    // Floors keep titles readable at the 0.7 scale clamp.
+    fontDisplay: Math.max(22, 32 * scale),
+    fontTitle: Math.max(18, 24 * scale),
     fontBody: Math.max(14, 16 * scale),
     fontCaption: Math.max(11, 12 * scale),
     fontHero,
@@ -148,6 +149,29 @@ export function snapGrid(token: ThemeTokens, value: number): number {
 /** Padding helper: n grid units. */
 export function pad(token: ThemeTokens, units = 1): number {
   return token.grid * units;
+}
+
+/**
+ * Header control band height (excluding safe.top).
+ * Visual track heights must NOT use touchMin — only hit targets should.
+ */
+export function headerContentH(token: ThemeTokens): number {
+  return Math.max(token.touchMin, pad(token, 6.5));
+}
+
+/** Y where header controls (back/title/cash) are vertically centered. */
+export function headerContentTop(token: ThemeTokens): number {
+  return token.safe.top;
+}
+
+/** Full header chrome height including safe inset. */
+export function headerBandH(token: ThemeTokens): number {
+  return token.safe.top + headerContentH(token);
+}
+
+/** Content region starts just below the header chrome. */
+export function contentTop(token: ThemeTokens): number {
+  return headerBandH(token);
 }
 
 export function accentForDiscipline(id: DisciplineId): string {

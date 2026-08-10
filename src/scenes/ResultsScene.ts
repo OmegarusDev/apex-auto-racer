@@ -6,8 +6,6 @@ import type { ResultsPayload } from '../engine/raceTypes';
 import { effectiveStats } from '../engine/stats';
 import type { DriverStatKey } from '../ui/components';
 import {
-  drawButton,
-  handleButton,
   drawHeader,
   handleHeader,
   drawRow,
@@ -18,11 +16,14 @@ import {
   handleUpgradePanel,
   driverSpendPanelHeight,
   upgradePanelHeight,
-  headerHeight,
+  layoutShell,
+  ContentScroller,
+  drawFooterActions,
+  handleFooterActions,
   pad,
-  ensureMinTouch,
   ToastManager,
   type ButtonDef,
+  type UiContext,
 } from '../ui/components';
 import {
   buildUi,
@@ -53,6 +54,8 @@ export class ResultsScene implements Scene {
   private upgradeCollapsed = false;
   private selectedDriverIdx = 0;
   private applied = false;
+  private scroller = new ContentScroller();
+  private detachWheel: (() => void) | null = null;
 
   constructor(payload: ResultsPayload, tournamentMode = false) {
     this.payload = payload;
@@ -64,17 +67,29 @@ export class ResultsScene implements Scene {
     this.phase = 'podium';
     this.phaseT = 0;
     this.applied = false;
+    this.scroller.scroll.offset = 0;
+    this.detachWheel = this.scroller.attachWheel(
+      getGameContext().canvas,
+      () => this.phase === 'done',
+    );
     this.applyResults();
     this.showUnlockToasts();
   }
 
-  exit(): void {}
+  exit(): void {
+    this.detachWheel?.();
+    this.detachWheel = null;
+  }
 
   onResize(w: number, h: number): void {
     onSceneResize(w, h);
   }
 
   handleBack(): boolean {
+    if (this.phase !== 'done') {
+      this.advancePhase();
+      return true;
+    }
     this.navigateBack();
     return true;
   }
@@ -179,6 +194,7 @@ export class ResultsScene implements Scene {
     if (idx < order.length - 1) {
       this.phase = order[idx + 1]!;
       this.phaseT = 0;
+      if (this.phase === 'done') this.scroller.scroll.offset = 0;
     } else {
       this.phase = 'done';
     }
@@ -211,6 +227,72 @@ export class ResultsScene implements Scene {
     this.navigateBack();
   }
 
+  private measureDoneContentH(
+    ui: UiContext,
+    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
+  ): number {
+    const { token } = ui;
+    let h = this.podiumH(token) + pad(token, 1.5);
+    if (this.tournamentMode) {
+      h += token.fontCaption + pad(token, 1.5);
+      h += this.payload.standings.length * pad(token, 4) + pad(token, 1.5);
+    }
+    h += this.payoutBlockH(token);
+    h += this.xpBlockH(ui, state);
+    h += pad(token, 2);
+    return h;
+  }
+
+  private podiumH(token: UiContext['token']): number {
+    return pad(token, 16);
+  }
+
+  private payoutBlockH(token: UiContext['token']): number {
+    const p = this.payload.payout;
+    const lines = [p.base, p.placement, p.objective, p.handsOff, p.entertainment, p.tournament].filter(
+      (v) => v > 0,
+    ).length;
+    const rowH = token.fontBody * 1.55;
+    return (
+      token.fontCaption +
+      pad(token, 1.5) +
+      lines * rowH +
+      token.fontTitle +
+      pad(token, 1) +
+      pad(token, 1.5)
+    );
+  }
+
+  private xpBlockH(
+    ui: UiContext,
+    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
+  ): number {
+    const grants = this.payload.driverXp;
+    if (grants.length === 0) return 0;
+    const grant = grants[this.selectedDriverIdx % grants.length];
+    if (grant === undefined) return 0;
+    const driver = findDriver(state, grant.driverId);
+    if (driver === undefined) return 0;
+    const spendH = driverSpendPanelHeight(
+      { x: 0, y: 0, w: 100, driver: driverSpendData(driver) },
+      ui.token,
+    );
+    const vehicle = state.vehicles[this.payload.discipline];
+    const upgradeH = upgradePanelHeight(
+      {
+        x: 0,
+        y: 0,
+        w: 100,
+        partTiers: vehicle.partTiers,
+        condition: vehicle.condition,
+        cash: state.cash,
+        collapsed: this.upgradeCollapsed,
+      },
+      ui.token,
+    );
+    return spendH + pad(ui.token, 1.5) + upgradeH;
+  }
+
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
     const state = g.state;
@@ -218,93 +300,93 @@ export class ResultsScene implements Scene {
 
     const accent = disciplineAccent(this.payload.discipline);
     const { ui, token } = buildUi(w, h, 0, accent);
+    const done = this.phase === 'done';
+    const shell = layoutShell(w, h, token, done ? { footer: true } : {});
+
     drawBackground(ctx, w, h, token);
 
-    const hh = headerHeight(token);
     const header = {
-      x: 0,
-      y: 0,
-      w,
-      h: hh + token.safe.top,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
       title: this.tournamentMode ? 'Tournament Results' : 'Race Results',
-      back: this.phase === 'done',
+      back: done,
       cash: state.cash,
-      onBack: () => this.navigateBack(),
+      onBack: () => this.handleBack(),
     };
     drawHeader(ctx, header, ui);
 
-    const contentX = pad(token, 2) + token.safe.left;
-    const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
-    let y = hh + token.safe.top + pad(token);
+    if (done) {
+      const view = shell.contentRect;
+      const contentH = this.measureDoneContentH(ui, state);
+      this.scroller.layout(view, contentH);
+      this.scroller.update(ui, view);
+      const lui = this.scroller.localUi(ui, view);
 
-    if (this.phase === 'podium' || this.phase === 'done') {
-      y += this.drawPodium(ctx, contentX, y, contentW, ui) + pad(token, 1.5);
-    }
+      this.scroller.begin(ctx, view);
+      let y = 0;
+      y += this.drawPodium(ctx, 0, y, view.w, lui) + pad(token, 1.5);
+      if (this.tournamentMode) {
+        y = this.drawStandings(ctx, 0, y, view.w, lui);
+      }
+      y = this.drawPayout(ctx, 0, y, view.w, lui);
+      y = this.drawXpSection(ctx, 0, y, view.w, lui, state);
+      this.scroller.end(ctx);
 
-    if ((this.phase === 'standings' || this.phase === 'done') && this.tournamentMode) {
-      y = this.drawStandings(ctx, contentX, y, contentW, ui);
-    }
-
-    if (this.phase === 'payout' || this.phase === 'done') {
-      y = this.drawPayout(ctx, contentX, y, contentW, ui);
-    }
-
-    if (this.phase === 'xp' || this.phase === 'done') {
-      y = this.drawXpSection(ctx, contentX, y, contentW, ui, state);
-    }
-
-    if (this.phase === 'done') {
-      const btnH = ensureMinTouch(pad(token, 5.5), token);
-      const btnGap = pad(token, 0.75);
-      let btnY = h - token.safe.bottom - pad(token, 2) - btnH;
       const hasSeriesNext = this.payload.nextRaceConfig !== undefined;
       const isQuick = this.payload.config.mode === 'quick';
       const showNext = hasSeriesNext || isQuick;
-      const btnCount = showNext ? 3 : 2;
-      const btnW = (contentW - btnGap * (btnCount - 1)) / btnCount;
-      let btnX = contentX;
-
-      const againBtn: ButtonDef = {
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: btnH,
-        label: 'Race Again',
-        onClick: () => this.raceAgain(),
-      };
-      btnX += btnW + btnGap;
-      drawButton(ctx, againBtn, ui);
-      handleButton(againBtn, ui);
-
+      const footerBtns: ButtonDef[] = [
+        { x: 0, y: 0, w: 0, h: 0, label: 'Race Again', onClick: () => this.raceAgain() },
+      ];
       if (showNext) {
-        const nextBtn: ButtonDef = {
-          x: btnX,
-          y: btnY,
-          w: btnW,
-          h: btnH,
+        footerBtns.push({
+          x: 0,
+          y: 0,
+          w: 0,
+          h: 0,
           label: 'Next Race',
           primary: true,
           onClick: () => this.nextRace(),
-        };
-        btnX += btnW + btnGap;
-        drawButton(ctx, nextBtn, ui);
-        handleButton(nextBtn, ui);
+        });
       }
-
-      const backBtn: ButtonDef = {
-        x: btnX,
-        y: btnY,
-        w: btnW,
-        h: btnH,
+      footerBtns.push({
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
         label: 'Back',
         primary: !showNext,
         onClick: () => this.navigateBack(),
-      };
-      drawButton(ctx, backBtn, ui);
-      handleButton(backBtn, ui);
-    }
+      });
 
-    if (this.phase !== 'done') {
+      if (shell.footerRect !== null) {
+        drawFooterActions(ctx, shell.footerRect, footerBtns, ui);
+        handleFooterActions(footerBtns, ui);
+      }
+    } else {
+      const contentX = shell.contentRect.x;
+      const contentW = shell.contentRect.w;
+      let y = shell.contentRect.y;
+
+      // Reveal phases stack: later phases keep earlier panels visible.
+      if (this.phase === 'podium' || this.phase === 'standings' || this.phase === 'payout' || this.phase === 'xp') {
+        y += this.drawPodium(ctx, contentX, y, contentW, ui) + pad(token, 1.5);
+      }
+      if (
+        (this.phase === 'standings' || this.phase === 'payout' || this.phase === 'xp') &&
+        this.tournamentMode
+      ) {
+        y = this.drawStandings(ctx, contentX, y, contentW, ui);
+      }
+      if (this.phase === 'payout' || this.phase === 'xp') {
+        y = this.drawPayout(ctx, contentX, y, contentW, ui);
+      }
+      if (this.phase === 'xp') {
+        y = this.drawXpSection(ctx, contentX, y, contentW, ui, state);
+      }
+
       ctx.save();
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
@@ -322,16 +404,15 @@ export class ResultsScene implements Scene {
     x: number,
     y: number,
     w: number,
-    ui: ReturnType<typeof buildUi>['ui'],
+    ui: UiContext,
   ): number {
     const { token, accent } = ui;
     const top3 = [...this.payload.finishers].sort((a, b) => a.position - b.position).slice(0, 3);
-    const h = pad(token, 16);
+    const h = this.podiumH(token);
     const place = this.payload.playerPosition;
     const won = place === 1;
 
     ctx.save();
-    // Place number — display font, winner gets accent + scale
     const placeSize = won ? token.fontDisplay * 1.35 : token.fontDisplay;
     ctx.font = `800 ${placeSize}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = won ? accent : token.text;
@@ -377,7 +458,6 @@ export class ResultsScene implements Scene {
       const barW = podiumW * (isFirst ? 0.62 : 0.52);
       ctx.fillStyle = finisher.isPlayer ? accent : isFirst ? `${accent}55` : token.bgElevated;
       ctx.fillRect(px - barW * 0.5, y + h - pad(token) - barH, barW, barH);
-      // Place numeral on bar
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = finisher.isPlayer || isFirst ? token.bg : token.textMuted;
       ctx.textBaseline = 'middle';
@@ -400,7 +480,7 @@ export class ResultsScene implements Scene {
     x: number,
     y: number,
     w: number,
-    ui: ReturnType<typeof buildUi>['ui'],
+    ui: UiContext,
   ): number {
     const { token } = ui;
     y += drawSectionTitle(ctx, x, y, 'Championship Standings', ui);
@@ -432,7 +512,7 @@ export class ResultsScene implements Scene {
     x: number,
     y: number,
     w: number,
-    ui: ReturnType<typeof buildUi>['ui'],
+    ui: UiContext,
   ): number {
     const { token } = ui;
     const p = this.payload.payout;
@@ -480,7 +560,7 @@ export class ResultsScene implements Scene {
     x: number,
     y: number,
     w: number,
-    ui: ReturnType<typeof buildUi>['ui'],
+    ui: UiContext,
     state: NonNullable<ReturnType<typeof getGameContext>['state']>,
   ): number {
     const grants = this.payload.driverXp;

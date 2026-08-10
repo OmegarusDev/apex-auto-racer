@@ -287,8 +287,8 @@ function computeTrafficBrake(
   let brake = 0;
   let blocked = false;
   let closeAhead = false;
-  /** Strict same-lane — cars with clear lateral room must not trigger accordion brake. */
-  const laneWidth = PHYSICS.carWidth * 0.62;
+  /** Same-lane sense — aligned with contact laneShare so AI brakes before nesting. */
+  const laneWidth = PHYSICS.carWidth * 0.7;
   const skillGap = 1 + BALANCE.followSkillGapSpan * (1 - skill / 100);
   const targetGap = Math.max(BALANCE.followMinGap, car.v * BALANCE.followTimeGap) * skillGap;
 
@@ -300,9 +300,9 @@ function computeTrafficBrake(
 
     const gap = r.arcGap;
     const closing = car.v - r.speed;
-    closeAhead = closeAhead || gap < targetGap * 1.45;
+    closeAhead = closeAhead || gap < targetGap * 1.55;
 
-    if (gap <= 0.1) {
+    if (gap <= 0.35) {
       blocked = true;
       brake = 1;
       continue;
@@ -310,11 +310,11 @@ function computeTrafficBrake(
 
     // Closing-speed decel onto the bumper gap.
     let need = 0;
-    if (closing > 0.75) {
+    if (closing > 0.5) {
       need = (closing * closing) / (2 * Math.max(gap, 0.35));
     }
     if (gap < targetGap) {
-      need = Math.max(need, (targetGap - gap) / Math.max(targetGap, 1) * aBrake);
+      need = Math.max(need, (targetGap - gap) / Math.max(targetGap, 1) * aBrake * 1.15);
     }
     // Give deslotted wrecks a wider berth.
     if (r.deslotted && gap < targetGap * 1.4) {

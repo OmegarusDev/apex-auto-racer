@@ -71,18 +71,19 @@ export const BALANCE = {
   draftGapMax: 28,
   draftLateralMax: 1.8,
   overtakeDraftThreshold: 0.36,
-  overtakeHoldSec: 0.85,
-  overtakeDurationSec: 3.5,
+  /** Shorter wake sit so blocked AI commit to a pass instead of rubbing. */
+  overtakeHoldSec: 0.65,
+  overtakeDurationSec: 3.2,
   /** Lateral offset onto a clear lane — sized for ~27–36 m asphalt. */
-  overtakeLateralShift: 3.9,
+  overtakeLateralShift: 4.2,
   /** Bumper clearance used by AI sensing (matches PHYSICS.carLength). */
   contactGap: 5.1,
   /** Follower speed cap vs leader on longitudinal contact. */
-  contactSpeedCap: 0.92,
-  /** Extra lateral separation rate (m/s) while bodies overlap. */
-  contactNudge: 4.8,
+  contactSpeedCap: 0.9,
+  /** Extra lateral separation rate (m/s) while bodies overlap (pass-lane only). */
+  contactNudge: 5.2,
   /** Iterative pack resolve passes per physics step. */
-  contactIters: 4,
+  contactIters: 5,
   /** Fraction of closing speed transferred as a leader bump. */
   contactBounce: 0.32,
   /** Closing speed (m/s) that counts as a hard car-car hit. */
@@ -94,9 +95,9 @@ export const BALANCE = {
   /** Min rear-end severity before condition is charged (kiss bumps are free). */
   contactConditionSeverityMin: 0.55,
   /** AI target time gap (s) to the car ahead in the same lane. */
-  followTimeGap: 0.32,
+  followTimeGap: 0.38,
   /** AI starts lifting/braking inside this bumper gap (m). */
-  followMinGap: 2.2,
+  followMinGap: 2.6,
   /** Low-skill AI brakes earlier for traffic (extra time-gap mult). */
   followSkillGapSpan: 0.72,
   finishWindowSec: 10,

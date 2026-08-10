@@ -1126,8 +1126,11 @@ export class RaceDirector {
     const minL = PHYSICS.carWidth;
     const iters = Math.max(1, BALANCE.contactIters);
     /** Same-lane closing only; side-by-side / overtakes must not accordion-match. */
-    const proxS = PHYSICS.carLength + BALANCE.followMinGap * 0.7;
-    const proxL = PHYSICS.carWidth * 0.42;
+    const proxS = PHYSICS.carLength + BALANCE.followMinGap * 0.85;
+    /** Match traffic-brain lane sense so soft bumper covers shared racing lines. */
+    const proxL = PHYSICS.carWidth * 0.58;
+    /** Centers inside this share a lane — stack in S, never peel-through. */
+    const laneShareL = PHYSICS.carWidth * 0.48;
     /** Soften stun / drive-kill while the pack is still clearing grid columns. */
     const launchSoft = this.raceTime < PHYSICS.gridHoldSec;
     const launchStunScale = launchSoft ? 0.2 : 1;
@@ -1173,21 +1176,16 @@ export class RaceDirector {
           }
 
           // Soft bumper match — same lane only, never marks blocked (draft glue killer).
-          // Skip when already offset for a pass or harvesting a strong tow.
-          if (
-            absS < proxS &&
-            absS >= minS &&
-            absL < proxL &&
-            follower.draft < BALANCE.overtakeDraftThreshold * 0.85 &&
-            !follower.car.isPlayerControlled
-          ) {
+          // Applies to player + AI so pin-throttle cannot tunnel a leader.
+          // Skip only when already clear of the lane for a pass.
+          if (absS < proxS && absS >= minS && absL < proxL) {
             const gap = absS - minS;
             const closing = follower.car.v - leader.car.v;
-            if (closing > 1.0 && gap < BALANCE.followMinGap * 0.75) {
+            if (closing > 0.6 && gap < BALANCE.followMinGap * 1.1) {
               const cap =
-                gap < BALANCE.followMinGap * 0.25
+                gap < BALANCE.followMinGap * 0.35
                   ? BALANCE.contactSpeedCap
-                  : Math.min(1, BALANCE.contactSpeedCap + 0.08);
+                  : Math.min(1, BALANCE.contactSpeedCap + 0.06);
               follower.car.v = Math.min(follower.car.v, leader.car.v * cap);
             }
           }
@@ -1196,10 +1194,9 @@ export class RaceDirector {
 
           const penS = minS - absS;
           const penL = minL - absL;
-          // Prefer peel when abreast / already offset so packs can run side-by-side.
-          const abreast = absS < PHYSICS.carLength * 0.85;
-          const alreadyOffset = absL > PHYSICS.carWidth * 0.18;
-          const separateLateral = abreast || alreadyOffset || penL <= penS * 1.15;
+          // Line behaviour: shared lane stacks in S. Peel only once cars are
+          // already offset for a pass — otherwise they phantom-slide past.
+          const separateLateral = absL >= laneShareL;
           const closing = follower.car.v - leader.car.v;
 
           if (separateLateral) {
@@ -1273,36 +1270,36 @@ export class RaceDirector {
             }
             // Mild peel: geometry only — keep both cars driving side-by-side.
           } else {
-            // Rear-end: separate along track, then inelastic-ish momentum transfer.
-            const pushBack = penS * 0.85;
-            const pushFwd = penS * 0.15;
+            // Rear-end / line block: separate along track, then inelastic match.
+            const pushBack = penS * 0.9;
+            const pushFwd = penS * 0.1;
             displaceAlongTrack(follower.car, -pushBack, trackLength);
             displaceAlongTrack(leader.car, pushFwd, trackLength);
 
             if (closing > 0) {
               const severity = Math.max(
                 0,
-                Math.min(1, (closing - 0.5) / BALANCE.contactCrashClosing),
+                Math.min(1, (closing - 0.35) / BALANCE.contactCrashClosing),
               );
               // Follower dumps closing speed; leader gets a fraction (inelastic bump).
-              const transfer = closing * (BALANCE.contactBounce + 0.4 * severity);
-              const followerDrop = closing * (0.5 + 0.4 * severity) * (launchSoft ? 0.45 : 1);
+              const transfer = closing * (BALANCE.contactBounce + 0.35 * severity);
+              const followerDrop = closing * (0.55 + 0.4 * severity) * (launchSoft ? 0.5 : 1);
               follower.car.v = Math.max(0, follower.car.v - followerDrop);
-              leader.car.v += transfer * (launchSoft ? 0.5 : 1);
-              // Cap residual tunnel — soft follow only after the bump.
+              leader.car.v += transfer * (launchSoft ? 0.45 : 1);
+              // Hard speed match — no residual tunnel through the leader.
               follower.car.v = Math.min(
                 follower.car.v,
-                Math.max(0, leader.car.v * (BALANCE.contactSpeedCap + 0.04 * (1 - severity))),
+                Math.max(0, leader.car.v * BALANCE.contactSpeedCap),
               );
 
-              if (severity > 0.28) {
+              if (severity > 0.22) {
                 follower.car.stunRemaining = Math.max(
                   follower.car.stunRemaining,
-                  (0.18 + 0.4 * severity) * launchStunScale,
+                  (0.14 + 0.35 * severity) * launchStunScale,
                 );
                 leader.car.stunRemaining = Math.max(
                   leader.car.stunRemaining,
-                  (0.08 + 0.18 * severity) * launchStunScale,
+                  (0.06 + 0.14 * severity) * launchStunScale,
                 );
                 const node = interpolateAtSInto(
                   this.track.nodes,
@@ -1313,7 +1310,7 @@ export class RaceDirector {
                 const curved =
                   Math.abs(node.kappaLine) >= PHYSICS.grooveKappaMin * 0.7;
                 // Hard rear-end can scrub/deslot — bends easier, straights need more.
-                if (!launchSoft && severity > (curved ? 0.5 : 0.72)) {
+                if (!launchSoft && severity > (curved ? 0.55 : 0.78)) {
                   contactDeslot(
                     follower.car,
                     Math.sign(follower.car.l || 1) * (0.7 + 0.6 * severity),
@@ -1332,18 +1329,19 @@ export class RaceDirector {
                   follower.car.contactHits += 1;
                 }
               }
-              // Only mark blocked when actually stacked (not a draft kiss / launch rub).
-              if (!launchSoft && (severity > 0.15 || penS > PHYSICS.carLength * 0.12)) {
+              // Stacked in-lane → AI must lift / look for a pass.
+              if (!launchSoft || penS > PHYSICS.carLength * 0.2) {
                 follower.contactBlocked = true;
               }
             } else {
               follower.car.v = Math.min(follower.car.v, leader.car.v * BALANCE.contactSpeedCap);
-              if (!launchSoft && penS > PHYSICS.carLength * 0.08) follower.contactBlocked = true;
+              if (!launchSoft || penS > PHYSICS.carLength * 0.1) follower.contactBlocked = true;
             }
           }
 
-          // Residual lateral nudge while still overlapping in L after peel/stack.
-          if (Math.abs(b.car.l - a.car.l) < minL) {
+          // Lateral nudge only for cars already offset into a pass lane.
+          // Same-lane stacks must not be walked sideways into a phantom slide.
+          if (separateLateral && Math.abs(b.car.l - a.car.l) < minL) {
             const sign = a.car.l >= b.car.l ? 1 : -1;
             const nudge = BALANCE.contactNudge * dt;
             a.car.l += sign * nudge;

@@ -282,6 +282,77 @@ export function runGearNoMissGate(): FeelGateResult {
   };
 }
 
+/**
+ * Same-lane contact must stack (brake / push back in S), not peel cars
+ * sideways to carWidth while still nested longitudinally (phantom pass).
+ */
+export function runPackContactGate(): FeelGateResult {
+  const director = new RaceDirector(baseConfig(77_020));
+  skipCountdown(director);
+  const player = director.cars.find((c) => c.isPlayerControlled);
+  const ai = director.cars.find((c) => !c.isPlayerControlled);
+  if (!player || !ai) {
+    return { id: 'PACK_CONTACT', ok: false, detail: 'missing cars' };
+  }
+
+  let bestS = player.s;
+  let bestK = 99;
+  for (const n of director.track.nodes) {
+    const k = Math.abs(n.kappaLine);
+    if (k < bestK) {
+      bestK = k;
+      bestS = n.s;
+    }
+  }
+
+  const raceDist = (c: { lap: number; s: number }) => c.lap * director.track.length + c.s;
+  ai.lap = 0;
+  ai.s = bestS;
+  ai.l = 0;
+  ai.dl = 0;
+  ai.v = 12;
+  ai.gear = 3;
+  ai.slotMode = 'groove';
+  ai.lTarget = 0;
+  player.lap = 0;
+  player.s = (bestS - 2.0 + director.track.length) % director.track.length;
+  player.l = 0.25;
+  player.dl = 0;
+  player.v = 22;
+  player.gear = 4;
+  player.slotMode = 'groove';
+  player.lTarget = 0.25;
+
+  let maxAbsLEarly = 0;
+  let sameLanePass = 0;
+  let minFollowerV = player.v;
+
+  for (let i = 0; i < 90; i++) {
+    director.setPlayerPedals(1, 0, true);
+    director.update(PHYSICS.dt);
+    const absL = Math.abs(player.l - ai.l);
+    const dS = raceDist(player) - raceDist(ai);
+    if (i < 12) maxAbsLEarly = Math.max(maxAbsLEarly, absL);
+    minFollowerV = Math.min(minFollowerV, player.v);
+    // Phantom: go ahead while still sharing the lane.
+    if (dS > 0 && absL < PHYSICS.carWidth * 0.55) sameLanePass += 1;
+  }
+
+  // Instant peel to ~carWidth while nested in S is the phantom signature.
+  const noInstantPeel = maxAbsLEarly < PHYSICS.carWidth * 0.85;
+  const stayedBehindOrOffset =
+    sameLanePass === 0 &&
+    (raceDist(player) <= raceDist(ai) || Math.abs(player.l - ai.l) >= PHYSICS.carWidth * 0.5);
+  const speedMatched = minFollowerV <= ai.v * 1.15 + 2;
+  const ok = noInstantPeel && stayedBehindOrOffset && speedMatched;
+
+  return {
+    id: 'PACK_CONTACT',
+    ok,
+    detail: `maxAbsLEarly=${maxAbsLEarly.toFixed(2)} sameLanePass=${sameLanePass} minFv=${minFollowerV.toFixed(1)} aiV=${ai.v.toFixed(1)} finalDs=${(raceDist(player) - raceDist(ai)).toFixed(2)} finalAbsL=${Math.abs(player.l - ai.l).toFixed(2)}`,
+  };
+}
+
 /** Player live vMax/aAccel must be paced — not only vDriver targets. */
 export function runPlayerPacePhysGate(): FeelGateResult {
   const director = new RaceDirector(baseConfig(77_012));
@@ -316,5 +387,6 @@ export function runHarnessGates(): FeelGateResult[] {
     runGearAssistGate(),
     runGearNoMissGate(),
     runPlayerPacePhysGate(),
+    runPackContactGate(),
   ];
 }

@@ -24,6 +24,7 @@ Live model is groove/deslot, not free-yaw understeer as the primary limit:
 - **P3 dormant cull:** free-yaw / understeer vocabulary (`kUnder`, oversteer*, coldYaw*, etc.) removed from the live path — groove-only. `DRIFT_CFG` stays quarantined with `enabled: false`.
 - `v_deslot` spans Skill × Focus × Bravery; player Authority splits brake assist (stronger at low Skill) vs throttle trim (rises with Skill). Pin-throttle nearly kills brake assist.
 - AI brakes for `vDriver` / live `v_deslot`, full throttle otherwise; draft hold then lateral pull-out. Soft bumper / grid-hold softens start rubs so the pack does not freeze at lights-out.
+- **Line contact (2026-08-10)** — Same-lane overlaps stack in S (brake / speed-match); lateral peel only once centers clear ~0.5 carWidth (intentional pass). Soft bumper covers player+AI. Gate: `PACK_CONTACT`.
 - Wall recovery is soft (stun cuts drive; no lateral freeze/teleport). Track width / normals / kerbs match painted asphalt.
 - **Manual upshift gearbox:** Enter/gas, Space/brake; player Shift/tap upshifts (no miss slap). Auto downshift when off throttle in a low band. AI keeps assisted auto up/down. Mild torque/topFrac personality per discipline; soft gear-cap overshoot (`gearCapSoft`). Street = 5 gears + harder walls; Rally = 4 gears + longer deslot.
 - Opponent fields stratify weak→strong within the rank budget band (no dead stall-cars at novice).
@@ -47,10 +48,10 @@ Headless suite green after groove rethink + crash recovery + tyre warm-up:
 
 - start-validate: 0 stalls; pin P1 ≤3/8; playerPaceMult=0.5 on vDriver+vMax+aAccel; manual player upshift
 - scalextric: finish 100%; deslots/car≈1.65; pin deslots; street walls
-- collision: residual overlap ≈0.03%
+- collision: residual overlap ≈0.03%; PACK_CONTACT (no same-lane peel-through)
 - field: not always P1; finish 100%
 - smoke determinism + stack-smoke PASS
-- PLAYER_PACE_PHYS + GEAR_ASSIST (manual up) gates
+- PLAYER_PACE_PHYS + GEAR_ASSIST (manual up) + PACK_CONTACT gates
 
 ## Feel freeze set (do not retune without a failing gate)
 

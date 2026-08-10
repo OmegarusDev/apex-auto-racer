@@ -16,6 +16,8 @@ import {
   drawHeader,
   handleHeader,
   drawCard,
+  drawRow,
+  drawSectionTitle,
   drawModal,
   handleModal,
   layoutModalButtons,
@@ -23,9 +25,14 @@ import {
   pad,
   ensureMinTouch,
   hitRect,
+  beginClip,
+  endClip,
+  clampScroll,
+  wheelScroll,
   ToastManager,
   type ButtonDef,
   type ModalDef,
+  type ScrollState,
 } from '../ui/components';
 import {
   buildUi,
@@ -49,6 +56,13 @@ export class CampaignScene implements Scene {
   private pendingTournamentId: string | null = null;
   private lineupSelection: string[] = [];
   private leadDriverId = '';
+  private scroll: ScrollState = { offset: 0, max: 0 };
+
+  private onWheel = (ev: WheelEvent): void => {
+    if (this.modal.open) return;
+    ev.preventDefault();
+    wheelScroll(this.scroll, ev.deltaY);
+  };
 
   constructor(discipline: DisciplineId) {
     this.discipline = discipline;
@@ -59,9 +73,13 @@ export class CampaignScene implements Scene {
     this.modal.open = false;
     this.lineupModalOpen = false;
     this.pendingTournamentId = null;
+    this.scroll.offset = 0;
+    getGameContext().canvas.addEventListener('wheel', this.onWheel, { passive: false });
   }
 
-  exit(): void {}
+  exit(): void {
+    getGameContext().canvas.removeEventListener('wheel', this.onWheel);
+  }
 
   onResize(w: number, h: number): void {
     onSceneResize(w, h);
@@ -227,15 +245,49 @@ export class CampaignScene implements Scene {
     };
     drawHeader(ctx, header, ui);
 
-    let y = hh + token.safe.top + pad(token);
+    const contentTop = hh + token.safe.top + pad(token);
+    const contentBottom = h - token.safe.bottom - pad(token);
     const contentX = pad(token, 2) + token.safe.left;
     const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
     const btnH = ensureMinTouch(pad(token, 5.5), token);
+    const objGap = pad(token, 0.5);
 
-    const heroH = pad(token, 14);
+    // Layout in content space (y=0 at top of scrollable region)
+    let contentH = 0;
+    const heroH = pad(token, 12);
+    contentH += heroH + pad(token, 1.5);
+    contentH += token.fontCaption + pad(token, 0.75); // objectives title
+    const objH = pad(token, 5.5);
+    const objCount = Math.min(state.objectives.active.length, BALANCE.activeObjectives);
+    contentH += objCount * (objH + objGap);
+    contentH += pad(token, 0.75);
+    contentH += token.fontCaption + pad(token, 0.75); // tournaments title
+    const cardH = pad(token, 10);
+    const lockedH = cardH * 0.55;
+    const tournaments = this.tournamentsForDiscipline();
+    const progress = this.inProgress();
+    for (const t of tournaments) {
+      const unlocked = state.rankUnlocked[this.discipline] >= t.rank;
+      const isActive = progress?.defId === t.id;
+      const locked = !unlocked && !isActive;
+      contentH += (locked ? lockedH : cardH) + objGap;
+    }
+    contentH += pad(token);
+
+    this.scroll.max = Math.max(0, contentH - (contentBottom - contentTop));
+    clampScroll(this.scroll);
+
+    beginClip(ctx, 0, contentTop, w, contentBottom - contentTop);
+    let y = contentTop - this.scroll.offset;
+    const inScroll =
+      !this.modal.open &&
+      ui.pointerY >= contentTop &&
+      ui.pointerY <= contentBottom;
+
+    // Quick Race — single interactive hero (kept as card: primary CTA)
     drawCard(ctx, { x: contentX, y, w: contentW, h: heroH }, ui);
     ctx.save();
-    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+    ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = token.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -262,61 +314,62 @@ export class CampaignScene implements Scene {
       },
     };
     drawButton(ctx, startBtn, ui);
-    handleButton(startBtn, ui);
+    if (inScroll) handleButton(startBtn, ui);
     y += heroH + pad(token, 1.5);
 
-    ctx.save();
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('Objectives', contentX, y);
-    y += token.fontBody + pad(token, 0.75);
-    ctx.restore();
+    y += drawSectionTitle(ctx, contentX, y, 'Objectives', ui);
 
-    const objH = pad(token, 6);
-    const objGap = pad(token, 0.75);
     for (const objId of state.objectives.active.slice(0, BALANCE.activeObjectives)) {
       const def = getObjectiveDef(objId);
-      drawCard(ctx, { x: contentX, y, w: contentW, h: objH }, ui);
+      drawRow(ctx, { x: contentX, y, w: contentW, h: objH }, ui);
       ctx.save();
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(def?.title ?? objId, contentX + pad(token, 1.5), y + objH * 0.35);
+      ctx.fillText(def?.title ?? objId, contentX + pad(token, 1), y + objH * 0.35);
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
-      ctx.fillText(def?.description ?? '', contentX + pad(token, 1.5), y + objH * 0.65);
-      ctx.font = `700 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillText(def?.description ?? '', contentX + pad(token, 1), y + objH * 0.68);
+      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = accent;
       ctx.textAlign = 'right';
-      ctx.fillText(`$${def?.reward ?? 0}`, contentX + contentW - pad(token, 1.5), y + objH * 0.5);
+      ctx.fillText(`$${def?.reward ?? 0}`, contentX + contentW - pad(token, 1), y + objH * 0.5);
       ctx.restore();
       y += objH + objGap;
     }
 
-    y += pad(token, 0.5);
-    ctx.save();
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.textAlign = 'left';
-    ctx.fillText('Tournaments', contentX, y);
-    y += token.fontBody + pad(token, 0.75);
-    ctx.restore();
+    y += pad(token, 0.75);
+    y += drawSectionTitle(ctx, contentX, y, 'Tournaments', ui);
 
-    const progress = this.inProgress();
-    const cardH = pad(token, 10);
-    for (const t of this.tournamentsForDiscipline()) {
+    for (const t of tournaments) {
       const rank = t.rank as RankId;
       const unlocked = state.rankUnlocked[this.discipline] >= rank;
       const isActive = progress?.defId === t.id;
       const locked = !unlocked && !isActive;
 
+      // Interactive series cards kept; locked rows stay quieter
+      if (locked) {
+        drawRow(ctx, { x: contentX, y, w: contentW, h: lockedH }, ui);
+        ctx.save();
+        ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+        ctx.fillStyle = token.disabled;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(t.name, contentX + pad(token, 1), y + lockedH * 0.5);
+        ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+        ctx.fillStyle = token.disabled;
+        ctx.textAlign = 'right';
+        ctx.fillText('Locked', contentX + contentW - pad(token, 1), y + lockedH * 0.5);
+        ctx.restore();
+        y += lockedH + objGap;
+        continue;
+      }
+
       drawCard(ctx, { x: contentX, y, w: contentW, h: cardH }, ui);
       ctx.save();
       ctx.font = `700 ${token.fontBody}px ${token.fontFamily}`;
-      ctx.fillStyle = locked ? token.disabled : token.text;
+      ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
       ctx.fillText(t.name, contentX + pad(token, 1.5), y + pad(token, 1));
@@ -327,11 +380,7 @@ export class CampaignScene implements Scene {
         contentX + pad(token, 1.5),
         y + pad(token, 1) + token.fontBody,
       );
-      if (locked) {
-        ctx.fillStyle = token.disabled;
-        ctx.textAlign = 'right';
-        ctx.fillText('🔒 Locked', contentX + contentW - pad(token, 1.5), y + cardH * 0.5);
-      } else if (isActive && progress !== null) {
+      if (isActive && progress !== null) {
         ctx.fillStyle = accent;
         ctx.textAlign = 'right';
         ctx.fillText(
@@ -342,57 +391,59 @@ export class CampaignScene implements Scene {
       }
       ctx.restore();
 
-      if (!locked) {
-        const actionY = y + cardH - pad(token, 1) - btnH;
-        if (isActive && progress !== null) {
-          const resumeBtn: ButtonDef = {
-            x: contentX + pad(token, 1.5),
-            y: actionY,
-            w: (contentW - pad(token, 4)) * 0.55,
-            h: btnH,
-            label: 'Resume',
-            primary: true,
-            onClick: () => this.startTournamentRace(),
-          };
-          const abandonBtn: ButtonDef = {
-            x: contentX + pad(token, 2) + (contentW - pad(token, 4)) * 0.55,
-            y: actionY,
-            w: (contentW - pad(token, 4)) * 0.4,
-            h: btnH,
-            label: 'Abandon',
-            onClick: () => {
-              this.modal = {
-                open: true,
-                title: 'Abandon Tournament?',
-                body: 'Progress in this series will be lost.',
-                buttons: [
-                  { x: 0, y: 0, w: 0, h: 0, label: 'Cancel', onClick: () => { this.modal.open = false; } },
-                  { x: 0, y: 0, w: 0, h: 0, label: 'Abandon', primary: true, onClick: () => { this.modal.open = false; this.abandonTournament(); } },
-                ],
-              };
-            },
-          };
-          drawButton(ctx, resumeBtn, ui);
-          drawButton(ctx, abandonBtn, ui);
+      const actionY = y + cardH - pad(token, 1) - btnH;
+      if (isActive && progress !== null) {
+        const resumeBtn: ButtonDef = {
+          x: contentX + pad(token, 1.5),
+          y: actionY,
+          w: (contentW - pad(token, 4)) * 0.55,
+          h: btnH,
+          label: 'Resume',
+          primary: true,
+          onClick: () => this.startTournamentRace(),
+        };
+        const abandonBtn: ButtonDef = {
+          x: contentX + pad(token, 2) + (contentW - pad(token, 4)) * 0.55,
+          y: actionY,
+          w: (contentW - pad(token, 4)) * 0.4,
+          h: btnH,
+          label: 'Abandon',
+          onClick: () => {
+            this.modal = {
+              open: true,
+              title: 'Abandon Tournament?',
+              body: 'Progress in this series will be lost.',
+              buttons: [
+                { x: 0, y: 0, w: 0, h: 0, label: 'Cancel', onClick: () => { this.modal.open = false; } },
+                { x: 0, y: 0, w: 0, h: 0, label: 'Abandon', primary: true, onClick: () => { this.modal.open = false; this.abandonTournament(); } },
+              ],
+            };
+          },
+        };
+        drawButton(ctx, resumeBtn, ui);
+        drawButton(ctx, abandonBtn, ui);
+        if (inScroll) {
           handleButton(resumeBtn, ui);
           handleButton(abandonBtn, ui);
-        } else if (!isActive && progress === null) {
-          const enterBtn: ButtonDef = {
-            x: contentX + contentW - pad(token, 1.5) - pad(token, 10),
-            y: actionY,
-            w: pad(token, 10),
-            h: btnH,
-            label: 'Enter',
-            primary: true,
-            onClick: () => this.openLineupPicker(t.id, t.teamSize),
-          };
-          drawButton(ctx, enterBtn, ui);
-          handleButton(enterBtn, ui);
         }
+      } else if (!isActive && progress === null) {
+        const enterBtn: ButtonDef = {
+          x: contentX + contentW - pad(token, 1.5) - pad(token, 10),
+          y: actionY,
+          w: pad(token, 10),
+          h: btnH,
+          label: 'Enter',
+          primary: true,
+          onClick: () => this.openLineupPicker(t.id, t.teamSize),
+        };
+        drawButton(ctx, enterBtn, ui);
+        if (inScroll) handleButton(enterBtn, ui);
       }
 
       y += cardH + objGap;
     }
+
+    endClip(ctx);
 
     if (this.lineupModalOpen && this.pendingTournamentId !== null) {
       const def = TOURNAMENTS.find((t) => t.id === this.pendingTournamentId);

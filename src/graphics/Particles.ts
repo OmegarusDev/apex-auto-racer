@@ -196,6 +196,17 @@ export class Particles {
   }
 
   render(ctx: CanvasRenderingContext2D, camera: CameraTransform, screenW: number, screenH: number): void {
+    this.renderGround(ctx, camera, screenW, screenH);
+    this.renderAir(ctx, camera, screenW, screenH);
+  }
+
+  /** Skids + dust — draw under cars. */
+  renderGround(
+    ctx: CanvasRenderingContext2D,
+    camera: CameraTransform,
+    screenW: number,
+    screenH: number,
+  ): void {
     const cx = screenW * 0.5;
     const cy = screenH * 0.5;
     const scale = PHYSICS.pxPerM * camera.zoom;
@@ -233,6 +244,28 @@ export class Particles {
       ctx.arc(p.x, p.y, d.size * camera.zoom * (1 + (1 - t) * 0.5), 0, Math.PI * 2);
       ctx.fill();
     }
+
+    ctx.restore();
+  }
+
+  /** Smoke + sparks — draw above cars. */
+  renderAir(
+    ctx: CanvasRenderingContext2D,
+    camera: CameraTransform,
+    screenW: number,
+    screenH: number,
+  ): void {
+    const cx = screenW * 0.5;
+    const cy = screenH * 0.5;
+    const scale = PHYSICS.pxPerM * camera.zoom;
+
+    const toScreen = (wx: number, wy: number): { x: number; y: number } => ({
+      x: cx + (wx - camera.x) * scale,
+      y: cy - (wy - camera.y) * scale,
+    });
+
+    ctx.save();
+    ctx.lineCap = 'round';
 
     for (let i = 0; i < SMOKE_CAP; i++) {
       const s = this.smoke[i];

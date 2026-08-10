@@ -3,6 +3,7 @@ import { getDiscipline } from '../data/disciplines.ts';
 import type { DisciplineDef, DisciplineId } from '../data/disciplines.ts';
 import type { Vec2 } from '../engine/types.ts';
 import type { CameraTransform } from './Camera.ts';
+import { drawSlotCarMesh, drawSlotCarShadow } from './CarMesh.ts';
 
 export const PX_PER_M = PHYSICS.pxPerM;
 
@@ -163,36 +164,16 @@ export class VectorRenderer {
     const len = PHYSICS.carLength * PX_PER_M * camera.zoom;
     const wid = PHYSICS.carWidth * PX_PER_M * camera.zoom;
 
+    // Ground shadow in screen space (unrotated) — reads as a tabletop miniature.
+    ctx.save();
+    ctx.translate(x, y);
+    drawSlotCarShadow(ctx, len, wid, isPlayer ? 0.42 : 0.34);
+    ctx.restore();
+
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(-heading);
-
-    if (isPlayer) {
-      // Cheap outline halo — avoid shadowBlur (expensive gaussian blur every car frame).
-      ctx.strokeStyle = `${color}55`;
-      ctx.lineWidth = 4 * camera.zoom;
-      roundRectPath(ctx, -len * 0.54, -wid * 0.64, len * 1.08, wid * 1.28, wid * 0.38);
-      ctx.stroke();
-      ctx.strokeStyle = `${color}aa`;
-      ctx.lineWidth = 2 * camera.zoom;
-      roundRectPath(ctx, -len * 0.52, -wid * 0.62, len * 1.04, wid * 1.24, wid * 0.35);
-      ctx.stroke();
-    }
-
-    ctx.fillStyle = color;
-    roundRectPath(ctx, -len * 0.5, -wid * 0.5, len, wid, wid * 0.22);
-    ctx.fill();
-
-    ctx.fillStyle = 'rgba(12,12,16,0.75)';
-    roundRectPath(ctx, -len * 0.08, -wid * 0.32, len * 0.38, wid * 0.64, wid * 0.12);
-    ctx.fill();
-
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.85;
-    roundRectPath(ctx, -len * 0.54, -wid * 0.08, len * 0.12, wid * 0.16, wid * 0.04);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
+    drawSlotCarMesh(ctx, { len, wid, color, isPlayer, detail: 'race' });
     ctx.restore();
   }
 
@@ -212,11 +193,13 @@ export class VectorRenderer {
 
     ctx.save();
     ctx.translate(p.x, p.y);
+    drawSlotCarShadow(ctx, len, wid, 0.16);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
     ctx.rotate(-heading);
-    ctx.globalAlpha = 0.35;
-    ctx.fillStyle = color;
-    roundRectPath(ctx, -len * 0.5, -wid * 0.5, len, wid, wid * 0.22);
-    ctx.fill();
+    drawSlotCarMesh(ctx, { len, wid, color, alpha: 0.38, detail: 'race' });
     ctx.restore();
   }
 
@@ -229,14 +212,14 @@ export class VectorRenderer {
     if (this.minimapPoints.length < 2) return;
 
     ctx.save();
-    ctx.fillStyle = 'rgba(10,10,12,0.72)';
-    ctx.strokeStyle = 'rgba(42,42,50,0.9)';
+    ctx.fillStyle = 'rgba(10,10,12,0.78)';
+    ctx.strokeStyle = 'rgba(42,42,50,0.95)';
     ctx.lineWidth = 1;
     roundRectPath(ctx, rect.x, rect.y, rect.w, rect.h, 6);
     ctx.fill();
     ctx.stroke();
 
-    const pad = 6;
+    const pad = Math.max(5, rect.w * 0.08);
     const ix = rect.x + pad;
     const iy = rect.y + pad;
     const iw = rect.w - pad * 2;
@@ -250,6 +233,8 @@ export class VectorRenderer {
       ctx.lineTo(ix + p.nx * iw, iy + p.ny * ih);
     }
     ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fill();
     ctx.strokeStyle = this.discipline?.accentDim ?? '#0e7490';
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -362,6 +347,15 @@ export class VectorRenderer {
     }
     ctx.closePath();
     ctx.fill();
+
+    // Soft asphalt rim (path still current after fill).
+    const s = this.bakeMeta?.scale ?? 1;
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = Math.max(1.5, 2.4 * s);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = Math.max(1, 1.4 * s);
+    ctx.stroke();
   }
 
   private drawKerbs(
@@ -377,37 +371,25 @@ export class VectorRenderer {
       const a = nodes[i]!;
       const b = nodes[i + 1]!;
       if (Math.abs(a.kappa) < KERB_KAPPA && Math.abs(b.kappa) < KERB_KAPPA) continue;
-
-      const stripe = Math.floor(a.s / 2) % 2 === 0;
+      // Apex-side kerbs only — cleaner Scalextric read.
+      const side = (a.kappa + b.kappa) >= 0 ? -1 : 1;
+      // Slightly longer stripe period for less noise.
+      const stripe = Math.floor(a.s / 2.6) % 2 === 0;
       ctx.fillStyle = stripe ? discipline.style.kerbA : discipline.style.kerbB;
 
-      for (const side of [-1, 1] as const) {
-        const inner = a.width * 0.5 * side;
-        const outer = (a.width * 0.5 + kerbDepth) * side;
-        const p0 = toBake(
-          a.pos.x + a.normal.x * inner,
-          a.pos.y + a.normal.y * inner,
-        );
-        const p1 = toBake(
-          b.pos.x + b.normal.x * inner,
-          b.pos.y + b.normal.y * inner,
-        );
-        const p2 = toBake(
-          b.pos.x + b.normal.x * outer,
-          b.pos.y + b.normal.y * outer,
-        );
-        const p3 = toBake(
-          a.pos.x + a.normal.x * outer,
-          a.pos.y + a.normal.y * outer,
-        );
-        ctx.beginPath();
-        ctx.moveTo(p0.x, p0.y);
-        ctx.lineTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.lineTo(p3.x, p3.y);
-        ctx.closePath();
-        ctx.fill();
-      }
+      const inner = a.width * 0.5 * side;
+      const outer = (a.width * 0.5 + kerbDepth) * side;
+      const p0 = toBake(a.pos.x + a.normal.x * inner, a.pos.y + a.normal.y * inner);
+      const p1 = toBake(b.pos.x + b.normal.x * inner, b.pos.y + b.normal.y * inner);
+      const p2 = toBake(b.pos.x + b.normal.x * outer, b.pos.y + b.normal.y * outer);
+      const p3 = toBake(a.pos.x + a.normal.x * outer, a.pos.y + a.normal.y * outer);
+      ctx.beginPath();
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.lineTo(p3.x, p3.y);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 

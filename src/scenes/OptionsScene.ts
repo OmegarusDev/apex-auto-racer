@@ -9,6 +9,7 @@ import {
   drawModal,
   handleModal,
   layoutModalButtons,
+  drawSectionTitle,
   headerHeight,
   pad,
   ensureMinTouch,
@@ -16,6 +17,7 @@ import {
   type ButtonDef,
   type ModalDef,
 } from '../ui/components';
+import { ACCENT_TRACK } from '../ui/theme';
 import {
   buildUi,
   drawBackground,
@@ -141,7 +143,7 @@ export class OptionsScene implements Scene {
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
-    const { ui, token } = buildUi(w, h, 0, '#22d3ee');
+    const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
     const vols = this.volumes();
 
     drawBackground(ctx, w, h, token);
@@ -163,6 +165,9 @@ export class OptionsScene implements Scene {
     let y = hh + token.safe.top + pad(token, 2);
     const sliderH = ensureMinTouch(pad(token, 1.5), token);
     const sliderGap = pad(token, 4);
+
+    y += drawSectionTitle(ctx, contentX, y, 'Audio', ui);
+    y += pad(token, 1.5);
 
     const sliders: SliderDef[] = [
       {
@@ -218,6 +223,8 @@ export class OptionsScene implements Scene {
     }
 
     y += sliderGap * 5 + pad(token, 3);
+    y += drawSectionTitle(ctx, contentX, y, 'Save Data', ui);
+    y += pad(token, 1);
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const resetBtn: ButtonDef = {
       x: contentX,

@@ -11,6 +11,7 @@ import {
   drawHeader,
   handleHeader,
   drawStatBar,
+  drawSectionTitle,
   drawModal,
   handleModal,
   layoutModalButtons,
@@ -22,6 +23,7 @@ import {
   type ButtonDef,
   type ModalDef,
 } from '../ui/components';
+import { ACCENT_TRACK } from '../ui/theme';
 import {
   buildUi,
   drawBackground,
@@ -138,7 +140,7 @@ export class TeamManagementScene implements Scene {
     this.rerollCount += 1;
     this.freeAgents = generateFreeAgents(g.state, this.rerollCount);
     g.autosave();
-    this.toasts.push('Free agents refreshed', '#22d3ee');
+    this.toasts.push('Free agents refreshed', ACCENT_TRACK);
   }
 
   private drawDriverCard(
@@ -270,7 +272,7 @@ export class TeamManagementScene implements Scene {
     const state = g.state;
     if (state === null) return;
 
-    const { ui, token } = buildUi(w, h, 0, '#22d3ee');
+    const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
     drawBackground(ctx, w, h, token);
 
     const hh = headerHeight(token);
@@ -290,12 +292,13 @@ export class TeamManagementScene implements Scene {
     const contentW = w - pad(token, 4) - token.safe.left - token.safe.right;
     let y = hh + token.safe.top + pad(token);
 
-    ctx.save();
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.textAlign = 'left';
-    ctx.fillText(`Roster (${state.roster.length}/${BALANCE.rosterCap})`, contentX, y);
-    y += token.fontBody + pad(token, 0.75);
+    y += drawSectionTitle(
+      ctx,
+      contentX,
+      y,
+      `Roster (${state.roster.length}/${BALANCE.rosterCap})`,
+      ui,
+    );
 
     for (const driver of state.roster) {
       const cardH = this.drawDriverCard(ctx, driver, contentX, y, contentW, ui, () => this.releaseDriver(driver));
@@ -303,9 +306,7 @@ export class TeamManagementScene implements Scene {
     }
 
     y += pad(token);
-    ctx.fillStyle = token.textMuted;
-    ctx.fillText('Free Agents', contentX, y);
-    y += token.fontBody + pad(token, 0.75);
+    y += drawSectionTitle(ctx, contentX, y, 'Free Agents', ui);
 
     for (const agent of this.freeAgents) {
       const agentCardH = this.drawAgentCard(ctx, agent, contentX, y, contentW, ui, state);
@@ -323,8 +324,6 @@ export class TeamManagementScene implements Scene {
     };
     drawButton(ctx, rerollBtn, ui);
     handleButton(rerollBtn, ui);
-
-    ctx.restore();
 
     handleHeader(header, ui);
     if (this.modal.open) layoutModalButtons(this.modal, ui);

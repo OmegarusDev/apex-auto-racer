@@ -99,6 +99,7 @@ export class RaceScene implements Scene {
   private ghostCarId: string | null = null;
   private ghostTrace: GhostTrace | null = null;
   private lastDt = 1 / 60;
+  private animTime = 0;
   private prevCarWallHits = new Map<string, number>();
   private enterError: string | null = null;
   /** Results dynamic import failed after finish — Escape/Back should leave to Campaign. */
@@ -246,6 +247,7 @@ export class RaceScene implements Scene {
     }
 
     this.lastDt = dt;
+    this.animTime += dt;
 
     if (this.paused) {
       this.handlePauseInput();
@@ -308,6 +310,9 @@ export class RaceScene implements Scene {
       }
     }
 
+    // Ground FX under cars — tabletop depth.
+    this.particles.renderGround(ctx, cam, w, h);
+
     const cars = director.cars;
     const teamCount = director.config.format.teamCount;
     const playerIdx = cars.findIndex((c) => c.isPlayerControlled);
@@ -318,13 +323,13 @@ export class RaceScene implements Scene {
       this.renderer.drawCar(ctx, car, color, car.isPlayerControlled, cam, w, h);
     }
 
-    this.particles.render(ctx, cam, w, h);
+    this.particles.renderAir(ctx, cam, w, h);
     this.particles.renderRain(ctx, w, h);
 
     this.drawHud(ctx, w, h, token, accent, director, cars, playerIdx);
     this.drawPedalTints(ctx, w, h, token);
     this.drawCountdownBanner(ctx, w, h, token, director.countdown);
-    if (director.rain) this.drawRainBanner(ctx, w, h, token);
+    if (director.rain) this.drawRainChip(ctx, w, h, token);
     this.drawTicker(ctx, w, h, token);
     this.drawOnboardingHint(ctx, w, h, token, accent);
 
@@ -571,6 +576,7 @@ export class RaceScene implements Scene {
             y: sample.pos.y + sample.normal.y * player.l,
           },
           player.v,
+          sample.tangent,
         );
       }
     }
@@ -859,17 +865,20 @@ export class RaceScene implements Scene {
       ctx.fillText(`Tyre ${Math.round(player.tyreTemp * 100)}%`, hudX + pad(token, 7), hudY);
       hudY += token.fontBody + pad(token, 0.6);
 
-      // Crowd / entertainment meter — under telemetry, clear of trait chip / pause.
+      // Crowd meter — labeled, compact.
       const barW = pad(token, 12);
       const barH = Math.max(4, pad(token, 0.45));
       const hype = this.director?.entertainmentSnapshot.hype ?? 0;
+      ctx.fillStyle = token.textDim;
+      ctx.font = `600 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('CROWD', hudX, hudY);
+      hudY += pad(token, 0.35);
+      ctx.textBaseline = 'top';
       ctx.fillStyle = token.card;
       ctx.fillRect(hudX, hudY, barW, barH);
       ctx.fillStyle = accent;
       ctx.fillRect(hudX, hudY, barW * Math.max(0.02, hype), barH);
-      ctx.fillStyle = token.textDim;
-      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillText('Crowd', hudX + barW + pad(token, 0.5), hudY + barH);
     }
 
     if (leadDriver !== undefined) {
@@ -975,26 +984,44 @@ export class RaceScene implements Scene {
   ): void {
     if (phase === null) return;
     const label = phase === 'go' ? 'GO!' : String(phase);
+    const pulse =
+      phase === 'go'
+        ? 1.08
+        : 1 + 0.04 * Math.sin(this.animTime * 10);
     ctx.save();
-    ctx.font = `900 ${token.fontDisplay * 2}px ${token.fontFamily}`;
+    ctx.fillStyle = 'rgba(10,10,12,0.28)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.translate(w * 0.5, h * 0.38);
+    ctx.scale(pulse, pulse);
+    ctx.font = `900 ${token.fontDisplay * 2.2}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = phase === 'go' ? token.success : token.text;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.globalAlpha = phase === 'go' ? 0.95 : 0.85;
-    ctx.fillText(label, w * 0.5, h * 0.38);
+    ctx.globalAlpha = phase === 'go' ? 0.98 : 0.9;
+    ctx.fillText(label, 0, 0);
     ctx.restore();
   }
 
-  private drawRainBanner(ctx: CanvasRenderingContext2D, w: number, _h: number, token: ThemeTokens): void {
+  private drawRainChip(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
+    const chipW = pad(token, 7);
+    const chipH = pad(token, 2.6);
+    const x = w - token.safe.right - pad(token) - chipW;
+    const y = token.safe.top + pad(token) + pad(token, 11);
     ctx.save();
-    ctx.fillStyle = 'rgba(56,189,248,0.18)';
-    ctx.fillRect(0, token.safe.top, w, pad(token, 3));
-    ctx.font = `700 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.fillStyle = 'rgba(14, 28, 40, 0.82)';
+    ctx.strokeStyle = 'rgba(125, 211, 252, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, chipW, chipH, pad(token, 0.4));
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = '#7dd3fc';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('RAIN', w * 0.5, token.safe.top + pad(token, 1.5));
+    ctx.fillText('RAIN', x + chipW * 0.5, y + chipH * 0.5);
     ctx.restore();
+    void h;
   }
 
   private drawTicker(ctx: CanvasRenderingContext2D, _w: number, h: number, token: ThemeTokens): void {

@@ -29,6 +29,7 @@ import {
   hitRect,
   ensureMinTouch,
 } from '../ui/components';
+import { drawSlotCarMesh } from '../graphics/CarMesh';
 
 export const DISCIPLINE_ORDER: DisciplineId[] = ['track', 'street', 'rally'];
 
@@ -243,6 +244,20 @@ export function launchRace(config: RaceLaunchConfig, toasts: ToastManager): void
 export function drawBackground(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
   ctx.fillStyle = token.bg;
   ctx.fillRect(0, 0, w, h);
+  // Quiet Title-grade atmosphere — menus share product space, not a flat void.
+  ctx.save();
+  const g = ctx.createRadialGradient(w * 0.5, h * 0.28, 0, w * 0.5, h * 0.4, Math.max(w, h) * 0.75);
+  g.addColorStop(0, 'rgba(34, 28, 22, 0.28)');
+  g.addColorStop(0.45, 'rgba(18, 18, 24, 0.12)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, w, h);
+  const bottom = ctx.createLinearGradient(0, h * 0.7, 0, h);
+  bottom.addColorStop(0, 'rgba(0,0,0,0)');
+  bottom.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = bottom;
+  ctx.fillRect(0, h * 0.7, w, h * 0.3);
+  ctx.restore();
 }
 
 const ACCENT_RIBBON = '#22d3ee';
@@ -836,40 +851,24 @@ export function drawTopDownCar(
   const def = getDiscipline(discipline);
   ctx.save();
   ctx.translate(cx, cy);
-
+  // Soft asphalt pad under the hero — grounds the faux-3D mesh.
   ctx.fillStyle = def.style.asphalt;
   ctx.beginPath();
-  ctx.ellipse(0, 0, w * 0.55, h * 0.45, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, h * 0.06, w * 0.55, h * 0.42, 0, 0, Math.PI * 2);
   ctx.fill();
-
-  ctx.fillStyle = accent;
-  ctx.beginPath();
-  ctx.roundRect(-w * 0.22, -h * 0.38, w * 0.44, h * 0.76, w * 0.08);
-  ctx.fill();
-
-  ctx.fillStyle = '#111118';
-  ctx.beginPath();
-  ctx.roundRect(-w * 0.16, -h * 0.28, w * 0.32, h * 0.18, 4);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.roundRect(-w * 0.14, h * 0.08, w * 0.28, h * 0.14, 4);
-  ctx.fill();
-
-  ctx.fillStyle = '#0a0a0c';
-  const wheelW = w * 0.12;
-  const wheelH = h * 0.16;
-  ctx.fillRect(-w * 0.3, -h * 0.32, wheelW, wheelH);
-  ctx.fillRect(w * 0.18, -h * 0.32, wheelW, wheelH);
-  ctx.fillRect(-w * 0.3, h * 0.16, wheelW, wheelH);
-  ctx.fillRect(w * 0.18, h * 0.16, wheelW, wheelH);
-
-  ctx.strokeStyle = `${accent}88`;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(0, -h * 0.38);
-  ctx.lineTo(0, h * 0.38);
-  ctx.stroke();
-
+  // Nose up for garage read (matches race heading convention).
+  ctx.rotate(-Math.PI / 2);
+  drawSlotCarMesh(
+    ctx,
+    {
+      len: Math.max(h * 0.72, w * 0.9),
+      wid: Math.max(w * 0.42, h * 0.28),
+      color: accent,
+      isPlayer: true,
+      detail: 'hero',
+    },
+    true,
+  );
   ctx.restore();
 }
 

@@ -8,6 +8,7 @@ import {
   handleHeader,
   drawStatBar,
   drawRadarChart,
+  drawSectionTitle,
   headerHeight,
   pad,
   ensureMinTouch,
@@ -108,11 +109,11 @@ export class GarageScene implements Scene {
     const navY = contentTop + pad(token, 2);
 
     ctx.save();
-    ctx.font = `${token.fontTitle}px ${token.fontFamily}`;
+    ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = accent;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillText(disciplineLabel(discipline), w * 0.5, navY);
+    ctx.fillText(disciplineLabel(discipline).toUpperCase(), w * 0.5, navY);
     ctx.restore();
 
     const leftX = pad(token) + token.safe.left;
@@ -138,10 +139,19 @@ export class GarageScene implements Scene {
     }
     ctx.restore();
 
-    const carW = Math.min(w * 0.35, pad(token, 18));
-    const carH = carW * 1.2;
+    const carW = Math.min(w * 0.42, pad(token, 22));
+    const carH = carW * 1.25;
     const carCx = w * 0.5;
-    const carCy = contentTop + pad(token, 8) + carH * 0.5;
+    const carCy = contentTop + pad(token, 7) + carH * 0.5;
+    // Soft accent wash behind hero car
+    ctx.save();
+    const glow = ctx.createRadialGradient(carCx, carCy, 0, carCx, carCy, carW * 0.85);
+    glow.addColorStop(0, `${accent}28`);
+    glow.addColorStop(0.55, `${accent}0a`);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(carCx - carW, carCy - carH * 0.7, carW * 2, carH * 1.4);
+    ctx.restore();
     drawTopDownCar(ctx, carCx, carCy, carW, carH, accent, discipline);
 
     const radarR = Math.min(w, h) * 0.14;
@@ -176,7 +186,9 @@ export class GarageScene implements Scene {
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const btnGap = pad(token, 0.75);
     const btnW = Math.min(condBarW, pad(token, 22));
-    let btnY = condY + statBarHeight(token) + pad(token, 3);
+    let btnY = condY + statBarHeight(token) + pad(token, 2);
+    btnY += drawSectionTitle(ctx, pad(token, 2) + token.safe.left, btnY, 'Actions', ui);
+    btnY += pad(token, 0.5);
 
     const campaignBtn: ButtonDef = {
       x: (w - btnW) * 0.5,

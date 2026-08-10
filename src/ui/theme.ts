@@ -31,6 +31,8 @@ export interface ThemeTokens {
   /** Hero wordmark size — viewport-aware, for title/brand surfaces. */
   fontHero: number;
   fontFamily: string;
+  /** Condensed stack for titles / headers (Title-grade). */
+  fontDisplayFamily: string;
   bg: string;
   bgElevated: string;
   card: string;
@@ -116,6 +118,8 @@ export function createTheme(w: number, h: number): ThemeTokens {
     fontHero,
     fontFamily:
       '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    fontDisplayFamily:
+      '"Arial Narrow", "Helvetica Neue Condensed", "Roboto Condensed", Impact, "Arial Black", sans-serif',
     bg: '#0a0a0c',
     bgElevated: '#121216',
     card: '#16161a',

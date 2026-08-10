@@ -60,11 +60,21 @@ export class Camera {
     this.targetZoom = clamp(fitZoom, PHYSICS.zoomMin, PHYSICS.zoomMax);
   }
 
-  /** Follow a single car; zoom scales with speed. */
-  setFollowTarget(worldPos: Vec2, speedMs: number): void {
+  /**
+   * Follow a car with look-ahead along track tangent (meters).
+   * Keeps the view oriented toward where the race is going.
+   */
+  setFollowTarget(worldPos: Vec2, speedMs: number, lookAhead?: Vec2): void {
     this.mode = 'follow';
-    this.targetX = worldPos.x;
-    this.targetY = worldPos.y;
+    const ahead = clamp(speedMs * 0.22, 4, 18);
+    if (lookAhead !== undefined) {
+      const len = Math.hypot(lookAhead.x, lookAhead.y) || 1;
+      this.targetX = worldPos.x + (lookAhead.x / len) * ahead;
+      this.targetY = worldPos.y + (lookAhead.y / len) * ahead;
+    } else {
+      this.targetX = worldPos.x;
+      this.targetY = worldPos.y;
+    }
     this.targetZoom = clamp(1.15 - 0.5 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
   }
 

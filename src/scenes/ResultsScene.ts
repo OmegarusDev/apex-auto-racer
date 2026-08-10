@@ -10,7 +10,8 @@ import {
   handleButton,
   drawHeader,
   handleHeader,
-  drawCard,
+  drawRow,
+  drawSectionTitle,
   drawDriverSpendPanel,
   handleDriverSpendPanel,
   drawUpgradePanel,
@@ -237,8 +238,7 @@ export class ResultsScene implements Scene {
     let y = hh + token.safe.top + pad(token);
 
     if (this.phase === 'podium' || this.phase === 'done') {
-      this.drawPodium(ctx, contentX, y, contentW, ui);
-      y += pad(token, 16);
+      y += this.drawPodium(ctx, contentX, y, contentW, ui) + pad(token, 1.5);
     }
 
     if ((this.phase === 'standings' || this.phase === 'done') && this.tournamentMode) {
@@ -326,14 +326,45 @@ export class ResultsScene implements Scene {
   ): number {
     const { token, accent } = ui;
     const top3 = [...this.payload.finishers].sort((a, b) => a.position - b.position).slice(0, 3);
-    const h = pad(token, 14);
-    drawCard(ctx, { x, y, w, h }, ui);
+    const h = pad(token, 16);
+    const place = this.payload.playerPosition;
+    const won = place === 1;
 
     ctx.save();
-    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
-    ctx.fillStyle = token.text;
+    // Place number — display font, winner gets accent + scale
+    const placeSize = won ? token.fontDisplay * 1.35 : token.fontDisplay;
+    ctx.font = `800 ${placeSize}px ${token.fontDisplayFamily}`;
+    ctx.fillStyle = won ? accent : token.text;
     ctx.textAlign = 'center';
-    ctx.fillText(`P${this.payload.playerPosition}`, x + w * 0.5, y + pad(token, 1.5));
+    ctx.textBaseline = 'top';
+    ctx.fillText(`P${place}`, x + w * 0.5, y + pad(token, 0.5));
+
+    if (won) {
+      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      ctx.fillStyle = accent;
+      ctx.globalAlpha = 0.85;
+      ctx.fillText('WINNER', x + w * 0.5, y + pad(token, 0.5) + placeSize + pad(token, 0.25));
+      ctx.globalAlpha = 1;
+    }
+
+    const bonusY =
+      y +
+      pad(token, 0.5) +
+      placeSize +
+      (won ? token.fontCaption + pad(token, 0.5) : pad(token, 0.5));
+    if (this.payload.handsOffBonus > 0) {
+      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.success;
+      ctx.fillText(
+        `Hands-off bonus: +$${this.payload.handsOffBonus} (${Math.round(this.payload.handsOffRatio * 100)}% idle)`,
+        x + w * 0.5,
+        bonusY,
+      );
+    } else if (this.payload.entertainmentBonus > 0) {
+      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillStyle = token.success;
+      ctx.fillText(`Crowd bonus: +$${this.payload.entertainmentBonus}`, x + w * 0.5, bonusY);
+    }
 
     const positions = [1, 0, 2];
     const podiumW = w / 3;
@@ -341,29 +372,23 @@ export class ResultsScene implements Scene {
       const finisher = top3[positions[i]!];
       if (finisher === undefined) continue;
       const px = x + i * podiumW + podiumW * 0.5;
-      const barH = pad(token, 4 + (positions[i] === 0 ? 4 : positions[i] === 1 ? 2 : 0));
-      ctx.fillStyle = finisher.isPlayer ? accent : token.bgElevated;
-      ctx.fillRect(px - podiumW * 0.3, y + h - pad(token) - barH, podiumW * 0.6, barH);
+      const isFirst = positions[i] === 0;
+      const barH = pad(token, 3.5 + (isFirst ? 4.5 : positions[i] === 1 ? 2 : 0));
+      const barW = podiumW * (isFirst ? 0.62 : 0.52);
+      ctx.fillStyle = finisher.isPlayer ? accent : isFirst ? `${accent}55` : token.bgElevated;
+      ctx.fillRect(px - barW * 0.5, y + h - pad(token) - barH, barW, barH);
+      // Place numeral on bar
+      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      ctx.fillStyle = finisher.isPlayer || isFirst ? token.bg : token.textMuted;
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String((positions[i] ?? 0) + 1), px, y + h - pad(token) - barH * 0.5);
       ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = token.text;
-      ctx.fillText(finisher.name.split(' ')[0] ?? finisher.name, px, y + h - pad(token) - barH - pad(token, 0.5));
-    }
-
-    if (this.payload.handsOffBonus > 0) {
-      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = token.success;
+      ctx.fillStyle = isFirst ? token.text : token.textMuted;
+      ctx.textBaseline = 'alphabetic';
       ctx.fillText(
-        `Hands-off bonus: +$${this.payload.handsOffBonus} (${Math.round(this.payload.handsOffRatio * 100)}% idle)`,
-        x + w * 0.5,
-        y + pad(token, 1.5) + token.fontTitle + pad(token, 0.5),
-      );
-    } else if (this.payload.entertainmentBonus > 0) {
-      ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = token.success;
-      ctx.fillText(
-        `Crowd bonus: +$${this.payload.entertainmentBonus}`,
-        x + w * 0.5,
-        y + pad(token, 1.5) + token.fontTitle + pad(token, 0.5),
+        finisher.name.split(' ')[0] ?? finisher.name,
+        px,
+        y + h - pad(token) - barH - pad(token, 0.5),
       );
     }
     ctx.restore();
@@ -378,28 +403,28 @@ export class ResultsScene implements Scene {
     ui: ReturnType<typeof buildUi>['ui'],
   ): number {
     const { token } = ui;
-    const rows = this.payload.standings.length;
-    const h = pad(token, 2) + token.fontBody + rows * pad(token, 4);
-    drawCard(ctx, { x, y, w, h }, ui);
-    ctx.save();
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.textAlign = 'left';
-    ctx.fillText('Championship Standings', x + pad(token, 1.5), y + pad(token, 1));
-    let rowY = y + pad(token, 1) + token.fontBody + pad(token, 0.75);
+    y += drawSectionTitle(ctx, x, y, 'Championship Standings', ui);
     const sorted = [...this.payload.standings].sort((a, b) => b.points - a.points);
+    const rowH = pad(token, 4);
     for (let i = 0; i < sorted.length; i++) {
       const entry = sorted[i]!;
-      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-      ctx.fillStyle = entry.teamId === 0 ? ui.accent : token.text;
-      ctx.fillText(`${i + 1}. ${entry.name}`, x + pad(token, 1.5), rowY);
-      ctx.textAlign = 'right';
-      ctx.fillText(`${entry.points} pts`, x + w - pad(token, 1.5), rowY);
+      const isPlayer = entry.teamId === 0;
+      drawRow(ctx, { x, y, w, h: rowH }, ui, { hovered: isPlayer });
+      ctx.save();
+      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      ctx.fillStyle = isPlayer ? ui.accent : token.textDim;
       ctx.textAlign = 'left';
-      rowY += pad(token, 4);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`${i + 1}`, x + pad(token, 1), y + rowH * 0.5);
+      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+      ctx.fillStyle = isPlayer ? ui.accent : token.text;
+      ctx.fillText(entry.name, x + pad(token, 4), y + rowH * 0.5);
+      ctx.textAlign = 'right';
+      ctx.fillText(`${entry.points} pts`, x + w - pad(token, 1), y + rowH * 0.5);
+      ctx.restore();
+      y += rowH;
     }
-    ctx.restore();
-    return y + h + pad(token, 1.5);
+    return y + pad(token, 1.5);
   }
 
   private drawPayout(
@@ -420,31 +445,34 @@ export class ResultsScene implements Scene {
       { label: 'Tournament', value: p.tournament },
     ].filter((row) => row.value > 0);
 
-    const h = pad(token, 2) + token.fontBody + lines.length * token.fontBody * 1.4 + token.fontTitle;
-    drawCard(ctx, { x, y, w, h }, ui);
-    ctx.save();
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.textAlign = 'left';
-    ctx.fillText('Payout', x + pad(token, 1.5), y + pad(token, 1));
-    let ly = y + pad(token, 1) + token.fontBody + pad(token, 0.75);
+    y += drawSectionTitle(ctx, x, y, 'Payout', ui);
+    const rowH = token.fontBody * 1.55;
     for (const row of lines) {
-      ctx.fillStyle = token.text;
-      ctx.fillText(row.label, x + pad(token, 1.5), ly);
+      drawRow(ctx, { x, y, w, h: rowH }, ui);
+      ctx.save();
+      ctx.font = `500 ${token.fontBody}px ${token.fontFamily}`;
+      ctx.fillStyle = token.textMuted;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(row.label, x + pad(token, 1), y + rowH * 0.5);
       ctx.textAlign = 'right';
       ctx.fillStyle = ui.accent;
-      ctx.fillText(`+$${row.value}`, x + w - pad(token, 1.5), ly);
-      ctx.textAlign = 'left';
-      ly += token.fontBody * 1.4;
+      ctx.fillText(`+$${row.value}`, x + w - pad(token, 1), y + rowH * 0.5);
+      ctx.restore();
+      y += rowH;
     }
-    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
+    const totalH = token.fontTitle + pad(token, 1);
+    ctx.save();
+    ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = token.text;
-    ctx.fillText('Total', x + pad(token, 1.5), ly);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Total', x + pad(token, 1), y + totalH * 0.5);
     ctx.textAlign = 'right';
     ctx.fillStyle = token.success;
-    ctx.fillText(`$${p.total}`, x + w - pad(token, 1.5), ly);
+    ctx.fillText(`$${p.total}`, x + w - pad(token, 1), y + totalH * 0.5);
     ctx.restore();
-    return y + h + pad(token, 1.5);
+    return y + totalH + pad(token, 1.5);
   }
 
   private drawXpSection(

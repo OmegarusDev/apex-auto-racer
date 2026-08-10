@@ -11,6 +11,8 @@ import {
   handleHeader,
   drawStatBar,
   drawRadarChart,
+  drawSectionTitle,
+  drawRow,
   headerHeight,
   pad,
   ensureMinTouch,
@@ -91,6 +93,7 @@ export class TuningScene implements Scene {
 
     const radarR = portrait ? Math.min(contentW * 0.35, pad(token, 10)) : pad(token, 8);
     const radarX = portrait ? contentX + (contentW - radarR * 2) * 0.5 : contentX;
+    y += drawSectionTitle(ctx, contentX, y, 'Performance', ui);
     drawRadarChart(
       ctx,
       { x: radarX, y, radius: radarR, values: vehicleRadarValues(this.discipline, vehicle) },
@@ -98,6 +101,7 @@ export class TuningScene implements Scene {
     );
     y += radarR * 2 + pad(token, 1.5);
 
+    y += drawSectionTitle(ctx, contentX, y, 'Condition', ui);
     drawStatBar(
       ctx,
       {
@@ -132,24 +136,22 @@ export class TuningScene implements Scene {
     handleButton(repairBtn, ui);
     y += btnH + pad(token, 1.5);
 
+    y += drawSectionTitle(ctx, contentX, y, 'Parts', ui);
+
     for (const part of PARTS) {
       const tier = vehicle.partTiers[part.id] ?? 0;
       const nextTier = tier + 1;
       const cost = partCost(part.baseCost, nextTier);
       const atMax = tier >= BALANCE.maxPartTier;
 
-      ctx.save();
-      ctx.strokeStyle = token.cardStroke;
-      ctx.beginPath();
-      ctx.moveTo(contentX, y + rowH);
-      ctx.lineTo(contentX + contentW, y + rowH);
-      ctx.stroke();
+      drawRow(ctx, { x: contentX, y, w: contentW, h: rowH }, ui);
 
+      ctx.save();
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(part.name, contentX, y + rowH * 0.5);
+      ctx.fillText(part.name, contentX + pad(token, 0.5), y + rowH * 0.5);
 
       const pipR = pad(token, 0.4);
       let pipX = contentX + pad(token, 10);

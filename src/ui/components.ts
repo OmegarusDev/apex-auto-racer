@@ -196,8 +196,15 @@ function roundRectPath(
   ctx.closePath();
 }
 
-function setFont(ctx: CanvasRenderingContext2D, token: ThemeTokens, size: number, weight = '600'): void {
-  ctx.font = `${weight} ${size}px ${token.fontFamily}`;
+function setFont(
+  ctx: CanvasRenderingContext2D,
+  token: ThemeTokens,
+  size: number,
+  weight = '600',
+  display = false,
+): void {
+  const family = display ? token.fontDisplayFamily : token.fontFamily;
+  ctx.font = `${weight} ${size}px ${family}`;
 }
 
 function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
@@ -267,6 +274,84 @@ export function drawCard(ctx: CanvasRenderingContext2D, card: CardDef, ui: UiCon
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.restore();
+}
+
+/** Quiet list row — no full card chrome. */
+export function drawRow(
+  ctx: CanvasRenderingContext2D,
+  row: CardDef,
+  ui: UiContext,
+  opts: { hovered?: boolean; divider?: boolean } = {},
+): void {
+  const { token } = ui;
+  ctx.save();
+  if (opts.hovered) {
+    ctx.fillStyle = token.bgElevated;
+    ctx.fillRect(row.x, row.y, row.w, row.h);
+  }
+  if (opts.divider !== false) {
+    ctx.strokeStyle = token.cardStroke;
+    ctx.globalAlpha = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(row.x + pad(token, 0.5), row.y + row.h);
+    ctx.lineTo(row.x + row.w - pad(token, 0.5), row.y + row.h);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
+export function drawSectionTitle(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  label: string,
+  ui: UiContext,
+): number {
+  const { token, accent } = ui;
+  ctx.save();
+  setFont(ctx, token, token.fontCaption, '700', true);
+  ctx.fillStyle = token.textMuted;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(label.toUpperCase(), x, y);
+  const tw = ctx.measureText(label.toUpperCase()).width;
+  ctx.fillStyle = accent;
+  ctx.globalAlpha = 0.7;
+  ctx.fillRect(x + tw + pad(token, 0.75), y + token.fontCaption * 0.45, pad(token, 3), 1.5);
+  ctx.restore();
+  return token.fontCaption + pad(token, 0.75);
+}
+
+export interface ScrollState {
+  offset: number;
+  max: number;
+}
+
+export function clampScroll(state: ScrollState): void {
+  state.offset = Math.max(0, Math.min(state.max, state.offset));
+}
+
+export function beginClip(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+}
+
+export function endClip(ctx: CanvasRenderingContext2D): void {
+  ctx.restore();
+}
+
+export function wheelScroll(state: ScrollState, deltaY: number, page = 48): void {
+  state.offset += deltaY > 0 ? page * 0.35 : -page * 0.35;
+  clampScroll(state);
 }
 
 // ── StatBar ─────────────────────────────────────────────────────────────────
@@ -640,11 +725,11 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
   ctx.save();
   ctx.fillStyle = token.bgElevated;
   ctx.fillRect(header.x, header.y, header.w, header.h);
-  ctx.strokeStyle = token.cardStroke;
-  ctx.beginPath();
-  ctx.moveTo(header.x, header.y + header.h);
-  ctx.lineTo(header.x + header.w, header.y + header.h);
-  ctx.stroke();
+  // Accent hairline — brand continuity past Title
+  ctx.fillStyle = accent;
+  ctx.globalAlpha = 0.85;
+  ctx.fillRect(header.x, header.y + header.h - 2, header.w, 2);
+  ctx.globalAlpha = 1;
 
   let titleX = header.x + pad(token, 1.5);
 
@@ -661,7 +746,7 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
     titleX = backBtn.x + backBtn.w + pad(token, 0.75);
   }
 
-  setFont(ctx, token, token.fontTitle, '700');
+  setFont(ctx, token, token.fontTitle, '700', true);
   ctx.fillStyle = token.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';

@@ -45,7 +45,7 @@ const dayPalettes = {
   groove: 'rgba(0,0,0,0.45)',
   grooveHighlight: 'rgba(255,255,255,0.07)',
   bevel: 'rgba(255,255,255,0.05)',
-  nightBg: '#0a0a0c',
+  nightBg: '#0b0d0c',
   nightWash: 'rgba(0,0,0,0)',
   wetSheen: 'rgba(140,170,200,0.05)',
 } as const;
@@ -74,9 +74,9 @@ export function buildTrackPalette(
     nightBg: mode.nightBg,
     nightWash: mode.nightWash,
     wetSheen: rain ? mode.wetSheen : 'rgba(0,0,0,0)',
-    startLight: '#f8fafc',
-    startDark: '#111114',
-    gridDash: 'rgba(244,244,245,0.45)',
+    startLight: '#f2efe6',
+    startDark: '#0b0d0c',
+    gridDash: 'rgba(242,239,230,0.45)',
   };
 }
 

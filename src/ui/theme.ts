@@ -4,9 +4,9 @@ import { BRAND_BODY_FONT, BRAND_DISPLAY_FONT } from './brand';
 /** Reference viewport short edge for token scaling. */
 const BASE_MIN = 720;
 
-export const ACCENT_TRACK = '#22d3ee';
-export const ACCENT_STREET = '#fbbf24';
-export const ACCENT_RALLY = '#fb923c';
+export const ACCENT_TRACK = '#f0c41a';
+export const ACCENT_STREET = '#ff5e3a';
+export const ACCENT_RALLY = '#5ecf8e';
 
 export const ACCENTS: Record<DisciplineId, string> = {
   track: ACCENT_TRACK,
@@ -120,18 +120,18 @@ export function createTheme(w: number, h: number): ThemeTokens {
     fontHero,
     fontFamily: BRAND_BODY_FONT,
     fontDisplayFamily: BRAND_DISPLAY_FONT,
-    bg: '#0a0a0c',
-    bgElevated: '#121216',
-    card: '#16161a',
-    cardStroke: '#2a2a32',
-    text: '#f4f4f5',
-    textMuted: '#a1a1aa',
-    textDim: '#71717a',
-    disabled: '#52525b',
-    disabledBg: '#1c1c22',
-    overlay: 'rgba(0,0,0,0.72)',
-    danger: '#f87171',
-    success: '#4ade80',
+    bg: '#0b0d0c',
+    bgElevated: '#141816',
+    card: '#1a1f1c',
+    cardStroke: '#2e3630',
+    text: '#f2efe6',
+    textMuted: '#9a9f96',
+    textDim: '#6b7168',
+    disabled: '#525852',
+    disabledBg: '#161a17',
+    overlay: 'rgba(4,6,5,0.78)',
+    danger: '#ff6b5a',
+    success: '#5ecf8e',
     safe: readSafeAreaInsets(),
   };
   cachedThemeW = w;

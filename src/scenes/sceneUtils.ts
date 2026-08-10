@@ -30,8 +30,7 @@ import {
   ensureMinTouch,
 } from '../ui/components';
 import { drawSlotCarMesh } from '../graphics/CarMesh';
-import { drawBrandAtmosphere } from '../ui/brand';
-import { BRAND_DISPLAY_FONT } from '../ui/brand';
+import { BRAND_DISPLAY_FONT, BRAND_SIGNAL, drawBrandAtmosphere } from '../ui/brand';
 
 export const DISCIPLINE_ORDER: DisciplineId[] = ['track', 'street', 'rally'];
 
@@ -265,7 +264,7 @@ export function drawBackground(
   drawBrandAtmosphere(ctx, w, h, token, accent);
 }
 
-const ACCENT_RIBBON = '#22d3ee';
+const ACCENT_RIBBON = BRAND_SIGNAL;
 const TITLE_FONT = BRAND_DISPLAY_FONT;
 
 export interface PlanarPoint {
@@ -506,9 +505,9 @@ export function drawRibbonTrack(
     ctx.lineTo(r1.sx, r1.sy);
     ctx.lineTo(r0.sx, r0.sy);
     ctx.closePath();
-    ctx.fillStyle = `rgba(22,22,28,${0.75 * a})`;
+    ctx.fillStyle = `rgba(18,22,20,${0.82 * a})`;
     ctx.fill();
-    ctx.strokeStyle = `rgba(40,40,48,${0.9 * a})`;
+    ctx.strokeStyle = `rgba(46,54,48,${0.95 * a})`;
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -518,7 +517,7 @@ export function drawRibbonTrack(
     ctx.beginPath();
     ctx.moveTo(c0.sx, c0.sy);
     ctx.lineTo(c1.sx, c1.sy);
-    ctx.strokeStyle = `rgba(34,211,238,${0.22 * a})`;
+    ctx.strokeStyle = `rgba(240,196,26,${0.28 * a})`;
     ctx.lineWidth = Math.max(1, pad(token, 0.15));
     ctx.setLineDash([pad(token, 0.9), pad(token, 0.7)]);
     ctx.lineDashOffset = -time * 28;
@@ -542,8 +541,8 @@ export function drawRibbonTrack(
       ctx.lineTo(p.sx, p.sy);
     }
   }
-  ctx.strokeStyle = 'rgba(244,244,245,0.14)';
-  ctx.lineWidth = 1.25;
+  ctx.strokeStyle = 'rgba(242,239,230,0.18)';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
   // Car marker along centerline
@@ -559,13 +558,13 @@ export function drawRibbonTrack(
     const r = Math.max(2.5, pad(token, 0.55));
     ctx.beginPath();
     ctx.arc(mx, my, r + 2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fill();
     ctx.beginPath();
     ctx.arc(mx, my, r, 0, Math.PI * 2);
     ctx.fillStyle = ACCENT_RIBBON;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(244,244,245,0.55)';
+    ctx.strokeStyle = 'rgba(242,239,230,0.65)';
     ctx.lineWidth = 1;
     ctx.stroke();
   }
@@ -582,18 +581,19 @@ export function drawTitleAtmosphere(
   fadeTop = h * 0.55,
 ): void {
   ctx.save();
-  const g = ctx.createRadialGradient(w * 0.5, h * 0.42, 0, w * 0.5, h * 0.45, Math.max(w, h) * 0.72);
-  g.addColorStop(0, 'rgba(28, 22, 18, 0.55)');
-  g.addColorStop(0.45, 'rgba(14, 14, 18, 0.35)');
+  const g = ctx.createRadialGradient(w * 0.48, h * 0.28, 0, w * 0.5, h * 0.4, Math.max(w, h) * 0.78);
+  g.addColorStop(0, 'rgba(240, 196, 26, 0.12)');
+  g.addColorStop(0.35, 'rgba(28, 36, 30, 0.4)');
   g.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, w, h);
 
-  // Slow sweeping light streak (motorsport garage / night race feel)
-  const sweep = ((time * 0.08) % 1) * (w + h);
-  const streak = ctx.createLinearGradient(sweep - h * 0.4, 0, sweep + h * 0.2, h);
+  // Slow sweeping garage fluorescent
+  const sweep = ((time * 0.07) % 1) * (w + h * 0.5);
+  const streak = ctx.createLinearGradient(sweep - h * 0.5, 0, sweep + h * 0.15, h);
   streak.addColorStop(0, 'rgba(255,255,255,0)');
-  streak.addColorStop(0.5, 'rgba(255, 196, 120, 0.03)');
+  streak.addColorStop(0.48, 'rgba(240, 196, 26, 0.05)');
+  streak.addColorStop(0.52, 'rgba(242, 239, 230, 0.04)');
   streak.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = streak;
   ctx.fillRect(0, 0, w, h);
@@ -601,9 +601,9 @@ export function drawTitleAtmosphere(
   // Bottom fade so menu stays readable — start just above the menu column.
   const top = Math.max(h * 0.35, Math.min(h * 0.72, fadeTop));
   const fade = ctx.createLinearGradient(0, top, 0, h);
-  fade.addColorStop(0, 'rgba(10,10,12,0)');
-  fade.addColorStop(0.55, 'rgba(10,10,12,0.55)');
-  fade.addColorStop(1, 'rgba(10,10,12,0.92)');
+  fade.addColorStop(0, 'rgba(11,13,12,0)');
+  fade.addColorStop(0.45, 'rgba(11,13,12,0.5)');
+  fade.addColorStop(1, 'rgba(11,13,12,0.94)');
   ctx.fillStyle = fade;
   ctx.fillRect(0, top, w, h - top);
   ctx.restore();
@@ -642,30 +642,30 @@ export function drawTitleLogo(
   ctx.textBaseline = 'top';
 
   // Subtle depth plate behind wordmark
-  ctx.font = `900 ${apexSize}px ${TITLE_FONT}`;
+  ctx.font = `400 ${apexSize}px ${TITLE_FONT}`;
   const apexW = ctx.measureText('APEX').width;
   const blockW = Math.max(apexW, apexSize * 2.4);
   const left = align === 'left' ? cx : cx - blockW * 0.5;
-  ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.fillRect(left - pad(token, 0.5), y - pad(token, 0.3), blockW + pad(token, 1), apexSize + subSize + gap * 3);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(left - pad(token, 0.6), y - pad(token, 0.35), blockW + pad(token, 1.2), apexSize + subSize + gap * 3.2);
 
   ctx.fillStyle = token.text;
   ctx.fillText('APEX', cx, y);
 
-  const ruleY = y + apexSize + gap * 0.35;
-  const ruleW = blockW * 0.92;
+  const ruleY = y + apexSize + gap * 0.2;
+  const ruleW = blockW * 0.95;
   const ruleX = align === 'left' ? cx : cx - ruleW * 0.5;
   ctx.fillStyle = ACCENT_RIBBON;
-  ctx.fillRect(ruleX, ruleY, ruleW * 0.38, ruleH);
-  ctx.fillStyle = 'rgba(244,244,245,0.35)';
-  ctx.fillRect(ruleX + ruleW * 0.4, ruleY, ruleW * 0.6, ruleH);
+  ctx.fillRect(ruleX, ruleY, ruleW * 0.42, ruleH);
+  ctx.fillStyle = 'rgba(242,239,230,0.28)';
+  ctx.fillRect(ruleX + ruleW * 0.44, ruleY, ruleW * 0.56, ruleH);
 
-  ctx.font = `700 ${subSize}px ${TITLE_FONT}`;
+  ctx.font = `400 ${subSize}px ${TITLE_FONT}`;
   ctx.fillStyle = ACCENT_RIBBON;
-  const subY = ruleY + ruleH + gap * 0.7;
+  const subY = ruleY + ruleH + gap * 0.85;
   // Tracked wordmark (letterSpacing when available; else manual advances)
   const sub = 'AUTO-RACER';
-  const spacing = Math.max(1, apexSize * 0.04);
+  const spacing = Math.max(2, apexSize * 0.055);
   const ctxLs = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
   if (typeof ctxLs.letterSpacing === 'string') {
     ctxLs.letterSpacing = `${spacing}px`;
@@ -677,10 +677,10 @@ export function drawTitleLogo(
     for (let i = 0; i < sub.length; i++) total += ctx.measureText(sub[i]!).width + (i > 0 ? spacing : 0);
     let x = align === 'left' ? cx : cx - total * 0.5;
     for (let i = 0; i < sub.length; i++) {
-      const ch = sub[i]!;
-      ctx.fillText(ch, x, subY);
-      x += ctx.measureText(ch).width + spacing;
+      ctx.fillText(sub[i]!, x, subY);
+      x += ctx.measureText(sub[i]!).width + spacing;
     }
+    ctx.textAlign = align;
   }
 
   ctx.restore();

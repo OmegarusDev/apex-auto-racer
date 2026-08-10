@@ -973,7 +973,8 @@ export class RaceScene implements Scene {
     };
 
     ctx.save();
-    ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
+    // Position plate — big timing-board numeral
+    ctx.font = `400 ${Math.max(token.fontDisplay * 1.15, token.fontTitle * 1.4)}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = token.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -984,22 +985,31 @@ export class RaceScene implements Scene {
     const telemetryMaxW = Math.max(pad(token, 14), chrome.minimap.x - hudX - pad(token));
 
     if (standing !== undefined) {
+      ctx.fillStyle = accent;
       ctx.fillText(`P${standing.position}`, hudX, hudY);
-      hudY += token.fontTitle + pad(token, 0.2);
+      // Hairline under position
+      const pw = ctx.measureText(`P${standing.position}`).width;
+      ctx.fillStyle = `${accent}88`;
+      ctx.fillRect(hudX, hudY + token.fontDisplay * 1.05, Math.min(pw, pad(token, 6)), 3);
+      hudY += token.fontDisplay * 1.15 + pad(token, 0.35);
     }
 
     ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
     ctx.fillStyle = token.textMuted;
     const lap = player?.lap ?? 0;
     ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
-    hudY += token.fontBody + pad(token, 0.4);
+    hudY += token.fontBody + pad(token, 0.45);
 
     if (player !== undefined) {
       const speedKmh = Math.round(player.v * 3.6);
+      ctx.fillStyle = token.text;
+      ctx.font = `400 ${token.fontTitle}px ${token.fontDisplayFamily}`;
+      ctx.fillText(`${speedKmh}`, hudX, hudY);
+      const sw = ctx.measureText(`${speedKmh}`).width;
+      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = accent;
-      ctx.font = `700 ${token.fontBody}px ${token.fontDisplayFamily}`;
-      ctx.fillText(`${speedKmh} km/h`, hudX, hudY);
-      hudY += token.fontBody + pad(token, 0.3);
+      ctx.fillText(' KM/H', hudX + sw + 4, hudY + token.fontTitle * 0.35);
+      hudY += token.fontTitle + pad(token, 0.35);
       hudY += drawPegMeter(
         ctx,
         hudX,
@@ -1029,24 +1039,26 @@ export class RaceScene implements Scene {
       const chipH = pad(token, playerIntent !== undefined ? 5.2 : 3.5);
       const chipX = hudX;
       const chipY = chrome.deckTop - pad(token, 0.75) - chipH;
-      ctx.fillStyle = 'rgba(12,12,16,0.82)';
-      ctx.strokeStyle = `${accent}88`;
-      ctx.lineWidth = 1.25;
+      ctx.fillStyle = 'rgba(11,13,12,0.88)';
+      ctx.strokeStyle = `${accent}99`;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.roundRect(chipX, chipY, chipW, chipH, pad(token, 0.5));
+      ctx.roundRect(chipX, chipY, chipW, chipH, Math.max(2, pad(token, 0.25)));
       ctx.fill();
       ctx.stroke();
+      ctx.fillStyle = accent;
+      ctx.fillRect(chipX, chipY, Math.max(3, pad(token, 0.35)), chipH);
       ctx.fillStyle = token.text;
       ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
       ctx.textBaseline = 'top';
-      ctx.fillText(leadDriver.name, chipX + pad(token, 0.75), chipY + pad(token, 0.5));
+      ctx.fillText(leadDriver.name, chipX + pad(token, 0.9), chipY + pad(token, 0.5));
       ctx.fillStyle = token.textDim;
-      ctx.fillText(trait.name, chipX + pad(token, 0.75), chipY + pad(token, 1.5));
+      ctx.fillText(trait.name, chipX + pad(token, 0.9), chipY + pad(token, 1.5));
       if (playerIntent !== undefined) {
         ctx.fillStyle = accent;
         ctx.fillText(
           intentHudLabel(playerIntent.tag),
-          chipX + pad(token, 0.75),
+          chipX + pad(token, 0.9),
           chipY + pad(token, 2.6),
         );
       }
@@ -1087,79 +1099,106 @@ export class RaceScene implements Scene {
     const shifting =
       this.g.input.isKeyDown('ShiftLeft') || this.g.input.isKeyDown('ShiftRight');
 
-    const roundPad = (
+    const paintPad = (
       r: { x: number; y: number; w: number; h: number },
-      fill: string,
-      stroke: string,
-      pressed: boolean,
+      idleFill: string,
+      activeRgb: string,
+      amount: number,
+      label: string,
+      labelColor: string,
     ): void => {
+      const pressed = amount > 0.08;
+      const radius = Math.max(2, pad(token, 0.3));
       ctx.save();
-      ctx.fillStyle = fill;
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = pressed ? 2.25 : 1.25;
+      // Base plate
+      ctx.fillStyle = idleFill;
       ctx.beginPath();
-      ctx.roundRect(r.x, r.y, r.w, r.h, pad(token, 0.85));
+      ctx.roundRect(r.x, r.y, r.w, r.h, radius);
       ctx.fill();
-      ctx.stroke();
+
+      // Pressure fill from bottom
       if (pressed) {
-        const g = ctx.createLinearGradient(r.x, r.y, r.x, r.y + r.h);
-        g.addColorStop(0, 'rgba(255,255,255,0.1)');
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g;
+        const fillH = r.h * Math.min(1, 0.18 + amount * 0.82);
+        const gy = ctx.createLinearGradient(r.x, r.y + r.h - fillH, r.x, r.y + r.h);
+        gy.addColorStop(0, `rgba(${activeRgb},0.15)`);
+        gy.addColorStop(1, `rgba(${activeRgb},0.55)`);
+        ctx.fillStyle = gy;
+        ctx.beginPath();
+        ctx.roundRect(r.x, r.y + r.h - fillH, r.w, fillH, radius);
         ctx.fill();
+      }
+
+      // Bevel + stroke
+      ctx.strokeStyle = pressed ? `rgba(${activeRgb},0.95)` : `rgba(${activeRgb},0.35)`;
+      ctx.lineWidth = pressed ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.roundRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, radius);
+      ctx.stroke();
+
+      // Top highlight rail
+      ctx.fillStyle = pressed ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)';
+      ctx.fillRect(r.x + radius, r.y + 2, r.w - radius * 2, 2);
+
+      ctx.font = `400 ${Math.max(token.fontCaption, Math.min(r.h * 0.22, token.fontTitle))}px ${token.fontDisplayFamily}`;
+      ctx.fillStyle = labelColor;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const ctxLs = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+      if (typeof ctxLs.letterSpacing === 'string') {
+        ctxLs.letterSpacing = '0.18em';
+        ctx.fillText(label, r.x + r.w * 0.5, r.y + r.h * 0.52);
+        ctxLs.letterSpacing = '0px';
+      } else {
+        ctx.fillText(label, r.x + r.w * 0.5, r.y + r.h * 0.52);
       }
       ctx.restore();
     };
 
-    // Soft deck plate behind pads.
+    // Soft deck plate behind pads — metal strip read.
     ctx.save();
-    ctx.fillStyle = 'rgba(8,8,12,0.45)';
+    const deckGrad = ctx.createLinearGradient(0, chrome.deckTop, 0, h);
+    deckGrad.addColorStop(0, 'rgba(8,10,9,0.2)');
+    deckGrad.addColorStop(0.25, 'rgba(8,10,9,0.72)');
+    deckGrad.addColorStop(1, 'rgba(6,8,7,0.92)');
+    ctx.fillStyle = deckGrad;
     ctx.fillRect(0, chrome.deckTop, w, h - chrome.deckTop);
-    const fade = ctx.createLinearGradient(0, chrome.deckTop - 24, 0, chrome.deckTop);
-    fade.addColorStop(0, 'rgba(8,8,12,0)');
-    fade.addColorStop(1, 'rgba(8,8,12,0.45)');
+    const fade = ctx.createLinearGradient(0, chrome.deckTop - 28, 0, chrome.deckTop);
+    fade.addColorStop(0, 'rgba(8,10,9,0)');
+    fade.addColorStop(1, 'rgba(8,10,9,0.55)');
     ctx.fillStyle = fade;
-    ctx.fillRect(0, chrome.deckTop - 24, w, 24);
+    ctx.fillRect(0, chrome.deckTop - 28, w, 28);
+    // Signal strip along deck top
+    ctx.fillStyle = `${accent}55`;
+    ctx.fillRect(0, chrome.deckTop, w, 2);
     ctx.restore();
 
-    roundPad(
+    paintPad(
       chrome.brake,
-      brake > 0.08 ? `rgba(248,113,113,${0.22 + brake * 0.28})` : 'rgba(28,16,18,0.72)',
-      brake > 0.08 ? 'rgba(248,113,113,0.85)' : 'rgba(248,113,113,0.35)',
-      brake > 0.08,
+      'rgba(28,14,14,0.78)',
+      '255,107,90',
+      brake,
+      'BRAKE',
+      brake > 0.08 ? token.text : 'rgba(255,107,90,0.7)',
     );
-    roundPad(
+    paintPad(
       chrome.gas,
-      throttle > 0.08 ? `rgba(74,222,128,${0.2 + throttle * 0.28})` : 'rgba(14,28,20,0.72)',
-      throttle > 0.08 ? 'rgba(74,222,128,0.85)' : `${accent}66`,
-      throttle > 0.08,
+      'rgba(12,28,18,0.78)',
+      '94,207,142',
+      throttle,
+      'GAS',
+      throttle > 0.08 ? token.text : 'rgba(94,207,142,0.7)',
     );
 
-    const shiftPulse = this.shiftCueArmed ? 0.12 + 0.08 * Math.sin(this.animTime * 10) : 0;
-    roundPad(
+    const shiftPulse = this.shiftCueArmed ? 0.15 + 0.1 * Math.sin(this.animTime * 10) : 0;
+    const shiftAmt = shifting ? 1 : shiftPulse > 0 ? 0.35 + shiftPulse : 0;
+    paintPad(
       chrome.shift,
-      shifting
-        ? 'rgba(250,204,21,0.32)'
-        : `rgba(40,34,12,${0.55 + shiftPulse})`,
-      this.shiftCueArmed || shifting ? 'rgba(250,204,21,0.9)' : 'rgba(250,204,21,0.35)',
-      shifting,
-    );
-
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `800 ${token.fontCaption}px ${token.fontDisplayFamily}`;
-    ctx.fillStyle = brake > 0.08 ? token.text : token.textMuted;
-    ctx.fillText('BRAKE', chrome.brake.x + chrome.brake.w * 0.5, chrome.brake.y + chrome.brake.h * 0.5);
-    ctx.fillStyle = throttle > 0.08 ? token.text : token.textMuted;
-    ctx.fillText('GAS', chrome.gas.x + chrome.gas.w * 0.5, chrome.gas.y + chrome.gas.h * 0.5);
-    ctx.fillStyle = shifting || this.shiftCueArmed ? '#facc15' : token.textDim;
-    ctx.fillText(
+      `rgba(36,30,10,${0.7 + shiftPulse})`,
+      '240,196,26',
+      shiftAmt,
       this.shiftCueArmed ? 'EARLY' : 'AUTO',
-      chrome.shift.x + chrome.shift.w * 0.5,
-      chrome.shift.y + chrome.shift.h * 0.5,
+      shifting || this.shiftCueArmed ? '#f0c41a' : token.textDim,
     );
-    ctx.restore();
   }
 
   private drawCountdownBanner(
@@ -1176,11 +1215,11 @@ export class RaceScene implements Scene {
         ? 1.08
         : 1 + 0.04 * Math.sin(this.animTime * 10);
     ctx.save();
-    ctx.fillStyle = 'rgba(10,10,12,0.28)';
+    ctx.fillStyle = 'rgba(10,12,11,0.35)';
     ctx.fillRect(0, 0, w, h);
     ctx.translate(w * 0.5, h * 0.38);
     ctx.scale(pulse, pulse);
-    ctx.font = `900 ${Math.min(token.fontDisplay * 2.2, h * 0.16)}px ${token.fontDisplayFamily}`;
+    ctx.font = `400 ${Math.min(token.fontDisplay * 2.4, h * 0.18)}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = phase === 'go' ? token.success : token.text;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1196,18 +1235,18 @@ export class RaceScene implements Scene {
     const x = w - token.safe.right - pad(token) - chipW;
     const y = chrome.pause.y + chrome.pause.h + pad(token, 0.5);
     ctx.save();
-    ctx.fillStyle = 'rgba(14, 28, 40, 0.82)';
-    ctx.strokeStyle = 'rgba(125, 211, 252, 0.45)';
-    ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(12, 22, 18, 0.88)';
+    ctx.strokeStyle = 'rgba(94, 207, 142, 0.45)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.roundRect(x, y, chipW, chipH, pad(token, 0.4));
+    ctx.roundRect(x, y, chipW, chipH, Math.max(2, pad(token, 0.25)));
     ctx.fill();
     ctx.stroke();
-    ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
-    ctx.fillStyle = '#7dd3fc';
+    ctx.font = `400 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+    ctx.fillStyle = '#5ecf8e';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('RAIN', x + chipW * 0.5, y + chipH * 0.5);
+    ctx.fillText('RAIN', x + chipW * 0.5, y + chipH * 0.52);
     ctx.restore();
   }
 
@@ -1220,18 +1259,18 @@ export class RaceScene implements Scene {
     const x = w - token.safe.right - pad(token) - chipW;
     const y = chrome.pause.y + chrome.pause.h + pad(token, 0.5) + rainOffset;
     ctx.save();
-    ctx.fillStyle = 'rgba(12, 16, 32, 0.88)';
-    ctx.strokeStyle = 'rgba(147, 197, 253, 0.4)';
-    ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(14, 16, 14, 0.9)';
+    ctx.strokeStyle = 'rgba(240, 196, 26, 0.4)';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.roundRect(x, y, chipW, chipH, pad(token, 0.4));
+    ctx.roundRect(x, y, chipW, chipH, Math.max(2, pad(token, 0.25)));
     ctx.fill();
     ctx.stroke();
-    ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
-    ctx.fillStyle = '#93c5fd';
+    ctx.font = `400 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+    ctx.fillStyle = '#f0c41a';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('NIGHT', x + chipW * 0.5, y + chipH * 0.5);
+    ctx.fillText('NIGHT', x + chipW * 0.5, y + chipH * 0.52);
     ctx.restore();
   }
 

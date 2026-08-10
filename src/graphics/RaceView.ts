@@ -190,7 +190,7 @@ export class RaceView {
       const nx = (car.worldX - b.minX) / spanX;
       const ny = 1 - (car.worldY - b.minY) / spanY;
       const dotR = i === playerIndex ? 4 : 3;
-      ctx.fillStyle = i === playerIndex ? (this.palette?.accent ?? '#22d3ee') : '#a1a1aa';
+      ctx.fillStyle = i === playerIndex ? (this.palette?.accent ?? '#f0c41a') : '#9a9f96';
       ctx.beginPath();
       ctx.arc(ix + ox + nx * drawW, iy + oy + ny * drawH, dotR, 0, Math.PI * 2);
       ctx.fill();

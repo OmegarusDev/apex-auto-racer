@@ -54,18 +54,18 @@ export function drawPegMeter(
   ctx.textAlign = 'right';
   const pct = Math.round(Math.min(1.35, ratio) * 100);
   ctx.fillStyle =
-    ratio >= 1 ? token.danger : ratio >= 0.9 ? '#fbbf24' : token.textMuted;
+    ratio >= 1 ? token.danger : ratio >= 0.9 ? '#f0c41a' : token.textMuted;
   ctx.fillText(`${pct}%`, x + w, y);
 
   const trackY = y + labelH;
   ctx.fillStyle = token.card;
   ctx.fillRect(x, trackY, w, barH);
   const fill = Math.max(0.02, Math.min(1, ratio));
-  ctx.fillStyle = ratio >= 1 ? token.danger : ratio >= 0.9 ? '#fbbf24' : accent;
+  ctx.fillStyle = ratio >= 1 ? token.danger : ratio >= 0.9 ? '#f0c41a' : accent;
   ctx.fillRect(x, trackY, w * Math.min(1, fill), barH);
   // Soft overshoot tick
   if (ratio > 1) {
-    ctx.fillStyle = 'rgba(248,113,113,0.45)';
+    ctx.fillStyle = 'rgba(255,107,90,0.45)';
     ctx.fillRect(x + w - 2, trackY - 1, 2, barH + 2);
   }
   ctx.restore();

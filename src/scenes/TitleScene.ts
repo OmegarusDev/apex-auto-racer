@@ -14,6 +14,7 @@ import {
   type ButtonDef,
   type ModalDef,
 } from '../ui/components';
+import { BRAND_SIGNAL } from '../ui/brand';
 import {
   buildUi,
   computeTitleLayout,
@@ -93,7 +94,7 @@ export class TitleScene implements Scene {
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
-    const { ui, token } = buildUi(w, h, 0, '#22d3ee');
+    const { ui, token } = buildUi(w, h, 0, BRAND_SIGNAL);
     const layout = computeTitleLayout(w, h, token);
 
     drawBackground(ctx, w, h, token);
@@ -116,14 +117,17 @@ export class TitleScene implements Scene {
       const s = layout.menuScrim;
       ctx.save();
       const scrim = ctx.createLinearGradient(s.x, s.y, s.x, s.y + s.h);
-      scrim.addColorStop(0, 'rgba(10,10,12,0.15)');
-      scrim.addColorStop(0.35, 'rgba(10,10,12,0.55)');
-      scrim.addColorStop(1, 'rgba(10,10,12,0.78)');
+      scrim.addColorStop(0, 'rgba(11,13,12,0.1)');
+      scrim.addColorStop(0.3, 'rgba(11,13,12,0.55)');
+      scrim.addColorStop(1, 'rgba(11,13,12,0.82)');
       ctx.fillStyle = scrim;
-      const r = pad(token, 1);
+      const r = Math.max(2, pad(token, 0.35));
       ctx.beginPath();
       ctx.roundRect(s.x, s.y, s.w, s.h, r);
       ctx.fill();
+      // Left signal rail on menu column
+      ctx.fillStyle = BRAND_SIGNAL;
+      ctx.fillRect(s.x, s.y + pad(token, 0.5), Math.max(3, pad(token, 0.35)), s.h - pad(token));
       ctx.restore();
     }
 
@@ -206,7 +210,7 @@ export class TitleScene implements Scene {
       onClick: () => {
         const state = ensureQuickRaceState();
         if (state.roster.length < 1) {
-          this.toasts.push('Need a driver on the roster', '#22d3ee');
+          this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
           return;
         }
         const seedMaterial =

@@ -214,36 +214,54 @@ function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
 export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: UiContext): void {
   const { token, accent } = ui;
   const hovered = !btn.disabled && hitRect(ui.pointerX, ui.pointerY, btn.x, btn.y, btn.w, btn.h);
-  const r = pad(token, 0.75);
+  // Sharp pit-plate corners — not soft app cards.
+  const r = Math.max(2, pad(token, 0.25));
+  const rail = Math.max(3, pad(token, 0.35));
 
   ctx.save();
   if (btn.disabled) {
     ctx.fillStyle = token.disabledBg;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
-    ctx.strokeStyle = token.cardStroke;
-    ctx.lineWidth = 1;
-    ctx.stroke();
     ctx.fillStyle = token.disabled;
   } else if (btn.primary) {
-    ctx.fillStyle = hovered ? accent : `${accent}cc`;
+    const fill = hovered ? accent : accent;
+    ctx.fillStyle = fill;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
+    // Inner top bevel
+    ctx.fillStyle = hovered ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)';
+    ctx.fillRect(btn.x + r, btn.y + 1, btn.w - r * 2, Math.max(2, btn.h * 0.08));
+    if (hovered) {
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
+      ctx.fill();
+      ctx.fillStyle = fill;
+      roundRectPath(ctx, btn.x + 1, btn.y + 1, btn.w - 2, btn.h - 2, Math.max(1, r - 1));
+      ctx.fill();
+    }
     ctx.fillStyle = token.bg;
   } else {
-    ctx.fillStyle = hovered ? token.bgElevated : token.card;
+    ctx.fillStyle = hovered ? '#1f2622' : token.card;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
-    ctx.strokeStyle = token.cardStroke;
+    // Left signal rail
+    ctx.fillStyle = hovered ? accent : `${accent}99`;
+    ctx.fillRect(btn.x, btn.y, rail, btn.h);
+    ctx.strokeStyle = hovered ? `${accent}55` : token.cardStroke;
     ctx.lineWidth = 1;
+    roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.stroke();
     ctx.fillStyle = token.text;
   }
 
-  setFont(ctx, token, token.fontBody);
+  const label = truncateText(ctx, btn.label.toUpperCase(), btn.w - pad(token) - rail);
+  setFont(ctx, token, token.fontBody, btn.primary ? '700' : '600', true);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(truncateText(ctx, btn.label, btn.w - pad(token)), btn.x + btn.w * 0.5, btn.y + btn.h * 0.5);
+  // Bebas Neue sits high — nudge baseline slightly for optical center.
+  const ty = btn.y + btn.h * 0.52;
+  ctx.fillText(label, btn.x + btn.w * 0.5 + (btn.primary ? 0 : rail * 0.25), ty);
   ctx.restore();
 }
 
@@ -257,8 +275,8 @@ export function handleButton(btn: ButtonDef, ui: UiContext): boolean {
 // ── Card ────────────────────────────────────────────────────────────────────
 
 export function drawCard(ctx: CanvasRenderingContext2D, card: CardDef, ui: UiContext): void {
-  const { token } = ui;
-  const r = pad(token, 0.75);
+  const { token, accent } = ui;
+  const r = Math.max(2, pad(token, 0.3));
   ctx.save();
   ctx.fillStyle = token.card;
   roundRectPath(ctx, card.x, card.y, card.w, card.h, r);
@@ -266,6 +284,9 @@ export function drawCard(ctx: CanvasRenderingContext2D, card: CardDef, ui: UiCon
   ctx.strokeStyle = token.cardStroke;
   ctx.lineWidth = 1;
   ctx.stroke();
+  // Top signal hairline
+  ctx.fillStyle = `${accent}66`;
+  ctx.fillRect(card.x + r, card.y, card.w - r * 2, 2);
   ctx.restore();
 }
 
@@ -843,12 +864,17 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
   const safeR = token.safe.right;
 
   ctx.save();
-  ctx.fillStyle = token.bgElevated;
+  // Translucent strip — reads as pit wall, not a solid app bar.
+  const bar = ctx.createLinearGradient(0, header.y, 0, header.y + header.h);
+  bar.addColorStop(0, 'rgba(11,13,12,0.55)');
+  bar.addColorStop(0.7, 'rgba(14,18,16,0.82)');
+  bar.addColorStop(1, 'rgba(14,18,16,0.92)');
+  ctx.fillStyle = bar;
   ctx.fillRect(header.x, header.y, header.w, header.h);
   ctx.fillStyle = accent;
-  ctx.globalAlpha = 0.85;
-  ctx.fillRect(header.x, header.y + header.h - 2, header.w, 2);
-  ctx.globalAlpha = 1;
+  ctx.fillRect(header.x, header.y + header.h - 3, header.w, 3);
+  ctx.fillStyle = 'rgba(242,239,230,0.06)';
+  ctx.fillRect(header.x, header.y + header.h - 1, header.w, 1);
 
   let titleX = header.x + pad(token, 1.5) + safeL;
   let rightEdge = header.x + header.w - pad(token, 0.75) - safeR;
@@ -892,11 +918,11 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
   }
 
   const titleMax = Math.max(pad(token, 8), rightEdge - titleX - pad(token, 0.5));
-  setFont(ctx, token, token.fontTitle, '700', true);
+  setFont(ctx, token, token.fontTitle, '400', true);
   ctx.fillStyle = token.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(truncateText(ctx, header.title, titleMax), titleX, midY);
+  ctx.fillText(truncateText(ctx, header.title.toUpperCase(), titleMax), titleX, midY);
 
   ctx.restore();
 }

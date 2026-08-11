@@ -40,6 +40,7 @@ import { raceChromeLayout, type RaceChromeLayout } from '../graphics/hud/raceChr
 import { buildCarFrame as buildCarFrameDto } from './race/frameBus';
 import { setupCountdownCamera, updateCamera as updateRaceCamera } from './race/raceCamera';
 import { updateCountdownAudio as bridgeCountdownAudio } from './race/audioBridge';
+import { drawPedalDeck as drawPedalDeckChrome } from './race/RaceChrome';
 
 import {
   drawButton,
@@ -112,6 +113,7 @@ export class RaceScene implements Scene {
   private prevPlayerWallHits = 0;
   private prevPlayerSpins = 0;
   private prevPlayerDeslots = 0;
+  private prevClutchKickRem = 0;
   private prevCarSamples = new Map<string, { x: number; y: number; s: number; l: number }>();
   private prevCarDeslots = new Map<string, number>();
   private ticker: TickerLine[] = [];
@@ -148,6 +150,19 @@ export class RaceScene implements Scene {
     this.launch = config;
   }
 
+  private resolveLeadDriver() {
+    const id = this.launch.leadDriverId;
+    const override = this.launch.playerDriversOverride?.find((d) => d.id === id);
+    if (override !== undefined) return override;
+    return this.g.state?.roster.find((d) => d.id === id);
+  }
+
+  private resolvePlayerVehicle() {
+    return (
+      this.launch.playerVehicleOverride ?? this.g.state?.vehicles[this.launch.discipline]
+    );
+  }
+
   enter(): void {
     const state = this.g.state;
     if (state === null) {
@@ -177,7 +192,8 @@ export class RaceScene implements Scene {
       this.nearDeslotFxCd = 0;
       this.shiftCueArmed = false;
 
-      const vehicle = state.vehicles[this.launch.discipline];
+      const vehicle =
+        this.launch.playerVehicleOverride ?? state.vehicles[this.launch.discipline];
       if (vehicle === undefined) {
         throw new Error(`Missing vehicle for ${this.launch.discipline}`);
       }
@@ -248,7 +264,6 @@ export class RaceScene implements Scene {
     this.g.input.setUiCapture(false);
     this.g.input.setRaceChrome(null);
     this.view.clearWorld();
-    document.querySelector<HTMLCanvasElement>('#world')?.classList.remove('is-live');
     if (this.g.audio.silenceRace) {
       this.g.audio.silenceRace();
     } else {
@@ -320,10 +335,20 @@ export class RaceScene implements Scene {
 
     if (this.g.input.brake > 0.1) this.stats.playerBrakeUsed = true;
 
+    const upEdge = this.g.input.consumeUpshift();
+    const playerCar = director.cars.find((c) => c.isPlayerControlled);
+    const armed =
+      playerCar !== undefined &&
+      (playerCar.driftState ||
+        playerCar.driftArmed ||
+        playerCar.gripUsage > 0.85 ||
+        Math.abs(playerCar.slipAngle) > 0.1);
+    const clutchKick = this.launch.discipline === 'street' && upEdge && armed;
     director.setPlayerPedals(
       this.g.input.throttle,
       this.g.input.brake,
-      this.g.input.consumeUpshift(),
+      clutchKick ? false : upEdge,
+      clutchKick,
     );
     director.update(dt);
 
@@ -388,11 +413,12 @@ export class RaceScene implements Scene {
     this.view.draw(ctx, frame);
 
     // Pedal deck under HUD so pause/minimap stay readable.
-    this.drawPedalDeck(ctx, w, h, token, accent);
+    const playerCar = director.cars.find((c) => c.isPlayerControlled);
+    this.drawPedalDeck(ctx, w, h, token, accent, playerCar);
     this.drawHud(ctx, w, h, token, accent, director, cars, playerIdx);
-    const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
+    const leadDriver = this.resolveLeadDriver();
     const traitName = leadDriver !== undefined ? getTrait(leadDriver.trait).name : 'Driver';
-    const vehicle = this.g.state?.vehicles[this.launch.discipline];
+    const vehicle = this.resolvePlayerVehicle();
     drawPreRaceCard(ctx, w, h, token, accent, {
       discipline: this.launch.discipline,
       laps: director.config.laps,
@@ -658,12 +684,22 @@ export class RaceScene implements Scene {
         onKerb: player.onKerb,
         discipline: this.launch.discipline,
         active: true,
+        drifting: player.driftState,
+        clutchKick: player.clutchKickRemaining > 0,
       });
 
       if (player.lastShiftKind !== null) {
         this.g.audio.playShift(player.lastShiftKind);
         player.lastShiftKind = null;
       }
+
+      if (
+        player.clutchKickRemaining > 0.2 &&
+        this.prevClutchKickRem <= 0.05
+      ) {
+        this.g.audio.playClutchKick();
+      }
+      this.prevClutchKickRem = player.clutchKickRemaining;
 
       if (player.wallHits > this.prevPlayerWallHits) {
         this.g.audio.playCrash();
@@ -717,7 +753,7 @@ export class RaceScene implements Scene {
         }
       }
 
-      const lead = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
+      const lead = this.resolveLeadDriver();
       const skill = lead?.skill ?? 40;
       if (
         !this.g.state!.onboarding.shownAuthorityHint &&
@@ -734,6 +770,33 @@ export class RaceScene implements Scene {
         this.hintText === null
       ) {
         this.showHint('SHIFT to upshift — hold a gear until you pull the next', 'shownShiftCue');
+      }
+
+      // Teach stack: trail brake → then Street kick (after shift cue seen).
+      if (
+        !this.g.state!.onboarding.shownTrailHint &&
+        this.g.state!.onboarding.shownBrakeHint &&
+        this.hintText === null &&
+        player.brake > 0.35 &&
+        player.v > 10 &&
+        Math.abs(sampleKappaAt(director.track.nodes, player.s)) >= PHYSICS.grooveKappaMin
+      ) {
+        this.showHint(
+          'Trail: ease brake into the peg — keep a little gas through the bend',
+          'shownTrailHint',
+        );
+      }
+      if (
+        this.launch.discipline === 'street' &&
+        !this.g.state!.onboarding.shownKickHint &&
+        this.g.state!.onboarding.shownShiftCue &&
+        this.hintText === null &&
+        (player.driftArmed || player.gripUsage > 0.88)
+      ) {
+        this.showHint(
+          'Street: SHIFT while armed/latched = clutch-kick — hold throttle to keep the slide',
+          'shownKickHint',
+        );
       }
 
       this.stats.playerWallHits = player.wallHits;
@@ -783,13 +846,22 @@ export class RaceScene implements Scene {
         });
       }
       if (scrubbing && car.v > 6) {
-        this.fxImpulses.push({
-          kind: 'dust',
-          x: px,
-          y: py,
-          index: tick,
-          intensity: Math.max(car.gripUsage, 1.1),
-        });
+        const disc = this.launch.discipline;
+        // Rally slide → dust; Street drift latch → tyre smoke; Track → light dust.
+        if (disc === 'street' && (car.driftState || Math.abs(car.slipAngle) > 0.18)) {
+          this.fxImpulses.push({ kind: 'smoke', x: px, y: py, index: tick });
+        } else if (disc === 'rally' || car.slotMode === 'deslot') {
+          this.fxImpulses.push({
+            kind: 'dust',
+            x: px,
+            y: py,
+            index: tick,
+            intensity: Math.max(car.gripUsage, disc === 'rally' ? 1.25 : 1.05),
+          });
+        }
+      }
+      if (car.clutchKickRemaining > 0.15) {
+        this.fxImpulses.push({ kind: 'smoke', x: px, y: py, index: tick + 40 });
       }
       if (car.spinRemaining > 0) {
         this.fxImpulses.push({ kind: 'smoke', x: px, y: py, index: tick });
@@ -895,7 +967,10 @@ export class RaceScene implements Scene {
     if (state === null) return;
 
     if (!state.onboarding.shownPedalControls) {
-      this.showHint('Enter = gas · Space = brake · SHIFT = upshift', 'shownPedalControls');
+      this.showHint(
+        'One finger: hold GAS — Mag steers. Space = brake · SHIFT = upshift (watch the rev strip)',
+        'shownPedalControls',
+      );
     } else if (!state.onboarding.shownTouchControls) {
       this.showHint(
         'Touch: right = gas, left = brake · SHIFT = up · lift to downshift',
@@ -932,7 +1007,7 @@ export class RaceScene implements Scene {
   ): void {
     const player = director.cars.find((c) => c.isPlayerControlled);
     const standing = director.currentStandings.find((s) => s.isPlayerControlled);
-    const leadDriver = this.g.state?.roster.find((d) => d.id === this.launch.leadDriverId);
+    const leadDriver = this.resolveLeadDriver();
 
     const chrome = this.chrome ?? raceChromeLayout(w, h, token);
     this.chrome = chrome;
@@ -1110,116 +1185,26 @@ export class RaceScene implements Scene {
     h: number,
     token: ThemeTokens,
     accent: string,
+    player?: { rpm: number; shiftWindow: import('../engine/Gearbox').ShiftWindowKind; gear: number } | null,
   ): void {
-    const chrome = this.chrome ?? raceChromeLayout(w, h, token);
+    const chrome = drawPedalDeckChrome({
+      ctx,
+      w,
+      h,
+      token,
+      accent,
+      throttle: this.g.input.throttle,
+      brake: this.g.input.brake,
+      shifting:
+        this.g.input.isKeyDown('ShiftLeft') || this.g.input.isKeyDown('ShiftRight'),
+      shiftCueArmed: this.shiftCueArmed,
+      animTime: this.animTime,
+      rpm: player?.rpm ?? 900,
+      shiftWindow: player?.shiftWindow ?? 'low',
+      gear: player?.gear ?? 1,
+    });
     this.chrome = chrome;
     this.g.input.setRaceChrome(chrome);
-
-    const throttle = this.g.input.throttle;
-    const brake = this.g.input.brake;
-    const shifting =
-      this.g.input.isKeyDown('ShiftLeft') || this.g.input.isKeyDown('ShiftRight');
-
-    const paintPad = (
-      r: { x: number; y: number; w: number; h: number },
-      idleFill: string,
-      activeRgb: string,
-      amount: number,
-      label: string,
-      labelColor: string,
-    ): void => {
-      const pressed = amount > 0.08;
-      const radius = Math.max(2, pad(token, 0.3));
-      ctx.save();
-      // Base plate
-      ctx.fillStyle = idleFill;
-      ctx.beginPath();
-      ctx.roundRect(r.x, r.y, r.w, r.h, radius);
-      ctx.fill();
-
-      // Pressure fill from bottom
-      if (pressed) {
-        const fillH = r.h * Math.min(1, 0.18 + amount * 0.82);
-        const gy = ctx.createLinearGradient(r.x, r.y + r.h - fillH, r.x, r.y + r.h);
-        gy.addColorStop(0, `rgba(${activeRgb},0.15)`);
-        gy.addColorStop(1, `rgba(${activeRgb},0.55)`);
-        ctx.fillStyle = gy;
-        ctx.beginPath();
-        ctx.roundRect(r.x, r.y + r.h - fillH, r.w, fillH, radius);
-        ctx.fill();
-      }
-
-      // Bevel + stroke
-      ctx.strokeStyle = pressed ? `rgba(${activeRgb},0.95)` : `rgba(${activeRgb},0.35)`;
-      ctx.lineWidth = pressed ? 2.5 : 1.5;
-      ctx.beginPath();
-      ctx.roundRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, radius);
-      ctx.stroke();
-
-      // Top highlight rail
-      ctx.fillStyle = pressed ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)';
-      ctx.fillRect(r.x + radius, r.y + 2, r.w - radius * 2, 2);
-
-      ctx.font = `400 ${Math.max(token.fontCaption, Math.min(r.h * 0.22, token.fontTitle))}px ${token.fontDisplayFamily}`;
-      ctx.fillStyle = labelColor;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      const ctxLs = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
-      if (typeof ctxLs.letterSpacing === 'string') {
-        ctxLs.letterSpacing = '0.18em';
-        ctx.fillText(label, r.x + r.w * 0.5, r.y + r.h * 0.52);
-        ctxLs.letterSpacing = '0px';
-      } else {
-        ctx.fillText(label, r.x + r.w * 0.5, r.y + r.h * 0.52);
-      }
-      ctx.restore();
-    };
-
-    // Soft deck plate behind pads — metal strip read.
-    ctx.save();
-    const deckGrad = ctx.createLinearGradient(0, chrome.deckTop, 0, h);
-    deckGrad.addColorStop(0, 'rgba(8,10,9,0.2)');
-    deckGrad.addColorStop(0.25, 'rgba(8,10,9,0.72)');
-    deckGrad.addColorStop(1, 'rgba(6,8,7,0.92)');
-    ctx.fillStyle = deckGrad;
-    ctx.fillRect(0, chrome.deckTop, w, h - chrome.deckTop);
-    const fade = ctx.createLinearGradient(0, chrome.deckTop - 28, 0, chrome.deckTop);
-    fade.addColorStop(0, 'rgba(8,10,9,0)');
-    fade.addColorStop(1, 'rgba(8,10,9,0.55)');
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, chrome.deckTop - 28, w, 28);
-    // Signal strip along deck top
-    ctx.fillStyle = `${accent}55`;
-    ctx.fillRect(0, chrome.deckTop, w, 2);
-    ctx.restore();
-
-    paintPad(
-      chrome.brake,
-      'rgba(28,14,14,0.78)',
-      '255,107,90',
-      brake,
-      'BRAKE',
-      brake > 0.08 ? token.text : 'rgba(255,107,90,0.7)',
-    );
-    paintPad(
-      chrome.gas,
-      'rgba(12,28,18,0.78)',
-      '94,207,142',
-      throttle,
-      'GAS',
-      throttle > 0.08 ? token.text : 'rgba(94,207,142,0.7)',
-    );
-
-    const shiftPulse = this.shiftCueArmed ? 0.15 + 0.1 * Math.sin(this.animTime * 10) : 0;
-    const shiftAmt = shifting ? 1 : shiftPulse > 0 ? 0.35 + shiftPulse : 0;
-    paintPad(
-      chrome.shift,
-      `rgba(36,30,10,${0.7 + shiftPulse})`,
-      '240,196,26',
-      shiftAmt,
-      this.shiftCueArmed ? 'SHIFT!' : 'SHIFT',
-      shifting || this.shiftCueArmed ? '#f0c41a' : token.textMuted,
-    );
   }
 
   private drawCountdownBanner(

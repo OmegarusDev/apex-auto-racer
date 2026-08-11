@@ -176,6 +176,10 @@ export interface OnboardingFlags {
   shownPegHint?: boolean;
   /** Touch pedal deck tip — separate from corner brake coaching. */
   shownTouchControls?: boolean;
+  /** Trail-brake / brake craft tip. */
+  shownTrailHint?: boolean;
+  /** Street clutch-kick tip. */
+  shownKickHint?: boolean;
 }
 
 export interface GameState {

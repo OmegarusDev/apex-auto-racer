@@ -180,10 +180,12 @@ export class ResultsScene implements Scene {
   update(dt: number): void {
     this.toasts.update(dt);
     this.phaseT += dt;
+    // Skip theatre beats only — once done, leave pendingClick for footer/header.
+    // Do not call consumeClick() before the done guard: `cond && consumeClick()`
+    // still evaluates left-to-right and eats the edge (dead Race Again / Back).
+    if (this.phase === 'done') return;
     const g = getGameContext();
-    if (g.input.consumeClick() !== null && this.phase !== 'done') {
-      this.advancePhase();
-    } else if (this.phaseT >= this.phaseDuration && this.phase !== 'done') {
+    if (g.input.consumeClick() !== null || this.phaseT >= this.phaseDuration) {
       this.advancePhase();
     }
   }
@@ -229,7 +231,15 @@ export class ResultsScene implements Scene {
     }
     const g = getGameContext();
     if (g.state !== null && this.payload.config.mode === 'quick') {
-      launchRace(makeQuickRaceConfig(g.state, this.payload.discipline, this.payload.config.returnTo ?? 'title'), this.toasts);
+      launchRace(
+        makeQuickRaceConfig(
+          g.state,
+          this.payload.discipline,
+          this.payload.config.returnTo ?? 'title',
+          this.payload.config.quickPresetId ?? 'garage',
+        ),
+        this.toasts,
+      );
       return;
     }
     this.navigateBack();

@@ -31,9 +31,9 @@ import {
   type TitlePreviewTrack,
 } from './titleArt';
 import { DISCIPLINE_ORDER } from '../career/disciplinesUi';
-import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
 import { GarageScene } from './GarageScene';
 import { OptionsScene } from './OptionsScene';
+import { QuickRaceSetupScene } from './QuickRaceSetupScene';
 
 /** Load save if present; otherwise create an in-memory roster without persisting. */
 function ensureQuickRaceState(): GameState {
@@ -154,10 +154,7 @@ export class TitleScene implements Scene {
           this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
           return;
         }
-        const seedMaterial =
-          (state.seed + state.careerStats.races * 9973 + state.careerStats.earnings) >>> 0;
-        const discipline = pick(mulberry32(seedMaterial), DISCIPLINE_ORDER);
-        launchRace(makeQuickRaceConfig(state, discipline), this.toasts);
+        getGameContext().scenes.push(new QuickRaceSetupScene({ returnTo: 'title' }));
       },
     };
     btnY += btnH + btnGap;

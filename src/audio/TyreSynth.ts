@@ -69,16 +69,31 @@ export class TyreSynth {
 
     const deslot = tel.slotMode === 'deslot';
     const grip = tel.gripUsage;
+    const drifting = tel.drifting === true;
+    const kick = tel.clutchKick === true;
     // Audible only when loading the tyre hard or scrubbing off-slot.
     let amount = 0;
-    if (deslot) {
+    if (kick) {
+      amount = clamp(0.45 + grip * 0.2, 0, 0.7);
+    } else if (drifting) {
+      amount =
+        tel.discipline === 'rally'
+          ? clamp(0.28 + grip * 0.3, 0, 0.58) // gravel scrub
+          : clamp(0.32 + grip * 0.35, 0, 0.62); // street squeal
+    } else if (deslot) {
       amount = clamp(0.2 + grip * 0.35, 0, 0.55);
     } else if (grip > 0.92) {
       amount = clamp((grip - 0.92) / 0.25, 0, 0.42);
     }
 
-    this.tyreFilter.frequency.setTargetAtTime(deslot ? 1400 : 2400 + grip * 800, t, 0.05);
-    this.tyreFilter.Q.setTargetAtTime(deslot ? 0.7 : 1.4, t, 0.05);
+    const freq =
+      tel.discipline === 'rally' && (drifting || deslot)
+        ? 900 + grip * 400
+        : deslot || drifting
+          ? 1400 + grip * 600
+          : 2400 + grip * 800;
+    this.tyreFilter.frequency.setTargetAtTime(freq, t, 0.05);
+    this.tyreFilter.Q.setTargetAtTime(deslot || drifting ? 0.7 : 1.4, t, 0.05);
     this.tyreGain.gain.setTargetAtTime(amount, t, 0.04);
 
     this.kerbOsc.frequency.setTargetAtTime(42 + tel.speed * 0.9, t, 0.05);

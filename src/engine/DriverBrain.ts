@@ -71,7 +71,12 @@ export interface BrainState {
   prevSlotMode: SlotMode | '';
 }
 
-const EMPTY_OUTPUT: BrainOutput = { desiredThrottle: 0, desiredBrake: 0, lTarget: 0 };
+const EMPTY_OUTPUT: BrainOutput = {
+  desiredThrottle: 0,
+  desiredBrake: 0,
+  lTarget: 0,
+  steerTarget: 0,
+};
 
 /** Brain ticks at 120/brainEveryN Hz — stall accumulator step. */
 const BRAIN_DT = PHYSICS.dt * PHYSICS.brainEveryN;
@@ -523,10 +528,12 @@ export function tickDriverBrain(
       desiredThrottle = 0.4 + 0.25 * (ctx.driver.skill / 100);
     }
     const intent = makeIntent(spinning ? 'SPIN_SCRUB' : 'REJOIN_CRAWL');
+    const lineT = Math.max(-lineClamp, Math.min(lineClamp, personalO));
     const raw: BrainOutput = {
       desiredThrottle,
       desiredBrake,
-      lTarget: Math.max(-lineClamp, Math.min(lineClamp, personalO)),
+      lTarget: lineT,
+      steerTarget: lineT,
       intent,
     };
     state.reactionQueue.length = 0;
@@ -828,7 +835,13 @@ export function tickDriverBrain(
   });
   const intent = makeIntent(intentTag);
 
-  const raw: BrainOutput = { desiredThrottle, desiredBrake, lTarget, intent };
+  const raw: BrainOutput = {
+    desiredThrottle,
+    desiredBrake,
+    lTarget,
+    steerTarget: lTarget,
+    intent,
+  };
 
   const tau = PHYSICS.reactionBase + PHYSICS.reactionFocusSpan * (1 - ctx.driver.focus / 100);
   state.reactionQueue.push({ emitTime: ctx.raceTime, out: raw });
@@ -845,20 +858,33 @@ export function tickDriverBrain(
     aiTraffic &&
     (traffic.blocked || ctx.contactBlocked || traffic.brake >= 0.55)
   ) {
+    const lt = ctx.raceTime < state.overtakeUntil ? lTarget : delayed.lTarget;
     return attachIntent(
       {
         desiredThrottle: Math.min(delayed.desiredThrottle, desiredThrottle),
         desiredBrake: Math.max(delayed.desiredBrake, desiredBrake),
-        lTarget: ctx.raceTime < state.overtakeUntil ? lTarget : delayed.lTarget,
+        lTarget: lt,
+        steerTarget: lt,
       },
       intent,
     );
   }
 
-  return attachIntent(delayed, intent);
+  return attachIntent(
+    {
+      ...delayed,
+      steerTarget: delayed.steerTarget ?? delayed.lTarget,
+    },
+    intent,
+  );
 }
 
 /** Neutral brain output for stun/spin or pre-race. */
 export function idleBrainOutput(car: CarSimState, _track: TrackData): BrainOutput {
-  return { desiredThrottle: 0, desiredBrake: 1, lTarget: car.gridL };
+  return {
+    desiredThrottle: 0,
+    desiredBrake: 1,
+    lTarget: car.gridL,
+    steerTarget: car.gridL,
+  };
 }

@@ -19,6 +19,12 @@ import {
 import type { GameState } from '../types';
 import { defaultVehicleSave } from '../types';
 import type { RaceConfig } from '../RaceDirector';
+import {
+  durationRangeForPaceBand,
+  maxLapsForPaceBand,
+  paceBandFromState,
+  trackScaleForPaceBand,
+} from './paceTrackScale';
 
 /** Evenly spaced HSL hues for team identification. */
 export function teamColor(teamId: number, teamCount: number): string {
@@ -65,17 +71,22 @@ export function quickRaceConfig(
   const opponentBudget: [number, number] = [statRange[0] * 4, statRange[1] * 4];
   const opponentPartRange = BALANCE.opponentPartTiers[difficultyRank] ?? BALANCE.opponentPartTiers[0]!;
 
-  const trackSeed = randInt(rng, 1, 0x7fffffff);
-  const track = generateTrack(trackSeed, discipline);
   const refVehicle = state.vehicles[discipline] ?? defaultVehicleSave(BALANCE.startingPartTier);
+  const paceBand = paceBandFromState(state, discipline, playerTeamDrivers, refVehicle);
+  const trackScale = trackScaleForPaceBand(paceBand);
+
+  const trackSeed = randInt(rng, 1, 0x7fffffff);
+  const track = generateTrack(trackSeed, discipline, undefined, trackScale);
   const refStats = effectiveStats(discipline, refVehicle.partTiers, refVehicle.condition);
   const mu = getDiscipline(discipline).muSurface;
   const { vProfile } = buildSpeedProfiles(track, refStats, mu);
   const lapTime = Math.max(estimateLapTime(track, vProfile), 1);
-  const targetDuration = randRange(rng, BALANCE.quickRaceDurationMin, BALANCE.quickRaceDurationMax);
+  const [durMin, durMax] = durationRangeForPaceBand(paceBand);
+  const targetDuration = randRange(rng, durMin, durMax);
+  const lapCap = maxLapsForPaceBand(paceBand);
   const laps = Math.max(
     BALANCE.minLaps,
-    Math.min(BALANCE.maxLaps, Math.round(targetDuration / lapTime)),
+    Math.min(lapCap, Math.round(targetDuration / lapTime)),
   );
 
   return {
@@ -89,5 +100,6 @@ export function quickRaceConfig(
     playerVehicle: refVehicle,
     opponentBudget,
     opponentPartRange,
+    trackScale,
   };
 }

@@ -37,6 +37,22 @@ export interface SpeedProfiles {
   vProfile: number[];
 }
 
+/** Optional procedural scale (Quick Race pace bands). Defaults 1,1. */
+export interface TrackScaleOpts {
+  /** Multiplies waypoint radii → circuit length. */
+  lengthMult?: number;
+  /** Multiplies asphalt / runoff width. */
+  widthMult?: number;
+}
+
+const DEFAULT_SCALE: Required<TrackScaleOpts> = { lengthMult: 1, widthMult: 1 };
+
+function resolveScale(opts?: TrackScaleOpts): Required<TrackScaleOpts> {
+  const lengthMult = Math.max(0.45, Math.min(1.35, opts?.lengthMult ?? 1));
+  const widthMult = Math.max(0.75, Math.min(1.2, opts?.widthMult ?? 1));
+  return { lengthMult, widthMult };
+}
+
 export type TrackFailReason =
   | { kind: 'selfIntersection' }
   | { kind: 'minRadius'; minR: number }
@@ -76,10 +92,14 @@ function pickArchetype(rng: Rng, discipline: DisciplineId, hint?: ArchetypeId): 
 
 type ArchetypeDefLike = (typeof ARCHETYPES)[number];
 
-function generateWaypoints(rng: Rng, archetype: ArchetypeDefLike): { x: number; y: number }[] {
+function generateWaypoints(
+  rng: Rng,
+  archetype: ArchetypeDefLike,
+  lengthMult = 1,
+): { x: number; y: number }[] {
   const [minN, maxN] = archetype.waypointCount;
   const n = minN === maxN ? minN : randInt(rng, minN, maxN);
-  const baseRadius = randRange(rng, PHYSICS.baseRadiusMin, PHYSICS.baseRadiusMax);
+  const baseRadius = randRange(rng, PHYSICS.baseRadiusMin, PHYSICS.baseRadiusMax) * lengthMult;
   const rx = baseRadius * archetype.elongation;
   const ry = baseRadius;
 
@@ -96,6 +116,18 @@ function generateWaypoints(rng: Rng, archetype: ArchetypeDefLike): { x: number; 
   }
 
   return points;
+}
+
+function scaledArchetype(
+  archetype: ArchetypeDefLike,
+  widthMult: number,
+): ArchetypeDefLike {
+  if (Math.abs(widthMult - 1) < 1e-9) return archetype;
+  return {
+    ...archetype,
+    width: Math.max(18, archetype.width * widthMult),
+    runoff: Math.max(1, archetype.runoff * widthMult),
+  };
 }
 
 /** Proper (interior) segment intersection; parallel/collinear → false. */
@@ -269,10 +301,12 @@ export function generateTrackAttempt(
   seed: number,
   discipline: DisciplineId,
   archetypeHint?: ArchetypeId,
+  scaleOpts?: TrackScaleOpts,
 ): TrackData {
+  const scale = resolveScale(scaleOpts);
   const rng = mulberry32(seed);
-  const archetype = pickArchetype(rng, discipline, archetypeHint);
-  const waypoints = generateWaypoints(rng, archetype);
+  const archetype = scaledArchetype(pickArchetype(rng, discipline, archetypeHint), scale.widthMult);
+  const waypoints = generateWaypoints(rng, archetype, scale.lengthMult);
   return buildTrackFromWaypoints(waypoints, archetype, seed, discipline);
 }
 
@@ -281,17 +315,24 @@ export function generateTrack(
   seed: number,
   discipline: DisciplineId,
   archetypeHint?: ArchetypeId,
+  scaleOpts?: TrackScaleOpts,
 ): TrackData {
+  const scale = resolveScale(scaleOpts ?? DEFAULT_SCALE);
   for (let attempt = 0; attempt < PHYSICS.maxGenAttempts; attempt++) {
     const attemptSeed = (seed + attempt * 0x9e3779b9) >>> 0;
-    const track = generateTrackAttempt(attemptSeed, discipline, attempt === 0 ? archetypeHint : undefined);
+    const track = generateTrackAttempt(
+      attemptSeed,
+      discipline,
+      attempt === 0 ? archetypeHint : undefined,
+      scale,
+    );
     if (validateTrack(track)) return track;
   }
 
   // Only after exhausting real attempts — known-simple oval fallback.
-  const oval = ARCHETYPES.find((a) => a.id === 'oval')!;
+  const oval = scaledArchetype(ARCHETYPES.find((a) => a.id === 'oval')!, scale.widthMult);
   const rng = mulberry32(FALLBACK_OVAL_SEED);
-  const waypoints = generateWaypoints(rng, oval);
+  const waypoints = generateWaypoints(rng, oval, scale.lengthMult);
   const fallback = buildTrackFromWaypoints(waypoints, oval, FALLBACK_OVAL_SEED, discipline);
   if (!validateTrack(fallback)) {
     console.error('[apex] oval fallback failed validateTrack — using anyway');

@@ -220,6 +220,11 @@ export class InputController {
     return v;
   }
 
+  /** True while Shift key or SHIFT pad is held (Street clutch-kick). */
+  isShiftHeld(): boolean {
+    return this.shiftKeysHeld.size > 0 || this.touchShiftHeld;
+  }
+
   update(dt: number): void {
     const ease = this.pedalEaseRate(dt);
     this.throttle = this.easeToward(this.throttle, this.targetThrottle, ease);

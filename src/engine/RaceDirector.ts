@@ -1,5 +1,5 @@
 import { BALANCE } from '../data/balance';
-import { DRIFT_CFG, PHYSICS } from '../data/physics';
+import { PHYSICS } from '../data/physics';
 import { getDiscipline } from '../data/disciplines';
 import type { DisciplineId } from '../data/disciplines';
 import type { ArchetypeId } from '../data/archetypes';
@@ -7,7 +7,7 @@ import type { RaceFormat } from '../data/formats';
 import { tickDriverBrain } from './DriverBrain';
 import type { BrainTickContext } from './DriverBrain';
 import { generateTrack } from './TrackGenerator';
-import type { TrackData } from './TrackGenerator';
+import type { TrackData, TrackScaleOpts } from './TrackGenerator';
 import { interpolateAtSInto } from './RacingLine';
 import { EntertainmentMeter } from './EntertainmentMeter';
 import type { EntertainmentSnapshot } from './EntertainmentMeter';
@@ -51,6 +51,8 @@ export interface RaceConfig {
   isTournament?: boolean;
   opponentDrivers?: Driver[];
   archetypeHint?: ArchetypeId;
+  /** Quick Race pace-band scale; tournament / feel harnesses omit (1.0). */
+  trackScale?: TrackScaleOpts;
 }
 
 export interface PedalTraceSample {
@@ -137,6 +139,7 @@ export class RaceDirector {
   private playerThrottle = 0;
   private playerBrake = 0;
   private playerUpshift = false;
+  private playerClutchKick = false;
   private paused = false;
   private retired = false;
   private finished = false;
@@ -172,7 +175,12 @@ export class RaceDirector {
     this.rain = this.rng() < BALANCE.rainChance;
     // Visual-only — hash raceSeed; do NOT consume this.rng (feel/determinism).
     this.night = ((config.raceSeed * 2654435761) >>> 0) % 100 < 32;
-    this.track = generateTrack(config.trackSeed, config.discipline, config.archetypeHint);
+    this.track = generateTrack(
+      config.trackSeed,
+      config.discipline,
+      config.archetypeHint,
+      config.trackScale,
+    );
     this.globalRainStack = buildRainStack(this.rain);
     this.muSurface = getDiscipline(config.discipline).muSurface;
     if (this.rain) {
@@ -301,10 +309,16 @@ export class RaceDirector {
     return this.ghostTrace;
   }
 
-  setPlayerPedals(throttle: number, brake: number, upshift = false): void {
+  setPlayerPedals(
+    throttle: number,
+    brake: number,
+    upshift = false,
+    clutchKick = false,
+  ): void {
     this.playerThrottle = Math.max(0, Math.min(1, throttle));
     this.playerBrake = Math.max(0, Math.min(1, brake));
     this.playerUpshift = upshift;
+    this.playerClutchKick = clutchKick;
   }
 
   pause(): void {
@@ -597,8 +611,15 @@ export class RaceDirector {
   private buildInputs(entry: RaceCarEntry): VehicleInputs {
     if (entry.car.isPlayerControlled) {
       const up = this.playerUpshift;
+      const kick = this.playerClutchKick;
       this.playerUpshift = false;
-      return { throttle: this.playerThrottle, brake: this.playerBrake, upshift: up };
+      this.playerClutchKick = false;
+      return {
+        throttle: this.playerThrottle,
+        brake: this.playerBrake,
+        upshift: up,
+        clutchKick: kick,
+      };
     }
     return { throttle: 0, brake: 0, upshift: false };
   }
@@ -657,10 +678,8 @@ export class RaceDirector {
       this.pushEvent('shift', car, name, car.lastShiftKind);
     }
 
-    // Quarantined with DRIFT_CFG — no driftEntry while latch is dormant.
-    const driftEnabled =
-      (DRIFT_CFG[this.config.discipline]?.enabled ?? DRIFT_CFG.track?.enabled) === true;
-    if (driftEnabled && car.driftState && !entry.prevDrift) {
+    // Hybrid latch entry (Street/Rally) — not the quarantined DRIFT_CFG path.
+    if (car.driftState && !entry.prevDrift) {
       this.pushEvent('driftEntry', car, name);
     }
 

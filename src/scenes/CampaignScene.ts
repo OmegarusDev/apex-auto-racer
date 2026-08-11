@@ -42,8 +42,9 @@ import {
 } from './sceneChrome';
 import { disciplineAccent, disciplineLabel } from '../career/disciplinesUi';
 import { defaultLeadDriver, defaultLineup } from '../career/roster';
-import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
+import { launchRace } from '../career/launchRace';
 import { getObjectiveDef } from '../career/objectives';
+import { QuickRaceSetupScene } from './QuickRaceSetupScene';
 
 const LINEUP_VISIBLE_ROWS = 4;
 
@@ -442,8 +443,12 @@ export class CampaignScene implements Scene {
           this.toasts.push('Need a driver on the roster', accent);
           return;
         }
-        const config = makeQuickRaceConfig(state, this.discipline, 'campaign');
-        launchRace(config, this.toasts);
+        getGameContext().scenes.push(
+          new QuickRaceSetupScene({
+            discipline: this.discipline,
+            returnTo: 'campaign',
+          }),
+        );
       },
     };
     drawButton(ctx, startBtn, lui);

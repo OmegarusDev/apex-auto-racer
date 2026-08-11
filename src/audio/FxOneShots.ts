@@ -105,6 +105,23 @@ export class FxOneShots {
     this.playNoiseBurst(110, 520, 0.34);
   }
 
+  /** Street clutch-kick chirp. */
+  playClutchKick(): void {
+    const t = this.buses.ctx.currentTime;
+    const osc = this.buses.ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(90, t);
+    osc.frequency.exponentialRampToValueAtTime(55, t + 0.12);
+    const g = this.buses.ctx.createGain();
+    g.gain.setValueAtTime(0.22, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
+    osc.connect(g);
+    g.connect(this.buses.fx);
+    osc.start(t);
+    osc.stop(t + 0.15);
+    this.playNoiseBurst(90, 700, 0.28);
+  }
+
   playShift(kind: ShiftKind): void {
     if (kind === 'miss') return; // assisted gearbox never emits miss
     const t = this.buses.ctx.currentTime;

@@ -28,12 +28,27 @@ export type FeelGateId =
   | 'RALLY_DESLOT_LONG'
   | 'DISCIPLINE_PROFILE_MATCH'
   | 'META_TOURNAMENT_TEAMS'
+  | 'QR_TRACK_SCALE'
   | 'SUITE_START'
   | 'SUITE_SLOT'
   | 'SUITE_PACK'
   | 'SUITE_FIELD'
   | 'SUITE_SMOKE'
-  | 'SUITE_STACK';
+  | 'SUITE_STACK'
+  | 'HYBRID_FORCES'
+  | 'GROOVE_AUTOPILOT'
+  | 'ONE_FINGER_SURVIVE'
+  | 'GEAR_RPM'
+  | 'SHIFT_WINDOW'
+  | 'LINE_SKILL'
+  | 'ONE_FINGER_TRACK'
+  | 'DRIFT_RALLY'
+  | 'DRIFT_STREET'
+  | 'CLUTCH_KICK'
+  | 'SETUP_TRADEOFF'
+  | 'MASS_INERTIA'
+  | 'TRAIL_BIAS'
+  | 'OFFSLOT_DYNAMICS';
 
 export interface FeelGateResult {
   id: FeelGateId;

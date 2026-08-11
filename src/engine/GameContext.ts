@@ -25,6 +25,7 @@ export interface AudioEngine {
   playSoftContact(): void;
   playSpin(): void;
   playDeslot(): void;
+  playClutchKick(): void;
   setKerb(on: boolean): void;
   setRain(on: boolean): void;
   click(): void;
@@ -54,6 +55,7 @@ class NullAudioEngine implements AudioEngine {
   playSoftContact(): void {}
   playSpin(): void {}
   playDeslot(): void {}
+  playClutchKick(): void {}
   setKerb(_on: boolean): void {}
   setRain(_on: boolean): void {}
   click(): void {}

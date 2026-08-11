@@ -45,6 +45,30 @@ export const BALANCE = {
   maxLaps: 9,
   minLaps: 1,
   /**
+   * Quick Race–only track scale by pace band (0 = novice/slow → 5 = elite).
+   * Non-freeze: length shrinks early circuits; width is a modest trim so
+   * overtake lateral still fits. Tournament / career omit this and stay 1.0.
+   */
+  quickRaceTrackScale: [
+    { length: 0.68, width: 0.88 },
+    { length: 0.76, width: 0.91 },
+    { length: 0.85, width: 0.94 },
+    { length: 0.94, width: 0.97 },
+    { length: 1.0, width: 1.0 },
+    { length: 1.06, width: 1.02 },
+  ] as { length: number; width: number }[],
+  /** Race-duration target (sec) by pace band — shorter early sessions. */
+  quickRaceDurationByPace: [
+    [55, 85],
+    [65, 100],
+    [75, 115],
+    [85, 130],
+    [90, 145],
+    [95, 150],
+  ] as [number, number][],
+  /** Soft lap cap by pace band (still clamped by minLaps/maxLaps). */
+  quickRaceMaxLapsByPace: [3, 3, 4, 5, 6, 7] as number[],
+  /**
    * Per-rank average-stat band. Floors stay high enough that no AI is a
    * dead stall-car; ceilings keep standouts. Variance lives inside the band.
    */

@@ -137,6 +137,10 @@ export class AudioEngine {
     this.fx.playDeslot();
   }
 
+  playClutchKick(): void {
+    this.fx.playClutchKick();
+  }
+
   setKerb(on: boolean): void {
     this.tyres.setKerb(on);
   }

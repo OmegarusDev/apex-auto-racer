@@ -58,7 +58,7 @@
         text-indent: 0.42em;
         margin-top: 0.55rem;
       }
-      /* WebGL world under HUD */
+      /* WebGL world under HUD — never hit-tests; pedals/UI live on #game. */
       #world {
         position: fixed;
         inset: 0;
@@ -96,6 +96,45 @@
     </div>
     <canvas id="world" aria-hidden="true"></canvas>
     <canvas id="game"></canvas>
+    <script>
+      // Catch module-init / import failures before main.ts can hideSplash.
+      (function () {
+        function show(msg) {
+          var splash = document.getElementById('splash');
+          if (!splash || splash.dataset.apexBoot === 'done' || splash.dataset.apexBoot === 'error') return;
+          splash.dataset.apexBoot = 'error';
+          splash.style.pointerEvents = 'auto';
+          splash.style.opacity = '1';
+          splash.innerHTML =
+            '<span class="mark">APEX</span><span class="sub">BOOT FAILED</span>' +
+            '<pre style="max-width:min(92vw,42rem);margin:1.25rem 1rem 0;padding:0;white-space:pre-wrap;word-break:break-word;' +
+            'font:500 12px/1.45 IBM Plex Sans,Segoe UI,sans-serif;letter-spacing:0.02em;color:#f2efe6;opacity:0.85;text-align:center">' +
+            String(msg).replace(/[<>&]/g, function (c) {
+              return c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;';
+            }) +
+            '</pre>';
+        }
+        window.addEventListener('error', function (ev) {
+          show((ev && ev.message) || 'Script error');
+        });
+        window.addEventListener('unhandledrejection', function (ev) {
+          var r = ev && ev.reason;
+          show(r && r.message ? r.message : String(r || 'Unhandled rejection'));
+        });
+        // Surface hang instead of an infinite splash. Distinguish never-loaded
+        // vs main evaluated but stuck (data-apex-boot=loading).
+        window.setTimeout(function () {
+          var splash = document.getElementById('splash');
+          if (!splash || splash.dataset.apexBoot === 'done' || splash.dataset.apexBoot === 'error') return;
+          if (splash.style.opacity === '0') return;
+          var msg =
+            splash.dataset.apexBoot === 'loading'
+              ? 'Boot hung after module load — check the console.'
+              : 'Boot timed out — check the console / refresh after restarting Vite.';
+          show(msg);
+        }, 12000);
+      })();
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

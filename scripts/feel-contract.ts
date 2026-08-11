@@ -5,9 +5,10 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { runAuthorityGates, runTyreGates } from '../src/engine/feel/unitGates.ts';
+import { runAuthorityGates, runTyreGates, runTrackScaleGates } from '../src/engine/feel/unitGates.ts';
 import { runHarnessGates } from '../src/engine/feel/harnessGates.ts';
 import { runDisciplineGates } from '../src/engine/feel/disciplineGates.ts';
+import { runHybridGates } from '../src/engine/feel/hybridGates.ts';
 import type { FeelGateResult } from '../src/engine/feel/types.ts';
 import { runDeterminismCheck } from '../src/engine/RaceDirector.ts';
 
@@ -30,8 +31,10 @@ async function main() {
   const results: FeelGateResult[] = [
     ...runAuthorityGates(),
     ...runTyreGates(),
+    ...runTrackScaleGates(),
     ...runHarnessGates(),
     ...runDisciplineGates(),
+    ...runHybridGates(),
     {
       id: 'DETERMINISM',
       ok: runDeterminismCheck(),

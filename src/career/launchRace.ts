@@ -5,6 +5,12 @@ import { getGameContext } from '../engine/GameContext';
 import { mulberry32, pick, randInt, shuffleInPlace, weightedPick } from '../engine/rng';
 import type { GameState } from '../engine/types';
 import type { RaceLaunchConfig } from './raceLaunch';
+import { applyQuickRacePreset } from './raceLaunch';
+import type { QuickRacePresetId } from './quickRacePresets';
+import {
+  maxLapsForPaceBand,
+  paceBandFromState,
+} from '../engine/race/paceTrackScale';
 import { RaceScene } from '../scenes/RaceScene';
 import { accentForDiscipline } from '../ui/theme';
 import type { ToastManager } from '../ui/components';
@@ -13,6 +19,7 @@ export function makeQuickRaceConfig(
   state: GameState,
   discipline: DisciplineId,
   returnTo: 'title' | 'campaign' = 'title',
+  presetId: QuickRacePresetId = 'garage',
 ): RaceLaunchConfig {
   state.quickRaceNonce = ((state.quickRaceNonce >>> 0) + 1) >>> 0;
   try {
@@ -43,8 +50,12 @@ export function makeQuickRaceConfig(
   const team = shuffled.slice(0, Math.min(format.teamSize, shuffled.length));
   const playerLineup = team.map((d) => d.id);
   const leadDriverId = playerLineup.length > 0 ? pick(rng, playerLineup) : '';
-  const laps = randInt(rng, BALANCE.minLaps, Math.min(BALANCE.maxLaps, 5));
-  return {
+
+  const paceBand = paceBandFromState(state, discipline);
+  const lapCap = maxLapsForPaceBand(paceBand);
+  const laps = randInt(rng, BALANCE.minLaps, Math.max(BALANCE.minLaps, lapCap));
+
+  const base: RaceLaunchConfig = {
     discipline,
     trackSeed,
     raceSeed,
@@ -55,6 +66,8 @@ export function makeQuickRaceConfig(
     mode: 'quick',
     returnTo,
   };
+
+  return applyQuickRacePreset(state, base, presetId);
 }
 
 let raceLaunchInFlight = false;

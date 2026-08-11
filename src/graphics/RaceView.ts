@@ -99,6 +99,10 @@ export class RaceView {
   /** Clear the world canvas when leaving race (menus own the HUD canvas). */
   clearWorld(): void {
     this.engine?.clear();
+    if (typeof document !== 'undefined') {
+      // CSS keeps #world pointer-events:none; drop is-live so menus aren't covered.
+      document.querySelector('#world')?.classList.remove('is-live');
+    }
   }
 
   getTrack(): TrackView | null {

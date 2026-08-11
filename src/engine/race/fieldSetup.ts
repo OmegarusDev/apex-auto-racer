@@ -16,6 +16,7 @@ import {
   createCarState,
   type CarSimState,
 } from '../Vehicle';
+import { carSetupFromParts } from '../vehicle/CarSetup';
 import {
   applyLooseCannon,
   buildTraitStack,
@@ -142,6 +143,7 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
       laneSign,
       gridS,
       gridL,
+      plan.driver.focus,
     );
 
     const car = createCarState(
@@ -158,6 +160,7 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
       gridL,
       authority,
       lineO,
+      carSetupFromParts(plan.parts),
     );
 
     return {

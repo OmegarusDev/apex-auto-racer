@@ -31,6 +31,9 @@ import {
 import { drawTopDownCar } from './titleArt';
 import { disciplineAccent, disciplineLabel } from '../career/disciplinesUi';
 import { buyPartTier, repairVehicle, vehicleRadarValues } from '../career/garage';
+import { carSetupFromParts, tuningSpeedReadout } from '../engine/vehicle/CarSetup';
+import { effectiveStats } from '../engine/stats';
+import { getDiscipline } from '../data/disciplines';
 
 export class TuningScene implements Scene {
   private readonly discipline: DisciplineId;
@@ -106,6 +109,10 @@ export class TuningScene implements Scene {
       pad(token, 1) +
       token.fontCaption +
       pad(token, 0.75) +
+      token.fontCaption * 2 +
+      pad(token, 1.5) +
+      token.fontCaption +
+      pad(token, 0.75) +
       statBarHeight(token) +
       pad(token, 0.75) +
       btnH +
@@ -149,6 +156,30 @@ export class TuningScene implements Scene {
       ctx.restore();
     }
     y += previewH + pad(token, 1);
+
+    const setup = carSetupFromParts(vehicle.partTiers);
+    const stats = effectiveStats(this.discipline, vehicle.partTiers, vehicle.condition);
+    const mu = getDiscipline(this.discipline).muSurface;
+    const readout = tuningSpeedReadout(setup, mu, stats.aAccel, stats.D, 0.08);
+    y += drawSectionTitle(ctx, 0, y, 'Predicted pace', lui);
+    ctx.save();
+    ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textMuted;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(
+      `Corner peg ~${readout.vDeslot.toFixed(1)} m/s · Aero limit ~${readout.vMax.toFixed(1)} m/s`,
+      pad(token, 0.5),
+      y,
+    );
+    ctx.fillStyle = token.textDim;
+    ctx.fillText(
+      `Mass ${setup.massKg.toFixed(0)} kg · Bias ${(setup.brakeBiasFront * 100).toFixed(0)}%F · CL×${setup.clScale.toFixed(2)} / CD×${setup.cdScale.toFixed(2)}`,
+      pad(token, 0.5),
+      y + token.fontCaption + 4,
+    );
+    ctx.restore();
+    y += token.fontCaption * 2 + pad(token, 1.5);
 
     y += drawSectionTitle(ctx, 0, y, 'Condition', lui);
     drawStatBar(

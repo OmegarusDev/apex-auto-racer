@@ -336,6 +336,7 @@ export function relaxCenterlineMinRadius(
  * - Lane identity from grid column (left stays left, right stays right)
  * - Skill → cut farther toward the apex *within* that side of the track
  * - Bravery → carry a bit wider through the corner
+ * - Focus → smoother line (less mid-corner jitter in the baked profile)
  * - Anchored to gridL near the start so launch does not yank laterally
  */
 export function buildPersonalRacingLine(
@@ -347,12 +348,14 @@ export function buildPersonalRacingLine(
   laneSign: number,
   gridS: number,
   gridL: number,
+  focus = 50,
 ): number[] {
   const n = nodes.length;
   if (n === 0) return [];
 
   const skill01 = Math.max(0, Math.min(1, skill / 100));
   const bravery01 = Math.max(0, Math.min(1, bravery / 100));
+  const focus01 = Math.max(0, Math.min(1, focus / 100));
   const sign = Math.sign(laneSign || gridL || 1) || 1;
   // Preferred lane center — stays near the grid column, not the track centerline.
   const laneBase = sign * PHYSICS.gridColOffset * (0.92 + 0.08 * (1 - skill01));
@@ -390,9 +393,10 @@ export function buildPersonalRacingLine(
     out[i] = Math.max(-half, Math.min(half, line));
   }
 
-  // Light smooth.
+  // Focus: more smoothing passes → cleaner Mag setpoint.
+  const smoothPasses = 2 + Math.round(2 * focus01);
   const smoothed = out.slice();
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < smoothPasses; pass++) {
     for (let i = 0; i < n; i++) {
       const im = wrapIndex(i - 1, n);
       const ip = wrapIndex(i + 1, n);

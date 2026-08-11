@@ -96,7 +96,9 @@ function evaluateObjectives(
 ): ObjectiveKind[] {
   const completed: ObjectiveKind[] = [];
   const handsOffRatio = raceDuration > 0 ? 1 - result.inputTime / raceDuration : 0;
-  const leadDriver = state.roster.find((d) => d.id === launch.leadDriverId);
+  const leadDriver =
+    launch.playerDriversOverride?.find((d) => d.id === launch.leadDriverId) ??
+    state.roster.find((d) => d.id === launch.leadDriverId);
   const playerFinished = result.positions.some((p) => p.teamId === 0);
 
   for (const objId of state.objectives.active) {
@@ -381,7 +383,8 @@ export function buildResultsPayload(
     stats.entertainmentScore,
   );
 
-  if (playerCarCondition !== undefined) {
+  // Preset showcase cars are race-local — do not ding career garage condition.
+  if (playerCarCondition !== undefined && launch.playerVehicleOverride === undefined) {
     state.vehicles[launch.discipline].condition = playerCarCondition;
   }
 

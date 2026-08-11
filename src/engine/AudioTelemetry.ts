@@ -14,6 +14,10 @@ export interface AudioTelemetry {
   discipline: DisciplineId;
   /** False when race exit / parked — full mute. */
   active: boolean;
+  /** Hybrid latch / slide. */
+  drifting?: boolean;
+  /** Clutch-kick impulse active. */
+  clutchKick?: boolean;
 }
 
 export type ShiftKind = 'up' | 'down' | 'miss';

@@ -37,6 +37,9 @@ export function buildUi(
 export function onSceneEnter(): void {
   const g = getGameContext();
   g.input.setMode('menu');
+  // Menus draw on #game; #world must never sit above HUD hits after a race.
+  // CSS keeps pointer-events:none; drop is-live so the GL surface stays hidden.
+  document.querySelector<HTMLCanvasElement>('#world')?.classList.remove('is-live');
   invalidateSafeArea();
 }
 

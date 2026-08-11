@@ -27,13 +27,10 @@ import {
   drawBackground,
   onSceneEnter,
   onSceneResize,
-  vehicleRadarValues,
-  disciplineLabel,
-  disciplineAccent,
-  buyPartTier,
-  repairVehicle,
-  drawTopDownCar,
-} from './sceneUtils';
+} from './sceneChrome';
+import { drawTopDownCar } from './titleArt';
+import { disciplineAccent, disciplineLabel } from '../career/disciplinesUi';
+import { buyPartTier, repairVehicle, vehicleRadarValues } from '../career/garage';
 
 export class TuningScene implements Scene {
   private readonly discipline: DisciplineId;

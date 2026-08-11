@@ -3,7 +3,7 @@
  * Run: npm run validate:meta
  */
 import { FORMATS } from '../src/data/formats.ts';
-import { buildTournamentStandings } from '../src/engine/raceTypes.ts';
+import { buildTournamentStandings } from '../src/career/tournamentStandings.ts';
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);

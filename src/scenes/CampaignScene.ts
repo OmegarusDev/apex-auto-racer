@@ -7,8 +7,8 @@ import { getTournament, TOURNAMENTS } from '../data/tournaments';
 import { generateOpponents } from '../engine/DriverGenerator';
 import { mulberry32, randInt } from '../engine/rng';
 import type { DisciplineId } from '../data/disciplines';
-import type { RaceLaunchConfig } from '../engine/raceTypes';
-import { buildTournamentStandings } from '../engine/raceTypes';
+import type { RaceLaunchConfig } from '../career/raceLaunch';
+import { buildTournamentStandings } from '../career/tournamentStandings';
 import type { TournamentProgress } from '../engine/types';
 import {
   drawButton,
@@ -39,14 +39,11 @@ import {
   drawBackground,
   onSceneEnter,
   onSceneResize,
-  disciplineLabel,
-  disciplineAccent,
-  defaultLineup,
-  defaultLeadDriver,
-  makeQuickRaceConfig,
-  launchRace,
-  getObjectiveDef,
-} from './sceneUtils';
+} from './sceneChrome';
+import { disciplineAccent, disciplineLabel } from '../career/disciplinesUi';
+import { defaultLeadDriver, defaultLineup } from '../career/roster';
+import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
+import { getObjectiveDef } from '../career/objectives';
 
 const LINEUP_VISIBLE_ROWS = 4;
 

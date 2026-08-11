@@ -10,10 +10,21 @@ Short log of where the live build differs from the plan. The plan file remains t
 
 ## Implementation
 
+- **Ownership extract in progress** — In-tree phased refactor (feel freeze sacred). Planned module paths: `src/engine/race/*` (pack/contact/draft/field/events/headless), `src/engine/vehicle/*` (updateVehicle step carve), `src/career/*` (xp/garage/launch/results), `src/data/present.ts` (pxPerM/dprCap out of PHYSICS), `src/scenes/race/*` (RaceChrome/frameBus/audioBridge). Public seams must stay stable: `RaceDirector.debugSnapshot()`, `runHeadless` / `runDeterminismCheck`, `RaceFrameView` / `CarFrameDto` / `FxImpulse`, `AudioTelemetry`. WebGL race world stays in-bundle (no CDN/fetch assets). Baseline: `validate:feel` 23/23 PASS (Phase 0).
+- **Phase 1** — `pxPerM` / `dprCap` moved from `PHYSICS` to `PRESENT` (`src/data/present.ts`). Presentation-only; not feel-freeze.
+- **Phase 2** — Pack extract under `src/engine/race/`: `trackMath`, `draft`, `rivals`, `contact` (`resolveContacts` → ContactStats), `modifiersSetup`, `types` (`RaceCarEntry`). RaceDirector calls `resolveContacts` and applies overlap frame deltas.
+- **Phase 3** — Further thin: `fieldSetup`, `eventRing`, `standings`, `ghost`, `headless`, `quickRaceConfig` under `src/engine/race/`. RaceDirector re-exports `runHeadless` / `runDeterminismCheck` / `quickRaceConfig` / `teamColor`. ~799 LOC orchestrator.
+- **Phase 4** — `Vehicle.ts` is a 34-LOC barrel under `src/engine/vehicle/*` (types/authority/zones/deslotMargin/create re-export seams; `updateVehicle.ts` holds the feel-identical body with section markers). Full step-body carve into groove/deslot/wall/drive deferred to avoid order-sensitive drift — seams ready for bisectable follow-up.
+- **Phase 5** — Career domain under `src/career/*`; `sceneChrome` + `titleArt` under scenes; deleted `sceneUtils.ts` / `raceTypes.ts`. `launchRace` keeps static `RaceScene` import.
+- **Phase 6** — `src/scenes/race/` owns `frameBus`, `raceCamera` (CameraDirector seam), `audioBridge` (countdown), `onboarding` helpers, `RaceChrome` seam. RaceScene host still holds car-audio/particles + HUD draw bodies (~1.4k LOC) — further chrome thin is presentation-only follow-up.
+- **Phase 7** — Deleted graphics shims (`CarMesh`, `Particles`, `VectorRenderer`, `camera/Camera`). titleArt imports `CarPainter`. Canvas2D world path is silent emergency fallback only; do not add features to TrackBaker/Blit. No CDN/fetch graphics assets.
+- **Phase 8** — `ui/components.ts` barrel; ownership modules `hit/button/slider/modal/toast/shell/charts/panels` re-export from `components.impl.ts` (body carve follow-up; call sites unchanged).
+- **Phase 9** — `src/data/disciplineProfiles.ts` read seam; Vehicle wall/deslot/runoff use profile fields. Gate `DISCIPLINE_PROFILE_MATCH`.
+- **Phase 10** — Custom engines path map updated; ownership extract complete (with noted follow-ups).
 - **New-game seed** — `SaveManager.createNew()` / `GameContext.startNewGame()` may use `Date.now()` when unseeded. Race sim stays fully seeded (`trackSeed` / `raceSeed`). Quick Race seeds derive from career counters.
 - **Race launch** — `launchRace` statically imports `RaceScene` (a dynamic-import cycle previously stuck on "Race loading..."). Results loads lazily from `RaceScene.finishRace`. Failures surface real errors, never a fake loading toast.
 - **Tournament standings** — Standings length follows `format.teamCount` (You + Rival 1…N). Rank cups still use 2-team formats today; multi-team formats (e.g. 2v2v2) are supported by the same standings path.
-- **RaceDirector split** — Full `race/*` module extract deferred; `debugSnapshot()` is the public feel-harness seam. Split when contact/draft tests need isolation.
+- **RaceDirector split** — Pack/field/events/headless live under `engine/race/*`; `debugSnapshot()` remains the public feel-harness seam.
 
 ## Intentional physics (Scalextric groove)
 
@@ -74,13 +85,13 @@ Change protocol:
 
 Three layers — keep new work in the right one:
 
-1. **Race sim** (seeded, headless) — `RaceDirector` facade composing Physics (`Vehicle`), Gearbox, Brain, Track, Modifiers, **EntertainmentMeter**, and the event ring. No Web Audio / DOM on the hot path.
-2. **Presentation** — `AudioEngine`, **Apex WebGL engine** (`src/graphics/engine/*` via `RaceView`), Canvas2D HUD/menus, Race fantasy chrome (`RaceFantasyHud`). Dual canvas: `#world` (WebGL) under `#game` (HUD). Consume a per-frame snapshot (`RaceFrameView` / `AudioTelemetry`). Never write into physics except via Input pedals. Canvas2D blit path remains as WebGL fallback.
-3. **Career** (between races) — payouts/XP/objectives/tournaments/garage mutate `GameState` only after the flag.
+1. **Race sim** (seeded, headless) — `RaceDirector` facade composing `engine/race/*` (pack/contact/draft/field/events/ghost/headless), Physics (`engine/vehicle/*` via `Vehicle` barrel), Gearbox, Brain, Track, Modifiers, **EntertainmentMeter**. No Web Audio / DOM on the hot path. Presentation knobs: `data/present.ts` (`PRESENT`); feel freeze stays in `PHYSICS` / `BALANCE`. Discipline branching reads: `data/disciplineProfiles.ts`.
+2. **Presentation** — `AudioEngine`, **Apex WebGL engine** (`src/graphics/engine/*` via `RaceView`), Canvas2D HUD/menus (`ui/*` barrels), Race fantasy chrome (`RaceFantasyHud`), `scenes/race/*` (frameBus/camera/audioBridge). Dual canvas: `#world` (WebGL) under `#game` (HUD). Consume a per-frame snapshot (`RaceFrameView` / `AudioTelemetry`). Never write into physics except via Input pedals. Canvas2D world path is silent emergency fallback only — do not add features to TrackBaker/Blit.
+3. **Career** (between races) — `src/career/*` (xp/garage/roster/launch/results/ghost/tournament) mutates `GameState` only after the flag. Scene chrome/title art: `scenes/sceneChrome.ts`, `scenes/titleArt.ts`.
 
 **Presentation bus:** RaceScene builds telemetry + hype from the director; audio/HUD/engine read only that.
 
-**Deferred extracts:** full `race/*` split; Economy / Tournament / Garage domain modules; DisciplineProfiles; CameraDirector; NativeShell; menu GL theatre. Audio/Entertainment land first along these seams.
+**Follow-ups (non-blocking):** vehicle step-body carve into groove/deslot/wall/drive; RaceScene HUD draw thin into `RaceChrome`; `ui/components.impl` body split into named files; CameraDirector.
 
 ## Deferred
 

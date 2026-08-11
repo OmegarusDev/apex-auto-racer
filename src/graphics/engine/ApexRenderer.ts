@@ -5,6 +5,7 @@
 
 import { PHYSICS } from '../../data/physics';
 import type { TrackPalette } from '../materials';
+import { raceCameraPull } from '../raceCameraZoom';
 import type { CarFrameDto, FxImpulse, RaceFrameView, TrackView } from '../types';
 import { buildCarGeometry } from './CarGeometry';
 import {
@@ -69,6 +70,8 @@ export class ApexRenderer {
   private fxCount = 0;
   private fxTick = 0;
   private contextLost = false;
+  private readonly onContextLost: (ev: Event) => void;
+  private readonly onContextRestored: () => void;
 
   private readonly view = mat4();
   private readonly proj = mat4();
@@ -87,21 +90,15 @@ export class ApexRenderer {
     gl.cullFace(gl.BACK);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    canvas.addEventListener(
-      'webglcontextlost',
-      (ev) => {
-        ev.preventDefault();
-        this.contextLost = true;
-      },
-      false,
-    );
-    canvas.addEventListener(
-      'webglcontextrestored',
-      () => {
-        this.contextLost = true; // still force RaceView to rebuild / fall back
-      },
-      false,
-    );
+    this.onContextLost = (ev) => {
+      ev.preventDefault();
+      this.contextLost = true;
+    };
+    this.onContextRestored = () => {
+      this.contextLost = true; // still force RaceView to rebuild / fall back
+    };
+    canvas.addEventListener('webglcontextlost', this.onContextLost, false);
+    canvas.addEventListener('webglcontextrestored', this.onContextRestored, false);
   }
 
   static tryCreate(canvas: HTMLCanvasElement | null): ApexRenderer | null {
@@ -122,11 +119,14 @@ export class ApexRenderer {
   }
 
   dispose(): void {
+    this.canvas.removeEventListener('webglcontextlost', this.onContextLost, false);
+    this.canvas.removeEventListener('webglcontextrestored', this.onContextRestored, false);
     const gl = this.gl;
     if (this.trackMesh) destroyMesh(gl, this.trackMesh);
     if (this.carMesh) destroyMesh(gl, this.carMesh);
     this.trackMesh = null;
     this.carMesh = null;
+    gl.deleteProgram(this.litProg);
   }
 
   getMinimapPoints(): Array<{ nx: number; ny: number }> {
@@ -233,7 +233,7 @@ export class ApexRenderer {
     }
   }
 
-  updateFx(dt: number): void {
+  updateFx(dt: number, camX = 0, camY = 0): void {
     let w = 0;
     for (let i = 0; i < this.fxCount; i++) {
       const p = this.fx[i]!;
@@ -255,12 +255,15 @@ export class ApexRenderer {
 
     if (this.rain) {
       this.fxTick++;
+      // Engine Z = -worldY — spawn rain around the follow camera, not origin.
+      const ox = camX;
+      const oz = -camY;
       for (let i = 0; i < 6; i++) {
         const h = hash(this.fxTick * 17 + i * 13);
         this.spawn(
-          (h - 0.5) * 80,
+          ox + (h - 0.5) * 80,
           12 + h * 8,
-          (hash(this.fxTick * 9 + i * 3) - 0.5) * 80,
+          oz + (hash(this.fxTick * 9 + i * 3) - 0.5) * 80,
           0,
           -28,
           0,
@@ -275,11 +278,12 @@ export class ApexRenderer {
     }
   }
 
-  render(frame: RaceFrameView): void {
+  /** @returns false when the frame was skipped (tiny canvas / missing mesh). */
+  render(frame: RaceFrameView): boolean {
     const gl = this.gl;
     const w = this.canvas.width;
     const h = this.canvas.height;
-    if (w < 2 || h < 2 || !this.trackMesh || !this.carMesh) return;
+    if (w < 2 || h < 2 || !this.trackMesh || !this.carMesh) return false;
 
     const bg = this.night ? [0.07, 0.09, 0.12] : [0.52, 0.62, 0.68];
     gl.viewport(0, 0, w, h);
@@ -299,13 +303,7 @@ export class ApexRenderer {
     mat4Identity(this.model);
     this.drawMesh(this.trackMesh, [1, 1, 1], 1);
 
-    // Ghost
-    if (frame.ghost) {
-      this.placeCar(frame.ghost.worldX, frame.ghost.worldY, frame.ghost.heading, 1);
-      this.drawMesh(this.carMesh, hexToRgb(frame.ghost.color), 0.35);
-    }
-
-    // Cars
+    // Solid cars first (no blend)
     for (const car of frame.cars) {
       const lift = car.slotMode === 'deslot' ? 0.35 : 0.08;
       this.placeCar(car.worldX, car.worldY, car.heading, lift);
@@ -323,11 +321,16 @@ export class ApexRenderer {
       this.drawMesh(this.carMesh, tint, 1);
     }
 
-    // FX as simple additive-ish lit points via tiny quads — use blend
+    // Ghost + FX need blending (ghost alpha is ignored with blend off).
     gl.enable(gl.BLEND);
     gl.depthMask(false);
+    if (frame.ghost) {
+      this.placeCar(frame.ghost.worldX, frame.ghost.worldY, frame.ghost.heading, 1);
+      this.drawMesh(this.carMesh, hexToRgb(frame.ghost.color), 0.35);
+    }
     this.drawFxPoints(frame);
     gl.depthMask(true);
+    return true;
   }
 
   private buildCamera(frame: RaceFrameView, player: CarFrameDto | undefined): void {
@@ -340,9 +343,7 @@ export class ApexRenderer {
 
     const zoom = Math.max(0.35, cam.zoom);
     const countdown = frame.countdown !== null;
-    // User zoom 0 = far tabletop, 1 = close. Default sits well pulled back.
-    const z = Math.max(0, Math.min(1, frame.raceZoom));
-    const pull = 2.35 - z * 1.45; // 2.35x far … 0.9x close
+    const pull = raceCameraPull(frame.raceZoom);
     const elev = ((108 * pull) / zoom) * (countdown ? 1.18 : 1);
     const dist = ((78 * pull) / zoom) * (countdown ? 1.12 : 1);
 
@@ -356,7 +357,8 @@ export class ApexRenderer {
       look[2] + (azZ / azLen) * dist,
     ];
 
-    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.2, 900);
+    const far = Math.max(2000, dist * 4);
+    mat4Perspective(this.proj, (40 * Math.PI) / 180, aspect, 1.2, far);
     mat4LookAt(this.view, eye, look, [0, 1, 0]);
     mat4Multiply(this.viewProj, this.proj, this.view);
 

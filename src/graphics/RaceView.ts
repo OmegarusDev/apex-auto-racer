@@ -4,6 +4,7 @@
  */
 
 import { PHYSICS } from '../data/physics';
+import { PRESENT } from '../data/present';
 import type { DisciplineId } from '../data/disciplines';
 import type { VehicleParts } from '../engine/types';
 import { emptyVehicleParts } from '../engine/types';
@@ -17,6 +18,7 @@ import { buildTrackPalette } from './materials';
 import { bakeTrack, type BakeMeta, type MinimapPoint } from './track/TrackBaker';
 import { blitNightVignette, blitTrack, buildNightVignette } from './track/TrackBlit';
 import { writeCarWorld } from './TrackSampler';
+import { raceCamera2dZoomScale } from './raceCameraZoom';
 import type {
   CarFrameDto,
   FxImpulse,
@@ -154,6 +156,11 @@ export class RaceView {
     this.camera.setCountdownTargets(positions, screenW, screenH);
   }
 
+  /** Instantly align live camera to current targets (race enter). */
+  snapCamera(): void {
+    this.camera.snapToTargets();
+  }
+
   syncCameraFollow(player: CarFrameDto, screenW: number, screenH: number): void {
     void screenW;
     void screenH;
@@ -191,12 +198,12 @@ export class RaceView {
     }
   }
 
-  updateFx(dt: number): void {
+  updateFx(dt: number, screenW = 800, screenH = 600): void {
     if (this.useEngine && this.engine !== null) {
-      this.engine.updateFx(dt);
+      this.engine.updateFx(dt, this.camera.x, this.camera.y);
       return;
     }
-    this.particles.update(dt);
+    this.particles.update(dt, screenW, screenH);
   }
 
   draw(ctx: CanvasRenderingContext2D, frame: RaceFrameView): void {
@@ -208,23 +215,25 @@ export class RaceView {
         this.engine.resize(
           frame.screenW,
           frame.screenH,
-          Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap),
+          Math.min(window.devicePixelRatio || 1, PRESENT.dprCap),
         );
-        this.engine.render(frame);
-        // HUD canvas stays transparent over the GL world.
-        ctx.clearRect(0, 0, frame.screenW, frame.screenH);
-        return;
+        const drew = this.engine.render(frame);
+        if (drew) {
+          // HUD canvas stays transparent over the GL world.
+          ctx.clearRect(0, 0, frame.screenW, frame.screenH);
+          return;
+        }
+        // Tiny / missing mesh frame — keep prior HUD, or fall through if baked.
+        if (!this.baked || !this.bakeMeta) return;
       }
     }
 
     if (!this.baked || !this.bakeMeta) return;
     const { camera, screenW, screenH } = frame;
-    // Apply race zoom to 2D blit (GL path uses frame.raceZoom in ApexRenderer).
-    const z = Math.max(0, Math.min(1, frame.raceZoom));
     const cam2d = {
       x: camera.x,
       y: camera.y,
-      zoom: camera.zoom * (0.28 + z * 0.9),
+      zoom: camera.zoom * raceCamera2dZoomScale(frame.raceZoom),
     };
 
     blitTrack(ctx, this.baked, this.bakeMeta, cam2d, screenW, screenH);

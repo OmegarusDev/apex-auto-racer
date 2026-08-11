@@ -79,13 +79,18 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     h: zoomH,
   };
 
+  // Rain + night chips stack under zoom — keep them out of the gas pad.
+  const chipH = pad(token, 2.6);
+  const chipStack =
+    pad(token, 0.5) + chipH + pad(token, 0.4) + chipH;
+
   // Expand TR dead zone so fat fingers don't gas through chrome.
   const trPad = pad(token, 0.75);
   const trZone: ChromeRect = {
     x: Math.min(mmX, pause.x, zoomSlider.x) - trPad,
     y: safe.top,
     w: w - Math.min(mmX, pause.x, zoomSlider.x) + trPad,
-    h: zoomSlider.y + zoomSlider.h + trPad - safe.top,
+    h: zoomSlider.y + zoomSlider.h + chipStack + trPad - safe.top,
   };
 
   return {

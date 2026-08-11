@@ -3,13 +3,14 @@ import type { GameContext } from '../engine/GameContext';
 import { BALANCE } from '../data/balance';
 import { getTrait } from '../data/traits';
 import { PHYSICS } from '../data/physics';
+import { PRESENT } from '../data/present';
 import {
   RaceDirector,
   type CountdownPhase,
   type GhostSample,
   type GhostTrace,
 } from '../engine/RaceDirector';
-import type { OnboardingFlags, RaceEvent, VehicleParts } from '../engine/types';
+import type { OnboardingFlags, RaceEvent } from '../engine/types';
 import {
   intentHudLabel,
   intentTickerPhrase,
@@ -17,15 +18,15 @@ import {
 } from '../engine/BrainIntent';
 import {
   buildRaceConfig,
-  buildResultsPayload,
-  loadGhostTrace,
-  storeGhostTrace,
   type RaceLaunchConfig,
+} from '../career/raceLaunch';
+import {
+  buildResultsPayload,
   type RaceObjectiveStats,
-} from '../engine/raceTypes';
+} from '../career/resultsPayload';
+import { loadGhostTrace, storeGhostTrace } from '../career/ghostStore';
 import { RaceView } from '../graphics/RaceView';
 import { writeCarWorld } from '../graphics/TrackSampler';
-import { hslToHex } from '../graphics/engine/math';
 import type { CarFrameDto, FxImpulse, RaceFrameView } from '../graphics/types';
 import {
   drawPegMeter,
@@ -36,6 +37,10 @@ import {
   wantsShiftCue,
 } from '../graphics/RaceFantasyHud';
 import { raceChromeLayout, type RaceChromeLayout } from '../graphics/hud/raceChromeLayout';
+import { buildCarFrame as buildCarFrameDto } from './race/frameBus';
+import { setupCountdownCamera, updateCamera as updateRaceCamera } from './race/raceCamera';
+import { updateCountdownAudio as bridgeCountdownAudio } from './race/audioBridge';
+
 import {
   drawButton,
   handleButton,
@@ -65,19 +70,6 @@ const TICKER_TTL = 6;
 
 const carPoseScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
 const ghostScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
-
-/** Soft rival paint — team hue nudged by loadout strength. Always #rrggbb. */
-function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts): string {
-  const hue = teamCount <= 0 ? 200 : Math.round((teamId * 360) / teamCount) % 360;
-  let tierSum = 0;
-  for (const k of Object.keys(parts) as (keyof VehicleParts)[]) {
-    tierSum += parts[k] ?? 1;
-  }
-  const avg = tierSum / 7;
-  const light = 48 + Math.min(12, avg * 2);
-  const sat = 62 + Math.min(12, (avg - 1) * 3);
-  return hslToHex(hue, sat, light);
-}
 
 interface TickerLine {
   text: string;
@@ -205,7 +197,6 @@ export class RaceScene implements Scene {
       this.director = new RaceDirector(raceConfig);
       const worldEl = document.querySelector<HTMLCanvasElement>('#world');
       if (worldEl !== null) {
-        worldEl.classList.add('is-live');
         this.view.attachWorldCanvas(worldEl);
       }
       this.view.prepare({
@@ -215,11 +206,16 @@ export class RaceScene implements Scene {
         rain: this.director.rain,
       });
       if (worldEl !== null) {
-        this.view.resizeWorld(
-          this.g.canvas.clientWidth,
-          this.g.canvas.clientHeight,
-          Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap),
-        );
+        if (this.view.usingEngine) {
+          worldEl.classList.add('is-live');
+          this.view.resizeWorld(
+            this.g.canvas.clientWidth,
+            this.g.canvas.clientHeight,
+            Math.min(window.devicePixelRatio || 1, PRESENT.dprCap),
+          );
+        } else {
+          worldEl.classList.remove('is-live');
+        }
       }
       this.g.audio.setDiscipline?.(this.launch.discipline);
       this.g.audio.setRain(this.director.rain);
@@ -444,43 +440,7 @@ export class RaceScene implements Scene {
   }
 
   private buildCarFrame(director: RaceDirector, playerAccent: string): CarFrameDto[] {
-    const track = this.view.getTrack();
-    const teamCount = director.config.format.teamCount;
-    const out = this.frameCars;
-    out.length = 0;
-    if (track === null) return out;
-
-    for (const car of director.cars) {
-      writeCarWorld(track, car.s, car.l, carPoseScratch, car.slipAngle);
-      const parts = director.partTiersFor(car.id);
-      const color = car.isPlayerControlled
-        ? playerAccent
-        : rivalPaint(car.teamId, teamCount, parts);
-      out.push({
-        id: car.id,
-        s: car.s,
-        l: car.l,
-        v: car.v,
-        slipAngle: car.slipAngle,
-        heading: carPoseScratch.heading,
-        color,
-        isPlayer: car.isPlayerControlled,
-        tyreTemp: car.tyreTemp,
-        condition: car.condition,
-        slotMode: car.slotMode,
-        driftState: car.driftState,
-        spinRemaining: car.spinRemaining,
-        gripUsage: car.gripUsage,
-        partTiers: parts,
-        worldX: carPoseScratch.x,
-        worldY: carPoseScratch.y,
-        tangentX: carPoseScratch.tx,
-        tangentY: carPoseScratch.ty,
-        lineNoise: car.stats.lineNoise,
-      });
-    }
-    this.frameCars = out;
-    return out;
+    return buildCarFrameDto(this.view, director, playerAccent, this.frameCars);
   }
 
   private openPause(): void {
@@ -648,43 +608,32 @@ export class RaceScene implements Scene {
   }
 
   private setupCountdownCamera(): void {
-    const director = this.director;
-    if (director === null) return;
-    const accent = disciplineAccent(this.launch.discipline);
-    const cars = this.buildCarFrame(director, accent);
-    this.view.syncCameraCountdown(
-      cars,
+    // CameraDirector seam
+    setupCountdownCamera(
+      this.view,
+      this.director,
+      this.launch.discipline,
+      this.frameCars,
       this.g.canvas.clientWidth,
       this.g.canvas.clientHeight,
     );
   }
 
   private updateCamera(director: RaceDirector): void {
-    const accent = disciplineAccent(this.launch.discipline);
-    const cars = this.buildCarFrame(director, accent);
-    const w = this.g.canvas.clientWidth;
-    const h = this.g.canvas.clientHeight;
-
-    if (director.countdown !== null) {
-      this.view.syncCameraCountdown(cars, w, h);
-    } else {
-      const player = cars.find((c) => c.isPlayer) ?? cars[0];
-      if (player !== undefined) {
-        this.view.syncCameraFollow(player, w, h);
-      }
-    }
-
-    this.view.updateCamera(this.lastDt);
+    // CameraDirector seam
+    updateRaceCamera(
+      this.view,
+      director,
+      this.launch.discipline,
+      this.frameCars,
+      this.g.canvas.clientWidth,
+      this.g.canvas.clientHeight,
+      this.lastDt,
+    );
   }
 
   private updateCountdownAudio(phase: CountdownPhase): void {
-    if (phase === this.prevCountdown) return;
-    if (phase === 3 || phase === 2 || phase === 1) {
-      this.g.audio.playCountdown(phase);
-    } else if (phase === 'go') {
-      this.g.audio.playGo();
-    }
-    this.prevCountdown = phase;
+    this.prevCountdown = bridgeCountdownAudio(this.g.audio, phase, this.prevCountdown);
   }
 
   private updateCarAudioAndParticles(director: RaceDirector): void {
@@ -861,7 +810,11 @@ export class RaceScene implements Scene {
     }
 
     this.view.applyFx(this.fxImpulses);
-    this.view.updateFx(this.lastDt);
+    this.view.updateFx(
+      this.lastDt,
+      this.g.canvas.clientWidth,
+      this.g.canvas.clientHeight,
+    );
   }
 
   private updateTicker(events: readonly RaceEvent[], eventSeq: number, dt: number): void {

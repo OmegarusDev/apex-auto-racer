@@ -32,10 +32,9 @@ import {
   drawBackground,
   onSceneEnter,
   onSceneResize,
-  generateFreeAgents,
-  spendStatPoint,
-  xpToNextLevel,
-} from './sceneUtils';
+} from './sceneChrome';
+import { generateFreeAgents } from '../career/roster';
+import { spendStatPoint, xpToNextLevel } from '../career/xp';
 
 export class TeamManagementScene implements Scene {
   private toasts = new ToastManager();

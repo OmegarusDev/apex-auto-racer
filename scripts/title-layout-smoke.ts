@@ -1,5 +1,5 @@
 import { createTheme } from '../src/ui/theme';
-import { computeTitleLayout, measureTitleLogoHeight } from '../src/scenes/sceneUtils';
+import { computeTitleLayout, measureTitleLogoHeight } from '../src/scenes/titleArt';
 
 const sizes: [number, number, string][] = [
   [390, 844, 'phone portrait'],

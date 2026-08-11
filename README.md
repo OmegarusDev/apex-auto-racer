@@ -41,7 +41,7 @@ Scalextric-style pedal autobattler. Hold gas and brake; steering is automatic. G
 npm install
 npm run play          # local game
 npm run build         # production bundle
-npm run validate      # feel contract (21 gates)
+npm run validate      # feel contract (24 gates)
 ```
 
 ## Stack

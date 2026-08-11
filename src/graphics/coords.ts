@@ -1,7 +1,7 @@
-import { PHYSICS } from '../data/physics';
+import { PRESENT } from '../data/present';
 import type { CameraTransform } from './Camera';
 
-export const PX_PER_M = PHYSICS.pxPerM;
+export const PX_PER_M = PRESENT.pxPerM;
 
 export interface ScreenPoint {
   x: number;

@@ -2,7 +2,7 @@ import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
 import { refillObjectives } from '../engine/SaveManager';
 import { RANK_NAMES } from '../data/balance';
-import type { ResultsPayload } from '../engine/raceTypes';
+import type { ResultsPayload } from '../career/resultsPayload';
 import { effectiveStats } from '../engine/stats';
 import type { DriverStatKey } from '../ui/components';
 import {
@@ -33,15 +33,12 @@ import {
   drawBackground,
   onSceneEnter,
   onSceneResize,
-  disciplineAccent,
-  driverSpendData,
-  spendStatPoint,
-  buyPartTier,
-  repairVehicle,
-  launchRace,
-  findDriver,
-  makeQuickRaceConfig,
-} from './sceneUtils';
+} from './sceneChrome';
+import { disciplineAccent } from '../career/disciplinesUi';
+import { buyPartTier, driverSpendData, repairVehicle } from '../career/garage';
+import { spendStatPoint } from '../career/xp';
+import { findDriver } from '../career/roster';
+import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
 import { CampaignScene } from './CampaignScene';
 
 type ResultsPhase = 'podium' | 'standings' | 'payout' | 'xp' | 'done';

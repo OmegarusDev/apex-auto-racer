@@ -4,10 +4,8 @@ export const PHYSICS = {
   dt: 1 / 120,
   brainEveryN: 4,
   g: 9.81,
-  pxPerM: 5,
   carLength: 5.1,
   carWidth: 2.3,
-  dprCap: 2.0,
   pedalEaseMs: 80,
   /** Cosmetic/engine RPM anchors for the assisted gearbox. */
   rpmIdle: 900,

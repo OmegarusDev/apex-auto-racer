@@ -5,23 +5,10 @@ import { OBJECTIVES } from '../data/objectives';
 import type { ObjectiveKind } from '../data/objectives';
 import { TOURNAMENTS } from '../data/tournaments';
 import type { DisciplineId } from '../data/disciplines';
-import type { RaceConfig, RaceResult, GhostTrace } from './RaceDirector';
-import type { Driver, GameState, TournamentStandingsEntry } from './types';
-
-export interface RaceLaunchConfig {
-  discipline: DisciplineId;
-  trackSeed: number;
-  raceSeed: number;
-  laps: number;
-  formatId: string;
-  playerLineup: string[];
-  leadDriverId: string;
-  mode: 'quick' | 'tournament';
-  tournamentDefId?: string;
-  again?: boolean;
-  /** Where Results Back should land — Title for Quick Race, Campaign otherwise. */
-  returnTo?: 'title' | 'campaign';
-}
+import type { RaceResult } from '../engine/RaceDirector';
+import type { GameState, TournamentStandingsEntry } from '../engine/types';
+import type { RaceLaunchConfig } from './raceLaunch';
+import { xpToNextLevel } from './xp';
 
 export interface RaceResultEntry {
   driverId: string;
@@ -80,7 +67,10 @@ export interface ResultsSceneOptions {
 export type RaceCompleteHandler = (payload: ResultsPayload) => void;
 
 export interface RaceSceneLike {
-  new (ctx: import('./GameContext').GameContext, config: RaceLaunchConfig): import('./SceneManager').Scene;
+  new (
+    ctx: import('../engine/GameContext').GameContext,
+    config: RaceLaunchConfig,
+  ): import('../engine/SceneManager').Scene;
 }
 
 export interface RaceObjectiveStats {
@@ -93,89 +83,6 @@ export interface RaceObjectiveStats {
   startGridPosition: number;
   vehicleConditionAtStart: number;
   vehicleRepairedBeforeRace: boolean;
-}
-
-/** Championship standings row count follows format.teamCount. */
-export function buildTournamentStandings(
-  teamCount: number,
-  rivalNames?: readonly string[],
-): TournamentStandingsEntry[] {
-  const standings: TournamentStandingsEntry[] = [{ teamId: 0, points: 0, name: 'You' }];
-  for (let t = 1; t < teamCount; t++) {
-    const named = rivalNames?.[t - 1];
-    standings.push({
-      teamId: t,
-      points: 0,
-      name: named && named.length > 0 ? named : `Rival ${t}`,
-    });
-  }
-  return standings;
-}
-
-let storedGhost: GhostTrace | null = null;
-let storedGhostCarId: string | null = null;
-
-export function storeGhostTrace(trace: GhostTrace, playerCarId: string): void {
-  storedGhost = trace;
-  storedGhostCarId = playerCarId;
-}
-
-export function loadGhostTrace(): { trace: GhostTrace; carId: string } | null {
-  if (storedGhost === null || storedGhostCarId === null) return null;
-  return { trace: storedGhost, carId: storedGhostCarId };
-}
-
-export function buildRaceConfig(state: GameState, launch: RaceLaunchConfig): RaceConfig {
-  const format = FORMATS.find((f) => f.id === launch.formatId) ?? FORMATS[0]!;
-  const playerTeamDrivers = launch.playerLineup
-    .map((id) => state.roster.find((d) => d.id === id))
-    .filter((d): d is Driver => d !== undefined);
-
-  const unlocked = Math.max(
-    state.rankUnlocked.track,
-    state.rankUnlocked.street,
-    state.rankUnlocked.rally,
-    state.rankUnlocked[launch.discipline] ?? 0,
-  );
-  /**
-   * Quick Race is a sparring challenge, not a soft tutorial field.
-   * Floor at rank band 2 and nudge +1 above career unlock so early careers
-   * still face upgraded cars and skilled drivers (tournament keeps true rank).
-   */
-  const rank =
-    launch.mode === 'quick'
-      ? Math.min(5, Math.max(unlocked + 1, 2))
-      : unlocked;
-  const statRange = BALANCE.opponentStatRanges[rank] ?? BALANCE.opponentStatRanges[0]!;
-  const opponentBudget: [number, number] = [statRange[0] * 4, statRange[1] * 4];
-  const opponentPartRange = BALANCE.opponentPartTiers[rank] ?? BALANCE.opponentPartTiers[0]!;
-
-  let opponentDrivers: Driver[] | undefined;
-  if (launch.mode === 'tournament') {
-    const progress = state.inProgressTournaments[launch.discipline];
-    if (progress !== null) {
-      opponentDrivers = progress.opponentDrivers;
-    }
-  }
-
-  return {
-    discipline: launch.discipline,
-    trackSeed: launch.trackSeed,
-    raceSeed: launch.raceSeed,
-    laps: launch.laps,
-    format,
-    playerTeamDrivers,
-    leadDriverId: launch.leadDriverId,
-    playerVehicle: state.vehicles[launch.discipline],
-    opponentBudget,
-    opponentPartRange,
-    isTournament: launch.mode === 'tournament',
-    opponentDrivers,
-  };
-}
-
-function xpToNextLevel(level: number): number {
-  return Math.round(BALANCE.levelCostBase * Math.pow(BALANCE.levelCostGrowth, level - 1));
 }
 
 function evaluateObjectives(

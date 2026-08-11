@@ -1,4 +1,4 @@
-import { PHYSICS } from './data/physics';
+import { PRESENT } from './data/present';
 import { AudioEngine } from './audio/AudioEngine';
 import { initGameContext } from './engine/GameContext';
 import { TitleScene } from './scenes/TitleScene';
@@ -7,7 +7,7 @@ import { bootDeterminismCheck } from './engine/determinismBoot';
 import { invalidateSafeArea } from './ui/theme';
 
 function setupHudCanvas(canvas: HTMLCanvasElement): { w: number; h: number; dpr: number } {
-  const dpr = Math.min(window.devicePixelRatio || 1, PHYSICS.dprCap);
+  const dpr = Math.min(window.devicePixelRatio || 1, PRESENT.dprCap);
   const vv = window.visualViewport;
   const w = Math.max(1, Math.floor(vv?.width ?? canvas.clientWidth));
   const h = Math.max(1, Math.floor(vv?.height ?? canvas.clientHeight));

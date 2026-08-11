@@ -23,7 +23,7 @@ import {
   type SliderDef,
 } from '../ui/components';
 import { ACCENT_TRACK } from '../ui/theme';
-import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneUtils';
+import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneChrome';
 import { TitleScene } from './TitleScene';
 
 type ResetStep = 'none' | 'confirm1' | 'confirm2';

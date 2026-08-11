@@ -21,15 +21,17 @@ import {
 import {
   buildUi,
   drawBackground,
-  drawTopDownCar,
   onSceneEnter,
   onSceneResize,
-  vehicleRadarValues,
-  disciplineLabel,
-  disciplineAccent,
+} from './sceneChrome';
+import { drawTopDownCar } from './titleArt';
+import {
   DISCIPLINE_ORDER,
   carouselNav,
-} from './sceneUtils';
+  disciplineAccent,
+  disciplineLabel,
+} from '../career/disciplinesUi';
+import { vehicleRadarValues } from '../career/garage';
 import { CampaignScene } from './CampaignScene';
 import { TuningScene } from './TuningScene';
 import { TeamManagementScene } from './TeamManagementScene';

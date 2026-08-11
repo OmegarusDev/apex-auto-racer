@@ -1,4 +1,5 @@
 import { PHYSICS } from '../data/physics';
+import { PRESENT } from '../data/present';
 import type { Vec2 } from '../engine/types';
 
 export type CameraMode = 'countdown' | 'follow';
@@ -51,8 +52,8 @@ export class Camera {
     this.targetX = (minX + maxX) * 0.5;
     this.targetY = (minY + maxY) * 0.5;
 
-    const worldPxX = spanX * PHYSICS.pxPerM;
-    const worldPxY = spanY * PHYSICS.pxPerM;
+    const worldPxX = spanX * PRESENT.pxPerM;
+    const worldPxY = spanY * PRESENT.pxPerM;
     const fitZoom = Math.min(
       (screenW - padding * 2) / worldPxX,
       (screenH - padding * 2) / worldPxY,
@@ -84,6 +85,14 @@ export class Camera {
     this.x += (this.targetX - this.x) * posK;
     this.y += (this.targetY - this.y) * posK;
     this.zoom += (this.targetZoom - this.zoom) * zoomK;
+    this.zoom = clamp(this.zoom, PHYSICS.zoomMin, PHYSICS.zoomMax);
+  }
+
+  /** Jump live pose onto current targets (race enter / countdown setup). */
+  snapToTargets(): void {
+    this.x = this.targetX;
+    this.y = this.targetY;
+    this.zoom = clamp(this.targetZoom, PHYSICS.zoomMin, PHYSICS.zoomMax);
   }
 
   getTransform(): CameraTransform {

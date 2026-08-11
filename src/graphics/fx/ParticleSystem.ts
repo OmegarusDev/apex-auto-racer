@@ -192,7 +192,9 @@ export class ParticleSystem {
     }
   }
 
-  update(dt: number): void {
+  update(dt: number, screenW = 800, screenH = 600): void {
+    this.screenW = Math.max(1, screenW);
+    this.screenH = Math.max(1, screenH);
     this.tickSkids(dt);
     this.tickPuffs(this.dust, DUST_CAP, dt, 0.92);
     this.tickPuffs(this.smoke, SMOKE_CAP, dt, 0.96);

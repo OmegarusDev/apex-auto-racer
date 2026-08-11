@@ -17,20 +17,21 @@ import {
 import { BRAND_SIGNAL } from '../ui/brand';
 import {
   buildUi,
+  drawBackground,
+  onSceneEnter,
+  onSceneResize,
+} from './sceneChrome';
+import {
   computeTitleLayout,
   createTitlePreviewTrack,
-  DISCIPLINE_ORDER,
-  drawBackground,
   drawRibbonTrack,
   drawTitleAtmosphere,
   drawTitleLogo,
   freshTitlePreviewSeed,
-  launchRace,
-  makeQuickRaceConfig,
-  onSceneEnter,
-  onSceneResize,
   type TitlePreviewTrack,
-} from './sceneUtils';
+} from './titleArt';
+import { DISCIPLINE_ORDER } from '../career/disciplinesUi';
+import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
 import { GarageScene } from './GarageScene';
 import { OptionsScene } from './OptionsScene';
 

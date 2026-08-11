@@ -1,6 +1,7 @@
 import { BALANCE } from '../../data/balance';
 import { FORMATS } from '../../data/formats';
 import { PHYSICS } from '../../data/physics';
+import { getDisciplineProfile } from '../../data/disciplineProfiles';
 import { RaceDirector, type RaceConfig } from '../RaceDirector';
 import { enterDeslot } from '../Vehicle';
 import { interpolateAtSInto, type InterpolatedNode } from '../RacingLine';
@@ -133,5 +134,28 @@ export function runRallyDeslotLongGate(): FeelGateResult {
 }
 
 export function runDisciplineGates(): FeelGateResult[] {
-  return [runStreetWallBiteGate(), runRallyDeslotLongGate()];
+  return [runStreetWallBiteGate(), runRallyDeslotLongGate(), runDisciplineProfileMatchGate()];
+}
+
+/** Profile fields must equal legacy constants (no numerical drift). */
+export function runDisciplineProfileMatchGate(): FeelGateResult {
+  const street = getDisciplineProfile('street');
+  const rally = getDisciplineProfile('rally');
+  const track = getDisciplineProfile('track');
+  const checks: string[] = [];
+  if (street.wallStunMult !== PHYSICS.streetWallStunMult) checks.push('street.wallStun');
+  if (track.wallStunMult !== 1 || rally.wallStunMult !== 1) checks.push('nonStreet.wallStun');
+  if (rally.deslotMinTimeMult !== 1.35) checks.push('rally.deslotMin');
+  if (track.deslotMinTimeMult !== 1 || street.deslotMinTimeMult !== 1) checks.push('nonRally.deslotMin');
+  if (rally.deslotScrubMult !== 1.2) checks.push('rally.scrub');
+  if (rally.runoffDrag !== PHYSICS.runoffDragRally) checks.push('rally.runoff');
+  if (track.runoffDrag !== PHYSICS.runoffDrag) checks.push('track.runoff');
+  if (street.gearbox.gearCount !== 5 || rally.gearbox.gearCount !== 4 || track.gearbox.gearCount !== 6) {
+    checks.push('gearCount');
+  }
+  return {
+    id: 'DISCIPLINE_PROFILE_MATCH',
+    ok: checks.length === 0,
+    detail: checks.length === 0 ? 'profile≡legacy' : checks.join(','),
+  };
 }

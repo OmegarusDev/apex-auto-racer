@@ -25,6 +25,7 @@ import {
   type ModalDef,
   type ThemeTokens,
   type UiContext,
+  truncateText,
 } from '../ui/components';
 import { ACCENT_TRACK } from '../ui/theme';
 import {
@@ -207,12 +208,17 @@ export class TeamManagementScene implements Scene {
     ctx.fillStyle = token.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(driver.name, x + pad(token, 1.5), cy);
+    const nameMax = w - pad(token, 3);
+    ctx.fillText(truncateText(ctx, driver.name, nameMax), x + pad(token, 1.5), cy);
     cy += token.fontTitle + pad(token, 0.25);
 
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
     ctx.fillStyle = accent;
-    ctx.fillText(`${trait.name} · Lv ${driver.level}`, x + pad(token, 1.5), cy);
+    ctx.fillText(
+      truncateText(ctx, `${trait.name} · Lv ${driver.level}`, nameMax),
+      x + pad(token, 1.5),
+      cy,
+    );
     cy += token.fontCaption + pad(token, 0.5);
 
     if (driver.unspentPoints > 0) {

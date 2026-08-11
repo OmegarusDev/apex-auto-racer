@@ -29,6 +29,7 @@ import {
   beginClip,
   endClip,
   ToastManager,
+  truncateText,
   type ButtonDef,
   type ModalDef,
   type ThemeTokens,
@@ -460,19 +461,31 @@ export class CampaignScene implements Scene {
     for (const objId of state.objectives.active.slice(0, BALANCE.activeObjectives)) {
       const def = getObjectiveDef(objId);
       drawRow(ctx, { x: 0, y, w: view.w, h: objH }, lui);
+      const rewardStr = `$${def?.reward ?? 0}`;
       ctx.save();
+      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      const rewardW = ctx.measureText(rewardStr).width;
+      const textMax = view.w - pad(token, 2) - rewardW - pad(token, 1);
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(def?.title ?? objId, pad(token, 1), y + objH * 0.35);
+      ctx.fillText(
+        truncateText(ctx, def?.title ?? objId, textMax),
+        pad(token, 1),
+        y + objH * 0.35,
+      );
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
-      ctx.fillText(def?.description ?? '', pad(token, 1), y + objH * 0.68);
+      ctx.fillText(
+        truncateText(ctx, def?.description ?? '', textMax),
+        pad(token, 1),
+        y + objH * 0.68,
+      );
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = accent;
       ctx.textAlign = 'right';
-      ctx.fillText(`$${def?.reward ?? 0}`, view.w - pad(token, 1), y + objH * 0.5);
+      ctx.fillText(rewardStr, view.w - pad(token, 1), y + objH * 0.5);
       ctx.restore();
       y += objH + objGap;
     }
@@ -493,11 +506,19 @@ export class CampaignScene implements Scene {
         ctx.fillStyle = token.disabled;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(t.name, pad(token, 1), y + lockedH * 0.5);
+        const lockLabel = `Locked · ${RANK_NAMES[rank]}`;
         ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-        ctx.fillStyle = token.disabled;
+        const lockW = ctx.measureText(lockLabel).width;
+        ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
+        ctx.fillText(
+          truncateText(ctx, t.name, view.w - pad(token, 2) - lockW - pad(token, 1)),
+          pad(token, 1),
+          y + lockedH * 0.5,
+        );
+        ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+        ctx.fillStyle = token.textDim;
         ctx.textAlign = 'right';
-        ctx.fillText('Locked', view.w - pad(token, 1), y + lockedH * 0.5);
+        ctx.fillText(lockLabel, view.w - pad(token, 1), y + lockedH * 0.5);
         ctx.restore();
         y += lockedH + objGap;
         continue;

@@ -14,8 +14,8 @@ import {
   pad,
   ensureMinTouch,
   statBarHeight,
-  hitRect,
   isPortrait,
+  truncateText,
   type ButtonDef,
 } from '../ui/components';
 import {
@@ -27,7 +27,6 @@ import {
 import { drawTopDownCar } from './titleArt';
 import {
   DISCIPLINE_ORDER,
-  carouselNav,
   disciplineAccent,
   disciplineLabel,
 } from '../career/disciplinesUi';
@@ -141,63 +140,78 @@ export class GarageScene implements Scene {
     const navSize = ensureMinTouch(pad(token, 5), token);
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const btnGap = pad(token, 0.75);
-    const carW = Math.min(view.w * (portrait ? 0.55 : 0.42), pad(token, 20));
-    const carH = carW * 1.15;
+    // Tighter hero so Tuning/Team sit nearer the action, not over empty floor.
+    const carW = Math.min(view.w * (portrait ? 0.48 : 0.38), pad(token, 17));
+    const carH = carW * 1.1;
     const radarR = portrait
-      ? Math.min(view.w * 0.22, pad(token, 8))
-      : Math.min(view.w * 0.18, pad(token, 9));
+      ? Math.min(view.w * 0.2, pad(token, 7))
+      : Math.min(view.w * 0.16, pad(token, 7.5));
+    // Extra inset so radar labels never clip the content edge.
+    const radarInset = pad(token, 2.5) + token.fontCaption;
 
     // Measure content height
-    let contentH = pad(token, 1) + navSize + pad(token, 1.5);
+    let contentH = pad(token, 0.5) + navSize + pad(token, 1);
     if (portrait) {
-      contentH += carH + pad(token, 1) + radarR * 2 + pad(token, 1.5);
+      contentH += carH + pad(token, 0.75) + radarR * 2 + pad(token, 2.5) + pad(token, 1);
     } else {
-      contentH += Math.max(carH, radarR * 2) + pad(token, 1.5);
+      contentH += Math.max(carH, radarR * 2 + pad(token, 2)) + pad(token, 1);
     }
     contentH +=
       statBarHeight(token) +
-      pad(token, 1.5) +
-      token.fontCaption +
       pad(token, 1) +
+      token.fontCaption +
+      pad(token, 0.75) +
       btnH * 1.15 +
       btnGap +
-      pad(token, 0.5) +
+      pad(token, 0.35) +
       token.fontCaption +
-      pad(token, 1) +
+      pad(token, 0.75) +
       btnH +
-      pad(token, 2);
+      pad(token, 1.5);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
 
     this.scroller.begin(ctx, view);
-    let y = pad(token, 0.5);
+    let y = pad(token, 0.25);
 
-    // Discipline nav — draw and hit at same Y
+    // Discipline nav — labeled prev/next instead of bare chevrons
+    const discLabel = disciplineLabel(discipline).toUpperCase();
+    const prevBtn: ButtonDef = {
+      x: 0,
+      y,
+      w: navSize,
+      h: navSize,
+      label: '‹',
+      onClick: () => this.prevDiscipline(),
+    };
+    const nextBtn: ButtonDef = {
+      x: view.w - navSize,
+      y,
+      w: navSize,
+      h: navSize,
+      label: '›',
+      onClick: () => this.nextDiscipline(),
+    };
+    drawButton(ctx, prevBtn, lui);
+    drawButton(ctx, nextBtn, lui);
     ctx.save();
     ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = accent;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(disciplineLabel(discipline).toUpperCase(), view.w * 0.5, y + navSize * 0.5);
-    ctx.restore();
-
-    const leftX = 0;
-    const rightX = view.w - navSize;
-    ctx.save();
-    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = hitRect(lui.pointerX, lui.pointerY, leftX, y, navSize, navSize) ? accent : token.text;
-    ctx.fillText('‹', leftX + navSize * 0.5, y + navSize * 0.5);
-    ctx.fillStyle = hitRect(lui.pointerX, lui.pointerY, rightX, y, navSize, navSize) ? accent : token.text;
-    ctx.fillText('›', rightX + navSize * 0.5, y + navSize * 0.5);
+    const titleMax = view.w - navSize * 2 - pad(token, 1);
+    ctx.fillText(truncateText(ctx, discLabel, titleMax), view.w * 0.5, y + navSize * 0.42);
+    ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+    ctx.fillStyle = token.textDim;
+    ctx.fillText('Swipe or tap arrows', view.w * 0.5, y + navSize * 0.78);
     ctx.restore();
     if (!swipeHandled && !this.scroller.isScrolling) {
-      carouselNav(lui, leftX, rightX, y, navSize, () => this.prevDiscipline(), () => this.nextDiscipline());
+      handleButton(prevBtn, lui);
+      handleButton(nextBtn, lui);
     }
-    y += navSize + pad(token, 1.5);
+    y += navSize + pad(token, 1);
 
     if (portrait) {
       const carCx = view.w * 0.5;
@@ -214,21 +228,21 @@ export class GarageScene implements Scene {
         partTiers: vehicle.partTiers,
         condition: vehicle.condition,
       });
-      y += carH + pad(token, 1);
+      y += carH + pad(token, 0.75);
       drawRadarChart(
         ctx,
         {
           x: (view.w - radarR * 2) * 0.5,
-          y,
+          y: y + pad(token, 1.25),
           radius: radarR,
           values: vehicleRadarValues(discipline, vehicle),
         },
         lui,
       );
-      y += radarR * 2 + pad(token, 1.5);
+      y += radarR * 2 + pad(token, 2.5) + pad(token, 1);
     } else {
-      const blockH = Math.max(carH, radarR * 2);
-      const carCx = view.w * 0.55;
+      const blockH = Math.max(carH, radarR * 2 + pad(token, 2.5));
+      const carCx = view.w * 0.58;
       const carCy = y + blockH * 0.5;
       ctx.save();
       const glow = ctx.createRadialGradient(carCx, carCy, 0, carCx, carCy, carW * 0.85);
@@ -245,14 +259,14 @@ export class GarageScene implements Scene {
       drawRadarChart(
         ctx,
         {
-          x: pad(token, 0.5),
+          x: radarInset,
           y: y + (blockH - radarR * 2) * 0.5,
           radius: radarR,
           values: vehicleRadarValues(discipline, vehicle),
         },
         lui,
       );
-      y += blockH + pad(token, 1.5);
+      y += blockH + pad(token, 1);
     }
 
     drawStatBar(
@@ -267,9 +281,9 @@ export class GarageScene implements Scene {
       },
       lui,
     );
-    y += statBarHeight(token) + pad(token, 1.5);
+    y += statBarHeight(token) + pad(token, 1);
     y += drawSectionTitle(ctx, 0, y, 'Race', lui);
-    y += pad(token, 0.5);
+    y += pad(token, 0.35);
 
     const campaignBtn: ButtonDef = {
       x: 0,
@@ -280,9 +294,9 @@ export class GarageScene implements Scene {
       primary: true,
       onClick: () => g.scenes.push(new CampaignScene(discipline)),
     };
-    y += campaignBtn.h + btnGap + pad(token, 0.5);
+    y += campaignBtn.h + btnGap + pad(token, 0.25);
     y += drawSectionTitle(ctx, 0, y, 'Garage', lui);
-    y += pad(token, 0.5);
+    y += pad(token, 0.35);
     const rowW = (view.w - btnGap) * 0.5;
     const tuningBtn: ButtonDef = {
       x: 0,

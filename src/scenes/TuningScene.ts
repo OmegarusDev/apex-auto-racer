@@ -20,6 +20,7 @@ import {
   statBarHeight,
   isPortrait,
   ToastManager,
+  truncateText,
   type ButtonDef,
 } from '../ui/components';
 import {
@@ -98,13 +99,15 @@ export class TuningScene implements Scene {
     const view = shell.contentRect;
     const btnH = ensureMinTouch(pad(token, 4.5), token);
     const rowH = Math.max(btnH + pad(token, 0.5), pad(token, 5.5));
-    const radarR = portrait ? Math.min(view.w * 0.32, pad(token, 10)) : pad(token, 8);
+    const radarR = portrait
+      ? Math.min((view.w - pad(token, 5)) * 0.32, pad(token, 9))
+      : pad(token, 7.5);
 
     const contentH =
       token.fontCaption +
       pad(token, 0.75) +
       radarR * 2 +
-      pad(token, 1.5) +
+      pad(token, 3.5) +
       pad(token, 10) +
       pad(token, 1) +
       token.fontCaption +
@@ -129,13 +132,15 @@ export class TuningScene implements Scene {
     this.scroller.begin(ctx, view);
     let y = 0;
     y += drawSectionTitle(ctx, 0, y, 'Performance', lui);
-    const radarX = portrait ? (view.w - radarR * 2) * 0.5 : 0;
+    const radarX = portrait
+      ? (view.w - radarR * 2) * 0.5
+      : pad(token, 2.5) + token.fontCaption;
     drawRadarChart(
       ctx,
-      { x: radarX, y, radius: radarR, values: vehicleRadarValues(this.discipline, vehicle) },
+      { x: radarX, y: y + pad(token, 1), radius: radarR, values: vehicleRadarValues(this.discipline, vehicle) },
       lui,
     );
-    y += radarR * 2 + pad(token, 1.5);
+    y += radarR * 2 + pad(token, 2.5) + pad(token, 1);
 
     y += drawSectionTitle(ctx, 0, y, 'Loadout preview', lui);
     const previewH = pad(token, 9);
@@ -240,11 +245,19 @@ export class TuningScene implements Scene {
       ctx.fillStyle = this.previewPart === part.id ? accent : token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(part.name, pad(token, 0.5), y + rowH * 0.5);
-
       const buyW = Math.min(pad(token, 10), view.w * 0.28);
+      const nameMax = view.w - buyW - pad(token, 8);
+      ctx.fillText(
+        truncateText(ctx, part.name, Math.max(pad(token, 6), nameMax)),
+        pad(token, 0.5),
+        y + rowH * 0.5,
+      );
+
       const pipR = pad(token, 0.4);
-      let pipX = pad(token, 0.5) + ctx.measureText(part.name).width + pad(token, 1);
+      let pipX =
+        pad(token, 0.5) +
+        ctx.measureText(truncateText(ctx, part.name, Math.max(pad(token, 6), nameMax))).width +
+        pad(token, 1);
       const pipMax = view.w - buyW - pad(token, 1.5);
       for (let p = 0; p <= BALANCE.maxPartTier; p++) {
         if (pipX + pipR > pipMax) break;

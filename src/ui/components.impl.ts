@@ -204,13 +204,174 @@ function setFont(
   ctx.font = `${weight} ${size}px ${family}`;
 }
 
-function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+/** Ellipsize to fit a single line. Call after setting ctx.font. */
+export function truncateText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return '';
   if (ctx.measureText(text).width <= maxWidth) return text;
   let t = text;
   while (t.length > 1 && ctx.measureText(`${t}…`).width > maxWidth) {
     t = t.slice(0, -1);
   }
-  return `${t}…`;
+  return t.length > 0 ? `${t}…` : '…';
+}
+
+/**
+ * Word-wrap into lines that fit maxWidth. Optional maxLines ellipsizes the last line.
+ * Call after setting ctx.font.
+ */
+export function wrapText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines = 0,
+): string[] {
+  const raw = text.trim();
+  if (!raw || maxWidth <= 0) return [];
+  const words = raw.split(/\s+/);
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    const test = cur ? `${cur} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth) {
+      cur = test;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    if (maxLines > 0 && lines.length >= maxLines) {
+      cur = '';
+      break;
+    }
+    // Long single word — hard truncate into the line.
+    if (ctx.measureText(word).width > maxWidth) {
+      lines.push(truncateText(ctx, word, maxWidth));
+      cur = '';
+      if (maxLines > 0 && lines.length >= maxLines) break;
+    } else {
+      cur = word;
+    }
+  }
+  if (cur && (maxLines <= 0 || lines.length < maxLines)) lines.push(cur);
+  if (maxLines > 0 && lines.length > maxLines) {
+    return lines.slice(0, maxLines);
+  }
+  // If we stopped early with leftover words, ellipsize last line.
+  if (maxLines > 0 && lines.length === maxLines) {
+    const used = lines.join(' ').length;
+    if (used < raw.length) {
+      const last = lines[lines.length - 1]!;
+      lines[lines.length - 1] = truncateText(ctx, last.replace(/…$/, ''), maxWidth);
+    }
+  }
+  return lines;
+}
+
+export interface HintBoxOpts {
+  x: number;
+  y: number;
+  /** Max box width (content + padding). */
+  maxW: number;
+  text: string;
+  accent: string;
+  token: ThemeTokens;
+  maxLines?: number;
+  fontSize?: number;
+  align?: 'center' | 'left';
+  /** Plate fill — overlay for race teach, card for menu toasts. */
+  fill?: 'overlay' | 'card';
+}
+
+export interface HintBoxLayout {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  lines: string[];
+}
+
+/** Measure a multi-line teach/toast box (does not draw). */
+export function layoutHintBox(
+  ctx: CanvasRenderingContext2D,
+  opts: HintBoxOpts,
+): HintBoxLayout {
+  const { token } = opts;
+  const maxLines = opts.maxLines ?? 3;
+  const fontSize = opts.fontSize ?? token.fontBody;
+  const padX = pad(token, 1.5);
+  const padY = pad(token, 1);
+  const lineH = fontSize * 1.35;
+  const boxW = Math.min(opts.maxW, opts.maxW);
+  setFont(ctx, token, fontSize, '600');
+  const lines = wrapText(ctx, opts.text, boxW - padX * 2, maxLines);
+  const textH = Math.max(lineH, lines.length * lineH);
+  const boxH = Math.max(ensureMinTouch(pad(token, 4), token), textH + padY * 2);
+  return { x: opts.x, y: opts.y, w: boxW, h: boxH, lines };
+}
+
+/** Draw a multi-line hint/toast plate. Returns layout used. */
+export function drawHintBox(ctx: CanvasRenderingContext2D, opts: HintBoxOpts): HintBoxLayout {
+  const { token, accent } = opts;
+  const layout = layoutHintBox(ctx, opts);
+  const fontSize = opts.fontSize ?? token.fontBody;
+  const lineH = fontSize * 1.35;
+  const align = opts.align ?? 'center';
+
+  ctx.save();
+  ctx.fillStyle = opts.fill === 'card' ? token.card : token.overlay;
+  roundRectPath(ctx, layout.x, layout.y, layout.w, layout.h, pad(token, 0.75));
+  ctx.fill();
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 1;
+  roundRectPath(ctx, layout.x, layout.y, layout.w, layout.h, pad(token, 0.75));
+  ctx.stroke();
+
+  setFont(ctx, token, fontSize, '600');
+  ctx.fillStyle = token.text;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  const textBlockH = layout.lines.length * lineH;
+  const startY = layout.y + (layout.h - textBlockH) * 0.5 + lineH * 0.5;
+  const tx =
+    align === 'center' ? layout.x + layout.w * 0.5 : layout.x + pad(token, 1.5);
+  for (let i = 0; i < layout.lines.length; i++) {
+    ctx.fillText(layout.lines[i]!, tx, startY + i * lineH);
+  }
+  ctx.restore();
+  return layout;
+}
+
+function drawGearIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  color: string,
+): void {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1.5, r * 0.22);
+  const teeth = 6;
+  ctx.beginPath();
+  for (let i = 0; i < teeth; i++) {
+    const a0 = (i / teeth) * Math.PI * 2 - Math.PI / teeth;
+    const a1 = ((i + 0.45) / teeth) * Math.PI * 2 - Math.PI / teeth;
+    const a2 = ((i + 0.55) / teeth) * Math.PI * 2 - Math.PI / teeth;
+    const a3 = ((i + 1) / teeth) * Math.PI * 2 - Math.PI / teeth;
+    const outer = r;
+    const inner = r * 0.68;
+    if (i === 0) ctx.moveTo(cx + Math.cos(a0) * inner, cy + Math.sin(a0) * inner);
+    ctx.lineTo(cx + Math.cos(a0) * outer, cy + Math.sin(a0) * outer);
+    ctx.lineTo(cx + Math.cos(a1) * outer, cy + Math.sin(a1) * outer);
+    ctx.lineTo(cx + Math.cos(a2) * inner, cy + Math.sin(a2) * inner);
+    ctx.lineTo(cx + Math.cos(a3) * inner, cy + Math.sin(a3) * inner);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.32, 0, Math.PI * 2);
+  ctx.fillStyle = '#0b0d0c';
+  ctx.fill();
+  ctx.restore();
 }
 
 // ── Button ──────────────────────────────────────────────────────────────────
@@ -584,12 +745,20 @@ export function drawSlider(ctx: CanvasRenderingContext2D, slider: SliderDef, ui:
   ctx.fillStyle = token.textMuted;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(slider.label, slider.x, slider.y);
+  const pct = `${Math.round(slider.value * 100)}%`;
+  setFont(ctx, token, token.fontCaption, '500');
+  const pctW = ctx.measureText(pct).width;
+  setFont(ctx, token, token.fontCaption, '600');
+  ctx.fillText(
+    truncateText(ctx, slider.label, Math.max(pad(token, 4), slider.w - pctW - pad(token, 1))),
+    slider.x,
+    slider.y,
+  );
 
   setFont(ctx, token, token.fontCaption, '500');
   ctx.fillStyle = token.textDim;
   ctx.textAlign = 'right';
-  ctx.fillText(`${Math.round(slider.value * 100)}%`, slider.x + slider.w, slider.y);
+  ctx.fillText(pct, slider.x + slider.w, slider.y);
 
   ctx.fillStyle = token.bgElevated;
   roundRectPath(ctx, slider.x, trackY, slider.w, trackH, trackH * 0.5);
@@ -750,11 +919,18 @@ export function drawRadarChart(ctx: CanvasRenderingContext2D, chart: RadarChartD
   ctx.fillStyle = token.textMuted;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  // Keep labels inside the chart's horizontal footprint so left/right edges don't clip.
+  const labelInset = pad(token, 0.25);
+  const minX = chart.x + labelInset;
+  const maxX = chart.x + chart.radius * 2 - labelInset;
   for (let i = 0; i < n; i++) {
     const a = angles[i]!;
-    const lx = cx + Math.cos(a) * (chart.radius + pad(token, 1.5));
-    const ly = cy + Math.sin(a) * (chart.radius + pad(token, 1.5));
-    ctx.fillText(RADAR_LABELS[i]!, lx, ly);
+    const label = RADAR_LABELS[i]!;
+    let lx = cx + Math.cos(a) * (chart.radius + pad(token, 1.25));
+    const ly = cy + Math.sin(a) * (chart.radius + pad(token, 1.25));
+    const half = ctx.measureText(label).width * 0.5;
+    lx = Math.max(minX + half, Math.min(maxX - half, lx));
+    ctx.fillText(label, lx, ly);
   }
 
   ctx.restore();
@@ -870,29 +1046,36 @@ export class ToastManager {
     if (this.items.length === 0) return;
     const { token, w } = ui;
     const toastW = Math.min(w - pad(token, 4), pad(token, 44));
-    const toastH = ensureMinTouch(pad(token, 5), token);
     let y = ui.h - pad(token, 2) - token.safe.bottom;
 
     ctx.save();
     for (let i = this.items.length - 1; i >= 0; i--) {
       const item = this.items[i]!;
-      y -= toastH + pad(token, 0.75);
-      const x = (w - toastW) * 0.5;
+      const measured = layoutHintBox(ctx, {
+        x: (w - toastW) * 0.5,
+        y: 0,
+        maxW: toastW,
+        text: item.message,
+        accent: item.accent ?? ui.accent,
+        token,
+        maxLines: 2,
+        fontSize: token.fontBody,
+        fill: 'card',
+      });
+      y -= measured.h + pad(token, 0.75);
       const alpha = Math.min(1, item.ttl / 0.35);
-
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = token.card;
-      roundRectPath(ctx, x, y, toastW, toastH, pad(token, 0.75));
-      ctx.fill();
-      ctx.strokeStyle = item.accent ?? ui.accent;
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
-      setFont(ctx, token, token.fontBody, '500');
-      ctx.fillStyle = token.text;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(truncateText(ctx, item.message, toastW - pad(token, 2)), x + toastW * 0.5, y + toastH * 0.5);
+      drawHintBox(ctx, {
+        x: measured.x,
+        y,
+        maxW: toastW,
+        text: item.message,
+        accent: item.accent ?? ui.accent,
+        token,
+        maxLines: 2,
+        fontSize: token.fontBody,
+        fill: 'card',
+      });
     }
     ctx.restore();
   }
@@ -900,12 +1083,42 @@ export class ToastManager {
 
 // ── Header ──────────────────────────────────────────────────────────────────
 
-export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui: UiContext): void {
-  const { token, accent } = ui;
+/** Wide enough for "Back" / "Options" labels beside icons. */
+function headerWideLabels(headerW: number, token: ThemeTokens): boolean {
+  return headerW >= pad(token, 48);
+}
+
+function headerBackRect(header: HeaderDef, token: ThemeTokens): Rect {
   const btnSize = ensureMinTouch(pad(token, 5.5), token);
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
-  const safeL = token.safe.left;
-  const safeR = token.safe.right;
+  const wide = headerWideLabels(header.w, token);
+  const w = wide ? ensureMinTouch(pad(token, 10), token) : btnSize;
+  return {
+    x: header.x + pad(token, 0.75) + token.safe.left,
+    y: midY - btnSize * 0.5,
+    w,
+    h: btnSize,
+  };
+}
+
+function headerSettingsRect(header: HeaderDef, token: ThemeTokens): Rect {
+  const btnSize = ensureMinTouch(pad(token, 5.5), token);
+  const midY = headerContentTop(token) + headerContentH(token) * 0.5;
+  const wide = headerWideLabels(header.w, token);
+  const w = wide ? ensureMinTouch(pad(token, 12), token) : btnSize;
+  const rightEdge = header.x + header.w - pad(token, 0.75) - token.safe.right;
+  return {
+    x: rightEdge - w,
+    y: midY - btnSize * 0.5,
+    w,
+    h: btnSize,
+  };
+}
+
+export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui: UiContext): void {
+  const { token, accent } = ui;
+  const midY = headerContentTop(token) + headerContentH(token) * 0.5;
+  const wide = headerWideLabels(header.w, token);
 
   ctx.save();
   // Translucent strip — reads as pit wall, not a solid app bar.
@@ -920,40 +1133,66 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
   ctx.fillStyle = 'rgba(242,239,230,0.06)';
   ctx.fillRect(header.x, header.y + header.h - 1, header.w, 1);
 
-  let titleX = header.x + pad(token, 1.5) + safeL;
-  let rightEdge = header.x + header.w - pad(token, 0.75) - safeR;
+  let titleX = header.x + pad(token, 1.5) + token.safe.left;
+  let rightEdge = header.x + header.w - pad(token, 0.75) - token.safe.right;
 
   if (header.back) {
+    const back = headerBackRect(header, token);
     const backBtn: ButtonDef = {
-      x: header.x + pad(token, 0.75) + safeL,
-      y: midY - btnSize * 0.5,
-      w: btnSize,
-      h: btnSize,
-      label: '←',
+      x: back.x,
+      y: back.y,
+      w: back.w,
+      h: back.h,
+      label: wide ? '← Back' : '←',
       onClick: header.onBack,
     };
     drawButton(ctx, backBtn, ui);
-    titleX = backBtn.x + backBtn.w + pad(token, 0.75);
+    titleX = back.x + back.w + pad(token, 0.75);
   }
 
   if (header.settings) {
-    const settingsBtn: ButtonDef = {
-      x: rightEdge - btnSize,
-      y: midY - btnSize * 0.5,
-      w: btnSize,
-      h: btnSize,
-      label: 'OPT',
-      onClick: header.onSettings,
-    };
-    drawButton(ctx, settingsBtn, ui);
-    rightEdge = settingsBtn.x - pad(token, 0.75);
+    const settings = headerSettingsRect(header, token);
+    if (wide) {
+      drawButton(
+        ctx,
+        {
+          x: settings.x,
+          y: settings.y,
+          w: settings.w,
+          h: settings.h,
+          label: 'Options',
+          onClick: header.onSettings,
+        },
+        ui,
+      );
+    } else {
+      const hovered = hitRect(ui.pointerX, ui.pointerY, settings.x, settings.y, settings.w, settings.h);
+      const r = Math.max(2, pad(token, 0.25));
+      const rail = Math.max(3, pad(token, 0.35));
+      ctx.fillStyle = hovered ? '#1f2622' : token.card;
+      roundRectPath(ctx, settings.x, settings.y, settings.w, settings.h, r);
+      ctx.fill();
+      ctx.fillStyle = hovered ? accent : `${accent}99`;
+      ctx.fillRect(settings.x, settings.y, rail, settings.h);
+      ctx.strokeStyle = hovered ? `${accent}55` : token.cardStroke;
+      ctx.lineWidth = 1;
+      roundRectPath(ctx, settings.x, settings.y, settings.w, settings.h, r);
+      ctx.stroke();
+      drawGearIcon(
+        ctx,
+        settings.x + settings.w * 0.5 + rail * 0.15,
+        settings.y + settings.h * 0.5,
+        Math.min(settings.w, settings.h) * 0.22,
+        token.text,
+      );
+    }
+    rightEdge = settings.x - pad(token, 0.75);
   }
 
-  let cashW = 0;
   if (header.cash !== undefined) {
     setFont(ctx, token, token.fontBody, '700');
     const cashStr = `$${header.cash.toLocaleString()}`;
-    cashW = ctx.measureText(cashStr).width;
+    const cashW = ctx.measureText(cashStr).width;
     ctx.fillStyle = accent;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
@@ -973,18 +1212,15 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
 
 export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
   const { token } = ui;
-  const btnSize = ensureMinTouch(pad(token, 5.5), token);
-  const midY = headerContentTop(token) + headerContentH(token) * 0.5;
-  const safeL = token.safe.left;
-  const safeR = token.safe.right;
   let handled = false;
 
   if (header.back) {
+    const back = headerBackRect(header, token);
     const backBtn: ButtonDef = {
-      x: header.x + pad(token, 0.75) + safeL,
-      y: midY - btnSize * 0.5,
-      w: btnSize,
-      h: btnSize,
+      x: back.x,
+      y: back.y,
+      w: back.w,
+      h: back.h,
       label: '←',
       onClick: header.onBack,
     };
@@ -992,13 +1228,13 @@ export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
   }
 
   if (header.settings) {
-    const rightEdge = header.x + header.w - pad(token, 0.75) - safeR;
+    const settings = headerSettingsRect(header, token);
     const settingsBtn: ButtonDef = {
-      x: rightEdge - btnSize,
-      y: midY - btnSize * 0.5,
-      w: btnSize,
-      h: btnSize,
-      label: 'OPT',
+      x: settings.x,
+      y: settings.y,
+      w: settings.w,
+      h: settings.h,
+      label: 'Options',
       onClick: header.onSettings,
     };
     if (handleButton(settingsBtn, ui)) handled = true;
@@ -1029,12 +1265,17 @@ export function drawDriverSpendPanel(
   ctx.fillStyle = token.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(d.name, panel.x + pad(token, 1.5), y);
+  const nameMax = panel.w - pad(token, 3);
+  ctx.fillText(truncateText(ctx, d.name, nameMax), panel.x + pad(token, 1.5), y);
   y += token.fontTitle + pad(token, 0.25);
 
   setFont(ctx, token, token.fontCaption, '500');
   ctx.fillStyle = accent;
-  ctx.fillText(`${d.trait} · Lv ${d.level}`, panel.x + pad(token, 1.5), y);
+  ctx.fillText(
+    truncateText(ctx, `${d.trait} · Lv ${d.level}`, nameMax),
+    panel.x + pad(token, 1.5),
+    y,
+  );
   y += token.fontCaption + pad(token, 0.75);
 
   if (d.unspentPoints > 0) {

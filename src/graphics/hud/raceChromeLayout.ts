@@ -32,9 +32,14 @@ export function pointInRect(x: number, y: number, r: ChromeRect): boolean {
 /** Bottom control deck + TR chrome for a given viewport. */
 export function raceChromeLayout(w: number, h: number, token: ThemeTokens): RaceChromeLayout {
   const safe = token.safe;
-  const deckH = Math.max(h * 0.26, pad(token, 11) + safe.bottom);
-  const deckTop = h - deckH;
   const gap = pad(token, 0.75);
+  const shortLandscape = w > h && h < pad(token, 55);
+  // Short landscape needs a taller deck so SHIFT stays ≥ touchMin and labels fit.
+  const deckFloor = shortLandscape
+    ? ensureMinTouch(pad(token, 12), token) + safe.bottom + gap * 2
+    : pad(token, 11) + safe.bottom;
+  const deckH = Math.max(h * (shortLandscape ? 0.32 : 0.26), deckFloor);
+  const deckTop = h - deckH;
   const shiftW = Math.min(w * 0.28, pad(token, 14));
   const shiftX = (w - shiftW) * 0.5;
   const sideW = (w - shiftW) * 0.5 - gap * 1.5;
@@ -51,11 +56,15 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     w: Math.max(pad(token, 8), w - safe.right - gap - (shiftX + shiftW + gap)),
     h: deckH - gap * 2 - safe.bottom,
   };
+
+  // SHIFT must always meet touchMin — grow pad and center in remaining deck.
+  const shiftH = ensureMinTouch(Math.min(deckH * 0.55, brake.h * 0.85), token);
+  const shiftY = deckTop + Math.max(gap, (deckH - safe.bottom - shiftH) * 0.45);
   const shift: ChromeRect = {
     x: shiftX,
-    y: deckTop + deckH * 0.28,
+    y: Math.min(shiftY, deckTop + deckH - safe.bottom - gap - shiftH),
     w: shiftW,
-    h: deckH * 0.55,
+    h: shiftH,
   };
 
   const pauseSize = ensureMinTouch(pad(token, 4.5), token);
@@ -63,10 +72,12 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
   const mmX = w - safe.right - pad(token) - mmSize;
   const mmY = safe.top + pad(token);
   const minimap: ChromeRect = { x: mmX, y: mmY, w: mmSize, h: mmSize * 0.72 };
+  // Pause under minimap — wide enough for "Pause" label when chrome column allows.
+  const pauseW = Math.max(pauseSize, Math.min(mmSize, pad(token, 9)));
   const pause: ChromeRect = {
-    x: w - safe.right - pad(token) - pauseSize,
+    x: w - safe.right - pad(token) - pauseW,
     y: mmY + mmSize * 0.72 + pad(token, 0.5),
-    w: pauseSize,
+    w: pauseW,
     h: pauseSize,
   };
 

@@ -95,17 +95,18 @@ export function drawPedalDeck(args: PedalDeckArgs): RaceChromeLayout {
     ctx.fillStyle = pressed ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.05)';
     ctx.fillRect(r.x + radius, r.y + 2, r.w - radius * 2, 2);
 
-    ctx.font = `400 ${Math.max(token.fontCaption, Math.min(r.h * 0.22, token.fontTitle))}px ${token.fontDisplayFamily}`;
+    ctx.font = `400 ${Math.max(token.fontCaption * 0.9, Math.min(r.h * 0.2, token.fontTitle * 0.85))}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = labelColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const ctxLs = ctx as CanvasRenderingContext2D & { letterSpacing?: string };
+    const labelY = r.y + r.h * 0.52;
     if (typeof ctxLs.letterSpacing === 'string') {
-      ctxLs.letterSpacing = '0.18em';
-      ctx.fillText(label, r.x + r.w * 0.5, r.y + r.h * 0.52);
+      ctxLs.letterSpacing = r.h < token.touchMin * 1.1 ? '0.08em' : '0.18em';
+      ctx.fillText(label, r.x + r.w * 0.5, labelY);
       ctxLs.letterSpacing = '0px';
     } else {
-      ctx.fillText(label, r.x + r.w * 0.5, r.y + r.h * 0.52);
+      ctx.fillText(label, r.x + r.w * 0.5, labelY);
     }
     ctx.restore();
   };

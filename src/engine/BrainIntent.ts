@@ -132,7 +132,7 @@ export function intentTickerPhrase(name: string, tag: BrainIntentTag): string {
     case 'DRAFT_HOLD':
       return `${name} sits in the tow`;
     case 'REJOIN_CRAWL':
-      return `${name} hunting the peg`;
+      return `${name} hunting the groove`;
     case 'BRAKE_FOR_CORNER':
       return `${name} lifts for the bend`;
     case 'AVOID_WRECK':

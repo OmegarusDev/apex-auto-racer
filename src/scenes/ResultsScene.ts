@@ -25,6 +25,7 @@ import {
   pad,
   ensureMinTouch,
   ToastManager,
+  truncateText,
   type ButtonDef,
   type UiContext,
 } from '../ui/components';
@@ -167,7 +168,7 @@ export class ResultsScene implements Scene {
       const lead = findDriver(state, this.payload.config.leadDriverId);
       if ((lead?.skill ?? 0) >= 55) {
         this.toasts.push(
-          'Skill trims pin-throttle — lift less; trust Authority in bends',
+          'Higher skill helps hold full gas through bends',
           accent,
           4.5,
         );
@@ -544,9 +545,16 @@ export class ResultsScene implements Scene {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(`${i + 1}`, x + pad(token, 1), y + rowH * 0.5);
+      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+      const pts = `${entry.points} pts`;
+      const ptsW = ctx.measureText(pts).width;
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = isPlayer ? ui.accent : token.text;
-      ctx.fillText(entry.name, x + pad(token, 4), y + rowH * 0.5);
+      ctx.fillText(
+        truncateText(ctx, entry.name, w - pad(token, 5) - ptsW - pad(token, 1)),
+        x + pad(token, 4),
+        y + rowH * 0.5,
+      );
       ctx.textAlign = 'right';
       ctx.fillText(`${entry.points} pts`, x + w - pad(token, 1), y + rowH * 0.5);
       ctx.restore();

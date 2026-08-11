@@ -19,6 +19,7 @@ import {
   ensureMinTouch,
   hitRect,
   ToastManager,
+  truncateText,
   type ButtonDef,
 } from '../ui/components';
 import {
@@ -177,7 +178,11 @@ export class QuickRaceSetupScene implements Scene {
     ctx.fillStyle = token.textMuted;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(disciplineQrBlurb(this.discipline), pad(token, 0.5), y);
+    ctx.fillText(
+      truncateText(ctx, disciplineQrBlurb(this.discipline), view.w - pad(token)),
+      pad(token, 0.5),
+      y,
+    );
     ctx.restore();
     y += token.fontCaption + pad(token, 1.5);
 
@@ -193,14 +198,23 @@ export class QuickRaceSetupScene implements Scene {
       ctx.fillStyle = selected ? accent : token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(preset.label, pad(token, 1), y + pad(token, 1));
+      const textMax = view.w - pad(token, 2);
+      ctx.fillText(truncateText(ctx, preset.label, textMax), pad(token, 1), y + pad(token, 1));
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textMuted;
-      ctx.fillText(preset.blurb, pad(token, 1), y + pad(token, 1) + token.fontBody + 2);
+      ctx.fillText(
+        truncateText(ctx, preset.blurb, textMax),
+        pad(token, 1),
+        y + pad(token, 1) + token.fontBody + 2,
+      );
       const stats = presetStatSummary(preset);
       if (stats) {
         ctx.fillStyle = token.textDim;
-        ctx.fillText(stats, pad(token, 1), y + rowH - pad(token, 1) - token.fontCaption);
+        ctx.fillText(
+          truncateText(ctx, stats, textMax),
+          pad(token, 1),
+          y + rowH - pad(token, 1) - token.fontCaption,
+        );
       }
       if (selected) {
         ctx.fillStyle = accent;

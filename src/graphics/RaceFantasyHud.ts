@@ -46,7 +46,7 @@ export function drawPegMeter(
   ctx.fillStyle = token.textDim;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('PEG', x, y);
+  ctx.fillText('GROOVE', x, y);
   ctx.textAlign = 'right';
   const pct = Math.round(Math.min(1.35, ratio) * 100);
   ctx.fillStyle =
@@ -85,15 +85,18 @@ export function drawPreRaceCard(
     partTiers?: import('../engine/types').VehicleParts;
   },
 ): void {
-  if (opts.phase !== 3 && opts.phase !== 2) return;
+  // Only on the first countdown beat so the big numeral has room.
+  if (opts.phase !== 3) return;
   const def = getDiscipline(opts.discipline);
-  const cardW = Math.min(w - pad(token, 4), pad(token, 36));
-  const cardH = pad(token, opts.partTiers ? 16.5 : 14);
+  const cardW = Math.min(w - pad(token, 4), pad(token, 34));
+  const lineH = token.fontCaption * 1.35;
+  const cardH = pad(token, 2) + token.fontTitle + pad(token, 0.5) + token.fontBody + lineH + pad(token, 1.5);
   const x = (w - cardW) * 0.5;
-  const y = h * 0.18;
+  // Sit high — leave the mid-screen clear for the countdown numeral.
+  const y = Math.max(token.safe.top + pad(token, 1), h * 0.1);
 
   ctx.save();
-  ctx.globalAlpha = opts.phase === 3 ? 0.96 : 0.55;
+  ctx.globalAlpha = 0.94;
   ctx.fillStyle = 'rgba(10,10,14,0.82)';
   ctx.strokeStyle = accent;
   ctx.lineWidth = 1.5;
@@ -102,41 +105,41 @@ export function drawPreRaceCard(
   ctx.fill();
   ctx.stroke();
 
+  let ty = y + pad(token, 1);
   ctx.font = `800 ${token.fontTitle}px ${token.fontDisplayFamily}`;
   ctx.fillStyle = accent;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(def.name.toUpperCase(), x + cardW * 0.5, y + pad(token, 1.25));
+  ctx.fillText(def.name.toUpperCase(), x + cardW * 0.5, ty);
+  ty += token.fontTitle + pad(token, 0.4);
 
   ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
   ctx.fillStyle = token.text;
-  ctx.fillText(
-    `${opts.laps} lap${opts.laps === 1 ? '' : 's'} · ${opts.driverName}`,
-    x + cardW * 0.5,
-    y + pad(token, 1.25) + token.fontTitle + pad(token, 0.5),
-  );
+  const driverLine = `${opts.laps} lap${opts.laps === 1 ? '' : 's'} · ${opts.driverName}`;
+  // Soft truncate long driver names.
+  let shown = driverLine;
+  const maxW = cardW - pad(token, 3);
+  if (ctx.measureText(shown).width > maxW) {
+    let t = opts.driverName;
+    while (t.length > 2 && ctx.measureText(`${opts.laps} laps · ${t}…`).width > maxW) {
+      t = t.slice(0, -1);
+    }
+    shown = `${opts.laps} lap${opts.laps === 1 ? '' : 's'} · ${t}…`;
+  }
+  ctx.fillText(shown, x + cardW * 0.5, ty);
+  ty += token.fontBody + pad(token, 0.35);
 
   ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
   ctx.fillStyle = token.textMuted;
   const bits = [opts.traitName];
   if (opts.rain) bits.push('Rain');
   if (opts.night) bits.push('Night');
-  bits.push('SHIFT up · lift to downshift');
-  ctx.fillText(bits.join(' · '), x + cardW * 0.5, y + cardH - pad(token, 2) - token.fontCaption);
-
-  if (opts.partTiers) {
-    const focus =
-      opts.discipline === 'rally'
-        ? (['tyres', 'suspension', 'brakes'] as const)
-        : opts.discipline === 'street'
-          ? (['brakes', 'tyres', 'engine'] as const)
-          : (['spoiler', 'engine', 'tyres'] as const);
-    const loadout = focus
-      .map((id) => `${id.slice(0, 3).toUpperCase()} T${opts.partTiers![id] ?? 1}`)
-      .join(' · ');
-    ctx.fillStyle = accent;
-    ctx.fillText(loadout, x + cardW * 0.5, y + cardH - pad(token, 3.5) - token.fontCaption);
+  bits.push('SHIFT up · lift down');
+  let footer = bits.join(' · ');
+  if (ctx.measureText(footer).width > maxW) {
+    footer = bits.slice(0, Math.min(3, bits.length)).join(' · ');
   }
+  ctx.fillText(footer, x + cardW * 0.5, ty);
   ctx.restore();
 }
 

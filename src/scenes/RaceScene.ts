@@ -52,6 +52,9 @@ import {
   handleSlider,
   pad,
   ensureMinTouch,
+  truncateText,
+  drawHintBox,
+  layoutHintBox,
   type ButtonDef,
   type ModalDef,
   type SliderDef,
@@ -704,7 +707,7 @@ export class RaceScene implements Scene {
       if (player.wallHits > this.prevPlayerWallHits) {
         this.g.audio.playCrash();
         if (!this.g.state!.onboarding.shownCrashHint) {
-          this.showHint('Wall contact reduces condition — brake earlier!', 'shownCrashHint');
+          this.showHint('Hit a wall — brake earlier next time', 'shownCrashHint');
         }
       }
       if (player.contactHits > this.prevPlayerContactHits) {
@@ -713,9 +716,9 @@ export class RaceScene implements Scene {
       if (player.deslotCount > this.prevPlayerDeslots) {
         this.g.audio.playDeslot();
         if (!this.g.state!.onboarding.shownBrakeHint) {
-          this.showHint('Too fast for the corner — brake before the bend!', 'shownBrakeHint');
+          this.showHint('Too fast — brake before the bend', 'shownBrakeHint');
         } else if (!this.g.state!.onboarding.shownDeslotHint) {
-          this.showHint("Crawl back onto the peg.", 'shownDeslotHint');
+          this.showHint('Crawl back onto the groove', 'shownDeslotHint');
         }
       } else if (
         !this.g.state!.onboarding.shownDeslotHint &&
@@ -730,7 +733,7 @@ export class RaceScene implements Scene {
           if (n.s <= player.s) kappa = n.kappaLine;
         }
         if (Math.abs(kappa) >= PHYSICS.grooveKappaMin) {
-          this.hintText = "Lift or you'll leave the peg.";
+          this.hintText = "Lift or you'll leave the groove";
           this.hintT = 4;
           this.warnedDeslotLift = true;
         }
@@ -749,7 +752,7 @@ export class RaceScene implements Scene {
         );
         this.nearDeslotFxCd = 0.35;
         if (!this.g.state!.onboarding.shownPegHint && this.hintText === null) {
-          this.showHint('Peg meter: keep under 100% in bends', 'shownPegHint');
+          this.showHint('Keep the groove meter under 100% in bends', 'shownPegHint');
         }
       }
 
@@ -760,7 +763,7 @@ export class RaceScene implements Scene {
         this.hintText === null &&
         shouldTeachAuthority(skill, player, kappa)
       ) {
-        this.showHint('Authority trims pin-throttle in bends — trust it', 'shownAuthorityHint');
+        this.showHint('Higher skill helps hold full gas through bends', 'shownAuthorityHint');
       }
 
       this.shiftCueArmed = wantsShiftCue(player, this.launch.discipline);
@@ -769,7 +772,7 @@ export class RaceScene implements Scene {
         !this.g.state!.onboarding.shownShiftCue &&
         this.hintText === null
       ) {
-        this.showHint('SHIFT to upshift — hold a gear until you pull the next', 'shownShiftCue');
+        this.showHint('Tap SHIFT to upshift — hold a gear until you need the next', 'shownShiftCue');
       }
 
       // Teach stack: trail brake → then Street kick (after shift cue seen).
@@ -782,7 +785,7 @@ export class RaceScene implements Scene {
         Math.abs(sampleKappaAt(director.track.nodes, player.s)) >= PHYSICS.grooveKappaMin
       ) {
         this.showHint(
-          'Trail: ease brake into the peg — keep a little gas through the bend',
+          'Ease off the brake into the bend — keep a little gas',
           'shownTrailHint',
         );
       }
@@ -794,7 +797,7 @@ export class RaceScene implements Scene {
         (player.driftArmed || player.gripUsage > 0.88)
       ) {
         this.showHint(
-          'Street: SHIFT while armed/latched = clutch-kick — hold throttle to keep the slide',
+          'Street: SHIFT while sliding = clutch-kick — hold gas to keep it',
           'shownKickHint',
         );
       }
@@ -968,12 +971,12 @@ export class RaceScene implements Scene {
 
     if (!state.onboarding.shownPedalControls) {
       this.showHint(
-        'One finger: hold GAS — Mag steers. Space = brake · SHIFT = upshift (watch the rev strip)',
+        'Hold GAS — the car steers itself. Space = brake · SHIFT = upshift',
         'shownPedalControls',
       );
     } else if (!state.onboarding.shownTouchControls) {
       this.showHint(
-        'Touch: right = gas, left = brake · SHIFT = up · lift to downshift',
+        'Touch: right = gas, left = brake · SHIFT = up · lift gas to downshift',
         'shownTouchControls',
       );
     }
@@ -1020,7 +1023,7 @@ export class RaceScene implements Scene {
       y: chrome.pause.y,
       w: chrome.pause.w,
       h: chrome.pause.h,
-      label: 'II',
+      label: 'Pause',
       onClick: () => this.openPause(),
     };
 
@@ -1079,18 +1082,27 @@ export class RaceScene implements Scene {
       hudY += token.fontCaption + pad(token, 0.35);
 
       const clean = Math.max(0, Math.min(1, 1.2 - player.stats.lineNoise));
-      const slim = `C${Math.round(player.condition * 100)} · T${Math.round(player.tyreTemp * 100)} · L${Math.round(clean * 100)}`;
+      const slim = `Car ${Math.round(player.condition * 100)} · Tyres ${Math.round(player.tyreTemp * 100)} · Line ${Math.round(clean * 100)}`;
       ctx.fillStyle = token.textMuted;
-      ctx.fillText(slim, hudX, hudY);
+      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+      ctx.fillText(truncateText(ctx, slim, telemetryMaxW), hudX, hudY);
     }
 
-    if (leadDriver !== undefined) {
+    // Teach band above deck: onboarding owns the channel when present;
+    // otherwise driver chip + ticker may use it (chip left, ticker right/above).
+    const hintUp = this.hintText !== null;
+    if (leadDriver !== undefined && !hintUp) {
       const trait = getTrait(leadDriver.trait);
       const playerIntent = player !== undefined ? director.intentForCar(player.id) : undefined;
       const chipW = Math.min(pad(token, 14), w * 0.34);
       const chipH = pad(token, playerIntent !== undefined ? 5.2 : 3.5);
       const chipX = hudX;
-      const chipY = chrome.deckTop - pad(token, 0.75) - chipH;
+      // Leave room for ticker lines above the deck when no hint.
+      const tickerReserve =
+        this.ticker.length > 0
+          ? Math.min(this.ticker.length, 2) * (token.fontCaption + 4) + pad(token, 0.5)
+          : 0;
+      const chipY = chrome.deckTop - pad(token, 0.75) - chipH - tickerReserve;
       ctx.fillStyle = 'rgba(11,13,12,0.88)';
       ctx.strokeStyle = `${accent}99`;
       ctx.lineWidth = 1.5;
@@ -1103,13 +1115,22 @@ export class RaceScene implements Scene {
       ctx.fillStyle = token.text;
       ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
       ctx.textBaseline = 'top';
-      ctx.fillText(leadDriver.name, chipX + pad(token, 0.9), chipY + pad(token, 0.5));
+      const nameMax = chipW - pad(token, 1.8);
+      ctx.fillText(
+        truncateText(ctx, leadDriver.name, nameMax),
+        chipX + pad(token, 0.9),
+        chipY + pad(token, 0.5),
+      );
       ctx.fillStyle = token.textDim;
-      ctx.fillText(trait.name, chipX + pad(token, 0.9), chipY + pad(token, 1.5));
+      ctx.fillText(
+        truncateText(ctx, trait.name, nameMax),
+        chipX + pad(token, 0.9),
+        chipY + pad(token, 1.5),
+      );
       if (playerIntent !== undefined) {
         ctx.fillStyle = accent;
         ctx.fillText(
-          intentHudLabel(playerIntent.tag),
+          truncateText(ctx, intentHudLabel(playerIntent.tag), nameMax),
           chipX + pad(token, 0.9),
           chipY + pad(token, 2.6),
         );
@@ -1164,7 +1185,7 @@ export class RaceScene implements Scene {
       y: r.y,
       w: r.w,
       h: r.h,
-      label: 'ZOOM',
+      label: 'Zoom',
       value: z,
       onChange: (v) => {
         state.options.raceZoom = Math.max(0, Math.min(1, v));
@@ -1280,18 +1301,27 @@ export class RaceScene implements Scene {
     ctx.restore();
   }
 
-  private drawTicker(ctx: CanvasRenderingContext2D, _w: number, h: number, token: ThemeTokens): void {
+  private drawTicker(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
     if (this.ticker.length === 0) return;
+    // Onboarding owns the teach channel — demote ticker while a hint is up.
+    if (this.hintText !== null) return;
     const chrome = this.chrome;
+    const deckTop = chrome?.deckTop ?? h - token.safe.bottom - pad(token, 5);
+    const maxW = Math.min(w - pad(token, 4) - token.safe.left - token.safe.right, pad(token, 40));
     ctx.save();
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
-    let y = (chrome?.deckTop ?? h - token.safe.bottom - pad(token, 5)) - pad(token, 0.75);
-    for (const line of this.ticker) {
+    let y = deckTop - pad(token, 0.75);
+    const lines = this.ticker.slice(0, 2);
+    for (const line of lines) {
       ctx.globalAlpha = Math.min(1, line.ttl / TICKER_TTL);
       ctx.fillStyle = token.textMuted;
-      ctx.fillText(line.text, token.safe.left + pad(token), y);
+      ctx.fillText(
+        truncateText(ctx, line.text, maxW),
+        token.safe.left + pad(token),
+        y,
+      );
       y -= token.fontCaption + 4;
     }
     ctx.restore();
@@ -1305,26 +1335,32 @@ export class RaceScene implements Scene {
     accent: string,
   ): void {
     if (this.hintText === null) return;
-    ctx.save();
     const boxW = Math.min(w - pad(token, 4), pad(token, 36));
-    const boxH = pad(token, 4);
-    const x = (w - boxW) * 0.5;
-    // Sit above the pedal deck (and driver chip), not on top of BRAKE/GAS/SHIFT.
     const deckTop = this.chrome?.deckTop ?? h * 0.74;
-    const y = Math.max(token.safe.top + pad(token, 8), deckTop - boxH - pad(token, 1.5));
-    ctx.fillStyle = token.overlay;
-    ctx.beginPath();
-    ctx.roundRect(x, y, boxW, boxH, pad(token, 0.75));
-    ctx.fill();
-    ctx.strokeStyle = accent;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.text;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(this.hintText, x + boxW * 0.5, y + boxH * 0.5);
-    ctx.restore();
+    const measured = layoutHintBox(ctx, {
+      x: (w - boxW) * 0.5,
+      y: 0,
+      maxW: boxW,
+      text: this.hintText,
+      accent,
+      token,
+      maxLines: 3,
+      fontSize: token.fontBody,
+    });
+    const y = Math.max(
+      token.safe.top + pad(token, 8),
+      deckTop - measured.h - pad(token, 1.5),
+    );
+    drawHintBox(ctx, {
+      x: measured.x,
+      y,
+      maxW: boxW,
+      text: this.hintText,
+      accent,
+      token,
+      maxLines: 3,
+      fontSize: token.fontBody,
+    });
   }
 
   private drawFinishOverlay(

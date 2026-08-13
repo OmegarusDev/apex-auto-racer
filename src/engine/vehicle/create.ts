@@ -78,6 +78,7 @@ export function createCarState(
     gear: 1,
     rpm: PHYSICS.rpmIdle,
     shiftCooldown: 0,
+    redlineDwell: 0,
     easedThrottle: 0,
     easedBrake: 0,
     vProfile,

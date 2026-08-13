@@ -1,6 +1,7 @@
 import { BALANCE } from '../../data/balance';
 import { FORMATS } from '../../data/formats';
 import { PHYSICS } from '../../data/physics';
+import { gearboxFor } from '../Gearbox';
 import { RaceDirector, type RaceConfig } from '../RaceDirector';
 import { enterDeslot } from '../Vehicle';
 import { effectiveStats } from '../stats';
@@ -206,7 +207,12 @@ export function runDraftTowGate(): FeelGateResult {
   };
 }
 
-/** Player must Shift to climb gears; pin-throttle alone stays gear-capped. */
+/**
+ * Gear contract:
+ *  - Pin-throttle alone auto-climbs after ~1s at the redline (no more crawl).
+ *  - Manual Shift works any time the band is valid — gas or not.
+ *  - Shift at low revs (band below earlyUpshiftBand) does nothing.
+ */
 export function runGearAssistGate(): FeelGateResult {
   const director = new RaceDirector(baseConfig(77_010));
   skipCountdown(director);
@@ -225,35 +231,56 @@ export function runGearAssistGate(): FeelGateResult {
     }
   }
 
+  // (a) Pin-throttle, no Shift: redline dwell must auto-climb past gear 1.
   player.gear = 1;
   player.v = 6;
   player.slotMode = 'groove';
   player.s = bestS;
   player.l = 0;
   player.shiftCooldown = 0;
-  for (let i = 0; i < 480; i++) {
+  player.redlineDwell = 0;
+  for (let i = 0; i < 720; i++) {
     director.setPlayerPedals(1, 0, false);
     director.update(PHYSICS.dt);
   }
-  const noAutoUp = player.gear <= 2;
+  const autoClimb = player.gear >= 3;
 
-  player.gear = 1;
-  player.v = 8;
-  player.s = bestS;
-  player.l = 0;
+  // (b) Manual upshift while coasting (gas off) once the band is valid.
+  player.gear = 2;
+  player.v = coastBandSpeed(player, 'track', 0.6);
+  player.slotMode = 'groove';
   player.shiftCooldown = 0;
-  for (let i = 0; i < 480; i++) {
-    // Hold throttle and request upshift every step once band allows.
-    director.setPlayerPedals(1, 0, true);
-    director.update(PHYSICS.dt);
-  }
-  const manualClimb = player.gear >= 3;
-  const ok = noAutoUp && manualClimb;
+  player.redlineDwell = 0;
+  const gearBefore = player.gear;
+  director.setPlayerPedals(0, 0, true);
+  director.update(PHYSICS.dt);
+  const coastUp = player.gear === gearBefore + 1;
+
+  // (c) Low-rev upshift is refused — must be a valid shift.
+  player.gear = 2;
+  player.v = coastBandSpeed(player, 'track', 0.2);
+  player.slotMode = 'groove';
+  player.shiftCooldown = 0;
+  player.redlineDwell = 0;
+  const gearBeforeLow = player.gear;
+  director.setPlayerPedals(0, 0, true);
+  director.update(PHYSICS.dt);
+  const lowRevBlocked = player.gear === gearBeforeLow;
+
+  const ok = autoClimb && coastUp && lowRevBlocked;
   return {
     id: 'GEAR_ASSIST',
     ok,
-    detail: `noAuto=${noAutoUp} manualClimb=${manualClimb} gear=${player.gear} v=${player.v.toFixed(1)} kappaMin=${bestK.toFixed(4)}`,
+    detail: `autoClimb=${autoClimb} gear=${player.gear} coastUp=${coastUp} lowRevBlocked=${lowRevBlocked} kappaMin=${bestK.toFixed(4)}`,
   };
+}
+
+/** Speed for a given band in `gear` under raw player stats (track box). */
+function coastBandSpeed(car: { stats: { vMax: number } }, discipline: import('../../data/disciplines').DisciplineId, band: number): number {
+  const box = gearboxFor(discipline);
+  const hi = car.stats.vMax * (box.topFrac[2] ?? 1);
+  const lo = car.stats.vMax * (box.topFrac[1] ?? 0);
+  return lo + band * (hi - lo);
 }
 
 /** Early Shift must not slap speed (no miss penalty). */
@@ -353,7 +380,7 @@ export function runPackContactGate(): FeelGateResult {
   };
 }
 
-/** Player live vMax/aAccel must be paced — not only vDriver targets. */
+/** No arbitrary pace handicap — player live vMax/aAccel equal raw part+driver stats. */
 export function runPlayerPacePhysGate(): FeelGateResult {
   const director = new RaceDirector(baseConfig(77_012));
   const player = director.cars.find((c) => c.isPlayerControlled);
@@ -365,16 +392,12 @@ export function runPlayerPacePhysGate(): FeelGateResult {
     defaultVehicleSave(BALANCE.startingPartTier).partTiers,
     BALANCE.conditionMax,
   );
-  const pace = BALANCE.playerPaceMult;
-  const expectV = raw.vMax * pace;
-  const expectA = raw.aAccel * pace;
-  const vOk = Math.abs(player.stats.vMax - expectV) < 0.05;
-  const aOk = Math.abs(player.stats.aAccel - expectA) < 0.05;
-  const belowRaw = player.stats.vMax < raw.vMax * 0.95;
+  const vOk = Math.abs(player.stats.vMax - raw.vMax) < 0.05;
+  const aOk = Math.abs(player.stats.aAccel - raw.aAccel) < 0.05;
   return {
     id: 'PLAYER_PACE_PHYS',
-    ok: vOk && aOk && belowRaw,
-    detail: `vMax=${player.stats.vMax.toFixed(2)} expect=${expectV.toFixed(2)} aAccel=${player.stats.aAccel.toFixed(2)} pace=${pace}`,
+    ok: vOk && aOk,
+    detail: `vMax=${player.stats.vMax.toFixed(2)} raw=${raw.vMax.toFixed(2)} aAccel=${player.stats.aAccel.toFixed(2)} rawA=${raw.aAccel.toFixed(2)}`,
   };
 }
 

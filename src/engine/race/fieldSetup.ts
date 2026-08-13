@@ -1,4 +1,3 @@
-import { BALANCE } from '../../data/balance';
 import { PHYSICS } from '../../data/physics';
 import { createBrainState, idleBrainOutput } from '../DriverBrain';
 import { driverStrength01, generateFieldDrivers, syncDriverIdsFrom } from '../DriverGenerator';
@@ -108,24 +107,22 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
     const row = Math.floor(i / 2);
     const col = i % 2;
     const gridL = col === 0 ? -PHYSICS.gridColOffset : PHYSICS.gridColOffset;
+    // Grid sits fully behind the start/finish line (s=0 is the line): front
+    // row is gridPoleGap back, each row stacks behind it. Placing row 0 on the
+    // line gave back rows a ~lap head start (they crossed s=0 after a few m).
     const gridS =
-      (track.length - row * PHYSICS.gridRowSpacing + track.length) % track.length;
+      (track.length -
+        PHYSICS.gridPoleGap -
+        row * PHYSICS.gridRowSpacing +
+        track.length) %
+      track.length;
 
     const rawStats = effectiveStats(config.discipline, plan.parts, plan.condition, plan.driver);
     const { vProfile, vSafe } = buildSpeedProfiles(track, rawStats, muSurface);
-    let vDriver = buildVDriverProfile(vProfile, plan.driver.skill, plan.driver.bravery);
-    // Player pace handicap applies to targets AND live top-speed/accel —
-    // previously only vDriver was trimmed so pin-throttle still felt overpowered.
-    let stats = rawStats;
-    if (plan.isPlayer) {
-      const pace = BALANCE.playerPaceMult;
-      stats = {
-        ...rawStats,
-        vMax: rawStats.vMax * pace,
-        aAccel: rawStats.aAccel * pace,
-      };
-      vDriver = vDriver.map((v) => v * pace);
-    }
+    const vDriver = buildVDriverProfile(vProfile, plan.driver.skill, plan.driver.bravery);
+    // No player pace handicap — car speed emerges from parts + driver skill
+    // + gear/brake execution, not a multiplier (see hybrid doctrine).
+    const stats = rawStats;
     const authority = plan.isPlayer ? computeBrakeAuthority(plan.driver.skill) : 1;
 
     const modifierStack = mergeModifierStacks(

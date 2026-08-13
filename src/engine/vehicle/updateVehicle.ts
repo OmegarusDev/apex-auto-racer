@@ -271,6 +271,7 @@ export function updateVehicle(
     inputs.upshift === true,
     ctx.discipline,
     car.isPlayerControlled,
+    Math.max(0, Math.min(1, ctx.skill / 100)),
     inputs.clutchKick === true,
   );
   const { vGearMax, torque, clutchKickLong } = transmissionDriveScale(

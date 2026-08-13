@@ -5,6 +5,7 @@
 import { PHYSICS } from '../../data/physics';
 import type { DisciplineId } from '../../data/disciplines';
 import {
+  aiUpshiftBand,
   gearboxFor,
   gearBandFrac,
   gearTopSpeed,
@@ -26,8 +27,9 @@ export interface TransmissionResult {
 }
 
 /**
- * Player: manual upshift; auto downshift only when off the throttle.
- * AI: assisted auto up/down.
+ * Player: manual upshift anytime the band is valid (Shift/tap); auto-upshift
+ * safety net after ~1s pinned at the redline; auto downshift when off throttle.
+ * AI: auto up/down at a band governed by driver skill (skill01 0..1).
  */
 export function stepTransmission(
   car: CarSimState,
@@ -37,6 +39,8 @@ export function stepTransmission(
   wantUpshift: boolean,
   discipline: DisciplineId,
   isPlayer: boolean,
+  /** Driver skill 0..1 — AI upshift quality only. */
+  skill01: number,
   /** Edge: clutch-kick while Shift armed (Street). */
   clutchKickRequest = false,
 ): TransmissionResult {
@@ -69,17 +73,31 @@ export function stepTransmission(
     car.spinRemaining <= 0 &&
     !car.holdGear; // Rally/Street slide: hold-gear friendly
 
+  // Redline dwell — player pin-throttle safety net only.
+  const redline = band >= box.amberBandHi;
+  if (isPlayer && redline && throttle > 0.4 && canUp) {
+    car.redlineDwell += dt;
+  } else {
+    car.redlineDwell = Math.max(0, car.redlineDwell - dt * PHYSICS.redlineDwellDecay);
+  }
+
+  const up = (kind: 'up' | 'down'): void => {
+    if (kind === 'up') car.gear += 1;
+    else car.gear -= 1;
+    car.shiftCooldown = kind === 'up' ? PHYSICS.shiftCooldown : PHYSICS.shiftCooldown * 0.55;
+    car.lastShiftKind = kind;
+    car.redlineDwell = 0;
+  };
+
   if (canUp) {
     if (isPlayer) {
-      if (wantUpshift && band >= box.earlyUpshiftBand) {
-        car.gear += 1;
-        car.shiftCooldown = PHYSICS.shiftCooldown;
-        car.lastShiftKind = 'up';
-      }
-    } else if (band >= box.autoUpshiftBand && throttle > 0.35) {
-      car.gear += 1;
-      car.shiftCooldown = PHYSICS.shiftCooldown * 0.9;
-      car.lastShiftKind = 'up';
+      // Manual Shift any time the band will accept it — gas or not.
+      const manual = wantUpshift && band >= box.earlyUpshiftBand;
+      // Pin-throttle safety net: ~1s at the redline shifts for you.
+      const auto = car.redlineDwell >= PHYSICS.redlineAutoShiftSec;
+      if (manual || auto) up('up');
+    } else if (band >= aiUpshiftBand(box, skill01) && throttle > 0.35) {
+      up('up');
     }
   }
 

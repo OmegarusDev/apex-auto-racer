@@ -14,6 +14,13 @@ export const PHYSICS = {
   /** Seconds after a shift before another upshift is accepted. */
   shiftCooldown: 0.2,
   /**
+   * Pin-throttle safety net: player auto-upshifts after this long held at the
+   * redline band. Manual Shift earlier (green window) stays the fast path.
+   */
+  redlineAutoShiftSec: 1.0,
+  /** Redline dwell decays this fast (1/s) when not pinned in red. */
+  redlineDwellDecay: 2.5,
+  /**
    * Soft drive-cap overshoot past gear topFrac — stops a bogged gear from
    * hard-bricking accel for a frame while auto-upshift lands.
    */
@@ -33,6 +40,9 @@ export const PHYSICS = {
   wallMargin: 1.15,
   /** Starting-grid row spacing along the track (m). */
   gridRowSpacing: 12,
+  /** Grid gap (m) from the start/finish line to the front row — the whole
+   *  pack grids BEHIND the line so no car crosses it at lights-out. */
+  gridPoleGap: 4,
   /** Starting-grid column offset from centerline (m). */
   gridColOffset: 4.6,
   crashSpeed: 15,
@@ -116,7 +126,7 @@ export const PHYSICS = {
   deslotReleaseImpulse: 2.8,
   /** Minimum off-slot time before rejoin is allowed. */
   deslotMinTime: 0.7,
-  /** |l − o| under this (and speed OK) → return to groove. */
+  /** Must be this close (m) to the personal line to re-slot. */
   deslotRejoinL: 1.35,
   /** Must be under this × v_deslot to re-slot. */
   deslotRejoinVFrac: 0.78,

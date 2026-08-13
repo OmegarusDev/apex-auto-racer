@@ -299,13 +299,20 @@ export class ApexRenderer {
     gl.useProgram(this.litProg);
     this.setLitGlobals(frame);
 
-    // Track
+    // Track — push its depth away from the camera so cars resting on it always
+    // win the depth test. On low-precision (16-bit) mobile depth buffers the
+    // ~0.1 unit car lift is below depth resolution at race distances, so the
+    // dark track rendered OVER moving cars on some phones. polygonOffset scales
+    // with the buffer's own resolution (units = depth-buffer levels).
     mat4Identity(this.model);
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(1, 4);
     this.drawMesh(this.trackMesh, [1, 1, 1], 1);
+    gl.disable(gl.POLYGON_OFFSET_FILL);
 
     // Solid cars first (no blend)
     for (const car of frame.cars) {
-      const lift = car.slotMode === 'deslot' ? 0.35 : 0.08;
+      const lift = car.slotMode === 'deslot' ? 0.35 : 0.12;
       this.placeCar(car.worldX, car.worldY, car.heading, lift);
       const tint = hexToRgb(car.color);
       if (car.isPlayer) {

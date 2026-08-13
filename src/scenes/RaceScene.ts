@@ -1039,7 +1039,10 @@ export class RaceScene implements Scene {
     let hudY = safe.top + pad(token);
     const telemetryMaxW = Math.max(pad(token, 14), chrome.minimap.x - hudX - pad(token));
 
-    if (standing !== undefined) {
+    // Hide the telemetry column while the pre-race card / countdown is up —
+    // the card (top-centre) overlaps these lines on narrow phones.
+    if (director.countdown === null) {
+      if (standing !== undefined) {
       ctx.fillStyle = accent;
       ctx.fillText(`P${standing.position}`, hudX, hudY);
       // Hairline under position
@@ -1086,6 +1089,7 @@ export class RaceScene implements Scene {
       ctx.fillStyle = token.textMuted;
       ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillText(truncateText(ctx, slim, telemetryMaxW), hudX, hudY);
+      }
     }
 
     // Teach band above deck: onboarding owns the channel when present;

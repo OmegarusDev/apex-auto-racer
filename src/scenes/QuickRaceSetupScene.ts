@@ -129,7 +129,13 @@ export class QuickRaceSetupScene implements Scene {
     const view = shell.contentRect;
     const presets = listQuickRacePresets();
     const discH = ensureMinTouch(pad(token, 4.5), token);
-    const rowH = ensureMinTouch(pad(token, 7.5), token);
+    // Preset rows stack label + blurb + stats; tall enough that the three
+    // lines never collide at mobile scale (was bottom-pinning stats into the
+    // blurb line on phones).
+    const rowH = ensureMinTouch(
+      pad(token, 1) + token.fontBody + 3 + token.fontCaption + 3 + token.fontCaption + pad(token, 1),
+      token,
+    );
     const contentH =
       pad(token, 0.5) +
       token.fontCaption +
@@ -193,28 +199,27 @@ export class QuickRaceSetupScene implements Scene {
       const hovered = hitRect(lui.pointerX, lui.pointerY, 0, y, view.w, rowH);
       drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui, { hovered: hovered || selected });
 
+      // Stacked lines (label / blurb / stats) — explicit positions so a short
+      // mobile row can never overlap them (stats used to be bottom-pinned).
+      const padX = pad(token, 1);
+      const labelY = y + pad(token, 1);
+      const blurbY = labelY + token.fontBody + 3;
+      const statsY = blurbY + token.fontCaption + 3;
+      const textMax = view.w - pad(token, 2);
+
       ctx.save();
       ctx.font = `700 ${token.fontBody}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = selected ? accent : token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      const textMax = view.w - pad(token, 2);
-      ctx.fillText(truncateText(ctx, preset.label, textMax), pad(token, 1), y + pad(token, 1));
+      ctx.fillText(truncateText(ctx, preset.label, textMax), padX, labelY);
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textMuted;
-      ctx.fillText(
-        truncateText(ctx, preset.blurb, textMax),
-        pad(token, 1),
-        y + pad(token, 1) + token.fontBody + 2,
-      );
+      ctx.fillText(truncateText(ctx, preset.blurb, textMax), padX, blurbY);
       const stats = presetStatSummary(preset);
       if (stats) {
         ctx.fillStyle = token.textDim;
-        ctx.fillText(
-          truncateText(ctx, stats, textMax),
-          pad(token, 1),
-          y + rowH - pad(token, 1) - token.fontCaption,
-        );
+        ctx.fillText(truncateText(ctx, stats, textMax), padX, statsY);
       }
       if (selected) {
         ctx.fillStyle = accent;

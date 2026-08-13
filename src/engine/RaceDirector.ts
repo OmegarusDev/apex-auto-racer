@@ -628,9 +628,15 @@ export class RaceDirector {
     const car = entry.car;
     if (car.lap >= this.config.laps) return;
 
+    const line = this.track.length;
+    // Edge-triggered: count the line pass exactly once. The prevS guard stops
+    // a slow or lingering crossing from firing on consecutive steps — the old
+    // level-triggered projection re-fired while a car sat near the line and
+    // granted back-row grid cars multiple laps at lights-out.
     const crossed =
       car.v > 0.5 &&
-      (car.s < entry.prevS || entry.prevS + car.v * PHYSICS.dt >= this.track.length - 0.01);
+      entry.prevS <= line - 0.5 &&
+      (car.s < entry.prevS || car.s >= line - 0.5);
 
     if (!crossed) return;
 

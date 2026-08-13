@@ -68,6 +68,8 @@ export interface CarSimState extends VehicleState {
   rpm: number;
   /** Cooldown after shift before another upshift lands. */
   shiftCooldown: number;
+  /** Seconds pinned at the redline band (player auto-upshift dwell). */
+  redlineDwell: number;
   /** Cached zone flag for presentation bus. */
   onKerb: boolean;
   easedThrottle: number;

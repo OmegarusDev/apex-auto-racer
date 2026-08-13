@@ -390,7 +390,12 @@ export class CampaignScene implements Scene {
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const objGap = pad(token, 0.5);
     const heroH = pad(token, 12);
-    const objH = pad(token, 5.5);
+    // Objective rows stack title (fontBody) + description (fontCaption) with
+    // explicit positions — fractional anchors overlapped the two on phones.
+    const objH = ensureMinTouch(
+      pad(token, 0.5) + token.fontBody + pad(token, 0.25) + token.fontCaption + pad(token, 0.75),
+      token,
+    );
     const cardH = pad(token, 10);
     const lockedH = cardH * 0.55;
     const objCount = Math.min(state.objectives.active.length, BALANCE.activeObjectives);
@@ -462,6 +467,8 @@ export class CampaignScene implements Scene {
       const def = getObjectiveDef(objId);
       drawRow(ctx, { x: 0, y, w: view.w, h: objH }, lui);
       const rewardStr = `$${def?.reward ?? 0}`;
+      const titleY = y + pad(token, 0.5) + token.fontBody * 0.5;
+      const descY = y + pad(token, 0.5) + token.fontBody + pad(token, 0.25) + token.fontCaption * 0.5;
       ctx.save();
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       const rewardW = ctx.measureText(rewardStr).width;
@@ -470,18 +477,10 @@ export class CampaignScene implements Scene {
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
-      ctx.fillText(
-        truncateText(ctx, def?.title ?? objId, textMax),
-        pad(token, 1),
-        y + objH * 0.35,
-      );
+      ctx.fillText(truncateText(ctx, def?.title ?? objId, textMax), pad(token, 1), titleY);
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.textDim;
-      ctx.fillText(
-        truncateText(ctx, def?.description ?? '', textMax),
-        pad(token, 1),
-        y + objH * 0.68,
-      );
+      ctx.fillText(truncateText(ctx, def?.description ?? '', textMax), pad(token, 1), descY);
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = accent;
       ctx.textAlign = 'right';

@@ -135,9 +135,11 @@ export class TuningScene implements Scene {
     const radarX = portrait
       ? (view.w - radarR * 2) * 0.5
       : pad(token, 2.5) + token.fontCaption;
+    // Clearance so the radar's top label clears the section title above it.
+    const radarY = y + pad(token, 1.25) + token.fontCaption * 0.5;
     drawRadarChart(
       ctx,
-      { x: radarX, y: y + pad(token, 1), radius: radarR, values: vehicleRadarValues(this.discipline, vehicle) },
+      { x: radarX, y: radarY, radius: radarR, viewW: view.w, values: vehicleRadarValues(this.discipline, vehicle) },
       lui,
     );
     y += radarR * 2 + pad(token, 2.5) + pad(token, 1);

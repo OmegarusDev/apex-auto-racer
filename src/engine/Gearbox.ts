@@ -12,8 +12,6 @@ export interface GearboxProfile {
   topFrac: number[];
   /** Drive torque multiplier per gear. */
   torque: number[];
-  /** BandFrac for AI auto-upshift. */
-  autoUpshiftBand: number;
   /** Player Shift may upshift from this band. */
   earlyUpshiftBand: number;
   /** BandFrac below this → auto downshift (player only when throttle is low). */
@@ -34,7 +32,6 @@ const TRACK_BOX: GearboxProfile = {
   gearCount: 6,
   topFrac: [0, 0.22, 0.38, 0.55, 0.72, 0.88, 1.0],
   torque: [0, 1.18, 1.1, 1.04, 0.98, 0.94, 0.9],
-  autoUpshiftBand: 0.76,
   earlyUpshiftBand: 0.42,
   downshiftBand: 0.18,
   playerDownshiftThrottle: 0.28,
@@ -47,7 +44,6 @@ const STREET_BOX: GearboxProfile = {
   gearCount: 5,
   topFrac: [0, 0.28, 0.48, 0.68, 0.86, 1.0],
   torque: [0, 1.22, 1.1, 1.02, 0.94, 0.88],
-  autoUpshiftBand: 0.74,
   earlyUpshiftBand: 0.4,
   downshiftBand: 0.16,
   playerDownshiftThrottle: 0.28,
@@ -60,7 +56,6 @@ const RALLY_BOX: GearboxProfile = {
   gearCount: 4,
   topFrac: [0, 0.32, 0.58, 0.8, 1.0],
   torque: [0, 1.25, 1.08, 0.98, 0.9],
-  autoUpshiftBand: 0.72,
   earlyUpshiftBand: 0.38,
   downshiftBand: 0.14,
   playerDownshiftThrottle: 0.3,
@@ -73,6 +68,16 @@ export function gearboxFor(discipline: DisciplineId): GearboxProfile {
   if (discipline === 'street') return STREET_BOX;
   if (discipline === 'rally') return RALLY_BOX;
   return TRACK_BOX;
+}
+
+/**
+ * AI auto-upshift band, governed by driver skill (0..1).
+ * Skilled drivers shift at the green-window start (peak torque); rookies hold
+ * gears into the redline and lose time — no arbitrary pace handicap.
+ */
+export function aiUpshiftBand(box: GearboxProfile, skill01: number): number {
+  const s = Math.max(0, Math.min(1, skill01));
+  return box.greenBandLo + (1 - s) * (box.amberBandHi - box.greenBandLo);
 }
 
 export function gearTopSpeed(vMaxEff: number, gear: number, box: GearboxProfile): number {

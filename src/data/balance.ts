@@ -17,8 +17,6 @@ export const BALANCE = {
   startingRosterSize: 3,
   startingPartTier: 1,
   maxPartTier: 5,
-  /** Player pace trim on vDriver + vMax/aAccel — early careers must not steamroll. */
-  playerPaceMult: 0.5,
   rainChance: 0.1,
   /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
   rainMuMult: 0.82,

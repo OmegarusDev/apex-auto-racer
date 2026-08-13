@@ -26,7 +26,7 @@ Scalextric-style pedal autobattler. **Hold gas — steering is Mag autopilot** (
 
 - **Enter / right half** — throttle (one-finger default)
 - **Space / left half** — brake (trail / threshold; Rally brake-pulse initiates slide)
-- **Shift / bottom pad** — manual upshift (watch the rev strip); **Street:** while armed/latched = clutch-kick
+- **Shift / bottom pad** — manual upshift (watch the rev strip; any valid-rev time, gas or not). Pin the throttle and the ~1s redline dwell auto-upshifts — but an early Shift is the fast path. **Street:** while armed/latched = clutch-kick
 - **Escape** — back / pause
 
 No steer axis — Mag + AI `steerTarget` hold the line. Quick Race picker: Track / Street / Rally each have a distinct look and blurb.

@@ -224,12 +224,15 @@ export function runGearRpmGate(): FeelGateResult {
     }
   }
   player.s = bestS;
-  player.v = 12;
+  player.v = 24;
   player.gear = 3;
   player.slotMode = 'groove';
   for (let i = 0; i < 120; i++) {
     director.setPlayerPedals(0.9, 0, false);
     director.update(PHYSICS.dt);
+    // Dyno-pin at the low-kappa node: speed test, not a cornering test.
+    player.s = bestS;
+    player.l = 0;
   }
   const box = gearboxFor('track');
   const band = gearBandFrac(player.v, player.stats.vMax, player.gear, box);
@@ -269,11 +272,25 @@ export function runShiftWindowGate(): FeelGateResult {
   if (!player) {
     return { id: 'SHIFT_WINDOW', ok: false, detail: 'no player' };
   }
+  let bestS = player.s;
+  let bestK = 99;
+  for (const n of director.track.nodes) {
+    const k = Math.abs(n.kappaLine);
+    if (k < bestK) {
+      bestK = k;
+      bestS = n.s;
+    }
+  }
+  player.s = bestS;
+  player.l = 0;
   player.v = 8;
   player.gear = 2;
   for (let i = 0; i < 60; i++) {
     director.setPlayerPedals(1, 0, false);
     director.update(PHYSICS.dt);
+    // Dyno-pin so a faster car cannot carry itself into a corner mid-test.
+    player.s = bestS;
+    player.l = 0;
   }
   const liveOk = ['low', 'green', 'amber', 'red'].includes(player.shiftWindow);
   return {

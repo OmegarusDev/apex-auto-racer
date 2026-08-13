@@ -84,11 +84,11 @@ Live failure mode is still groove/deslot (Scalextric peg), not free-yaw underste
 - AI brakes for `vDriver` / live `v_deslot`, full throttle otherwise; draft hold then lateral pull-out. Soft bumper / grid-hold softens start rubs so the pack does not freeze at lights-out.
 - **Line contact (2026-08-10)** — Same-lane overlaps stack in S (brake / speed-match); lateral peel only once centers clear ~0.5 carWidth (intentional pass). Soft bumper covers player+AI. Gate: `PACK_CONTACT`.
 - Wall recovery is soft (stun cuts drive; no lateral freeze/teleport). Track width / normals / kerbs match painted asphalt.
-- **Manual upshift gearbox:** Enter/gas, Space/brake; player Shift/tap upshifts (no miss slap). Auto downshift when off throttle in a low band. AI keeps assisted auto up/down. RPM/torque curves + SHIFT rev meter (green/amber/red). Street = 5 gears + harder walls + clutch-kick while armed/latched; Rally = 4 gears + longer deslot + softer Mag + brake-pulse slide.
+- **Manual upshift gearbox:** Enter/gas, Space/brake; player Shift/tap upshifts any time the rev band will accept it (gas or not) — no miss slap. Pin-throttle safety net: ~1s held at the redline band auto-upshifts (no crawl). Auto downshift when off throttle in a low band. AI upshift band is governed by driver skill (`aiUpshiftBand`), never a fixed timer or pace trim — low-skill drivers hold gears into the redline and lose time, skilled drivers shift at green-window start. RPM/torque curves + SHIFT rev meter (green/amber/red). Street = 5 gears + harder walls + clutch-kick while armed/latched; Rally = 4 gears + longer deslot + softer Mag + brake-pulse slide.
 - Opponent fields stratify weak→strong within the rank budget band (no dead stall-cars at novice).
 - **Quick Race challenge floor** — Quick Race uses `max(unlocked+1, 2)` into existing opponentStatRanges / opponentPartTiers (tournament keeps true rank). Field traits are cycled for style variety; part roll biases upgraded.
-- **Player pace (2026-08-10)** — `playerPaceMult` (0.5) scales live `vMax`/`aAccel` as well as `vDriver` (was targets-only, so pin-throttle still felt overpowered). Gate: `PLAYER_PACE_PHYS`. Opponent early bands + part tiers raised; field budget distribute no longer clamps away standout totals. `GEAR_ASSIST` asserts manual up / auto-down for the player.
-- **Manual upshift** — player must Shift/tap to upshift; auto downshift when throttle is low in the downshift band. AI keeps auto up/down.
+- **No player pace handicap (2026-08-13)** — `playerPaceMult` removed: the player's live `vMax`/`aAccel`/`vDriver` are raw part+driver stats. Race pace emerges from parts, driver skill, and gear/brake execution — player and AI follow the same physics. Player safety net: redline-dwell auto-upshift (`PHYSICS.redlineAutoShiftSec`). AI shift quality scales with driver skill only. Gates: `PLAYER_PACE_PHYS`, `GEAR_ASSIST` (pin-throttle auto-climbs; coast upshift at valid band; low-rev Shift refused).
+- **Manual upshift** — player must Shift/tap to upshift (or ride the redline for the auto safety net); auto downshift when throttle is low in the downshift band. AI upshift band from driver skill.
 - **Quick Race track scale (2026-08-11)** — Early / slower Quick Race circuits shrink via non-freeze `BALANCE.quickRaceTrackScale` + duration/lap caps by pace band (`engine/race/paceTrackScale.ts`). `generateTrack(..., trackScale)` scales waypoint radius + modest asphalt width. Tournament / feel harnesses omit scale (1.0). Gate: `QR_TRACK_SCALE`.
 - **Quick Race picker (2026-08-11)** — Title / Campaign Quick Race open `QuickRaceSetupScene`: discipline + curated presets (My Garage → Rookie → Factory Ace). Presets set driver/vehicle overrides + challenge/pace bands without rewriting career garage. Synthetic preset drivers skip garage condition writeback.
 
@@ -116,6 +116,18 @@ Live failure mode is still groove/deslot (Scalextric peg), not free-yaw underste
 | Focus | Wider hold; fewer mistakes; cleaner wall recovery; **Mag damp** + smoother baked line |
 | Determination | Catch-up accel; stronger draft; shorter wake before pull-out |
 | Slipstreamer / Hothead / Ice Cold / Showboat / Grinder / Loose Cannon | As in traits data (draft ×1.65, brake aggression, late-race calm, lead mistakes, XP, per-race jitter) |
+
+## Feel baseline (2026-08-13)
+
+Headless suite green after removing the player pace handicap and adding the redline auto-upshift safety net:
+
+- `validate:feel` 38/38 incl. rewritten `GEAR_ASSIST` (pin-throttle auto-climbs ≥gear 3, coast upshift at valid band, low-rev Shift refused) and `PLAYER_PACE_PHYS` (player vMax/aAccel == raw part+driver stats)
+- **Race-start fairness (2026-08-13)** — two bugs made the start unfair:
+  - Grid placed the front row ON the line (s=0) and the back row 12 m BEFORE it → back rows crossed s=0 after a few metres, counted a ~lap head start, and won every race; everyone else was retired at +10 s. Fixed with `PHYSICS.gridPoleGap` (whole pack grids behind the line).
+  - `handleLapCrossing` was level-triggered (`prevS + v·dt ≥ line`) so a slow/lingering crossing re-fired the lap counter on consecutive steps → back-row cars could "finish" in ~1.6 s. Now edge-triggered on `prevS` (one pass = one lap).
+- start-validate PASS: pin P1 ≤ 7/8 vs novice field — pin-throttle is intentionally viable at the entry band (see balance notes).
+- AI upshift band from driver skill (`aiUpshiftBand(box, skill01)`) — no fixed-band assist, no pace trim.
+- `scripts/balance-probe.ts` — headless difficulty probe (`npm run` via vite-node) across Quick Race bands; known follow-up: pin-throttle currently beats all AI bands by ~10 s because overspeed deslots are rare/cheap — the feel-tuning target for playtesting (see below).
 
 ## Feel baseline (2026-08-11)
 
@@ -151,7 +163,7 @@ Change protocol:
 
 ### BALANCE (freeze-critical)
 
-`playerPaceMult`, `opponentStatRanges`, `opponentPartTiers`, `contactGap`, `contactSpeedCap`, `contactNudge`, `contactIters`, `contactBounce`, `contactCrashClosing`, `contactDeslotClosing`, `contactConditionSeverityMin`, `followTimeGap`, `followMinGap`, `followSkillGapSpan`, `draftGapMax`, `draftLateralMax`, `overtakeDraftThreshold`, `overtakeHoldSec`, `overtakeDurationSec`, `overtakeLateralShift`, `rainMuMult`, `finishWindowSec`, `wallCrashConditionLoss`, `contactCrashConditionLoss`
+`opponentStatRanges`, `opponentPartTiers`, `contactGap`, `contactSpeedCap`, `contactNudge`, `contactIters`, `contactBounce`, `contactCrashClosing`, `contactDeslotClosing`, `contactConditionSeverityMin`, `followTimeGap`, `followMinGap`, `followSkillGapSpan`, `draftGapMax`, `draftLateralMax`, `overtakeDraftThreshold`, `overtakeHoldSec`, `overtakeDurationSec`, `overtakeLateralShift`, `rainMuMult`, `finishWindowSec`, `wallCrashConditionLoss`, `contactCrashConditionLoss`
 
 ## Custom engines (layer map)
 
@@ -172,6 +184,7 @@ Three layers — keep new work in the right one:
 - Full visual identity + menu-flow product overhaul deferred until playability soak.
 - **Presentation rebuild (2026-08-10)** — Graphics engine split into `RaceView` + `TrackBaker` / `TrackBlit` / `CarPainter` / `materials` / `TrackSampler`. RaceScene consumes `RaceFrameView` DTOs; cars show part tiers / condition / tyre; garage+tuning share CarPainter; brand shell via `ui/brand.ts`. Feel-freeze physics untouched. Quick Race Results Back uses `returnTo: 'title'`.
 - **Race chrome + track origin (2026-08-10)** — Bottom pedal deck + shared `raceChromeLayout` (pause/minimap dead-zone); Quick Race `quickRaceNonce` (save v2); TrackGenerator phase-shifts `s=0` to best straight; Pages `100dvh` + visualViewport + splash.
+- **Depth-fighting fix (2026-08-13)** — Cars vanished "under a black (dark tarmac) layer" once moving on some phones. The ~0.1 unit car lift sits below the resolution of low-precision (16-bit) depth buffers at race distances (near 1.2 / far up to 2000), so the track won the depth test on those GPUs. Fixed in `ApexRenderer`: `gl.polygonOffset(1, 4)` biases the track's depth away from the camera (scales with the buffer's own resolution), plus a modest car-lift bump 0.08→0.12.
 
 ## Physics depth roadmap (race-engineer brief)
 

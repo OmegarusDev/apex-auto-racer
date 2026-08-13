@@ -73,6 +73,9 @@ export interface RadarChartDef {
   x: number;
   y: number;
   radius: number;
+  /** Optional local viewport width — labels clamp to it instead of the chart
+   *  footprint, so opposite labels keep their natural sides on small screens. */
+  viewW?: number;
   values: {
     topSpeed: number;
     acceleration: number;
@@ -919,10 +922,14 @@ export function drawRadarChart(ctx: CanvasRenderingContext2D, chart: RadarChartD
   ctx.fillStyle = token.textMuted;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // Keep labels inside the chart's horizontal footprint so left/right edges don't clip.
+  // Clamp labels to the drawing surface when viewW is given; otherwise keep
+  // them inside the chart footprint. Chart-footprint clamping pulled opposite
+  // labels (e.g. Accel/Downforce) toward the center at the same height and
+  // they collided on narrow phones.
   const labelInset = pad(token, 0.25);
-  const minX = chart.x + labelInset;
-  const maxX = chart.x + chart.radius * 2 - labelInset;
+  const hasView = chart.viewW !== undefined;
+  const minX = hasView ? labelInset : chart.x + labelInset;
+  const maxX = hasView ? chart.viewW! - labelInset : chart.x + chart.radius * 2 - labelInset;
   for (let i = 0; i < n; i++) {
     const a = angles[i]!;
     const label = RADAR_LABELS[i]!;

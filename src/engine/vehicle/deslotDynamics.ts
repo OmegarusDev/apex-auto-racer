@@ -99,9 +99,12 @@ export function tryRejoinGroove(
   car.slotMode = 'groove';
   car.slipAngle *= 0.35;
   car.yawRate *= 0.4;
-  car.dl = 0;
+  // Smooth pin re-catch: ramp lateral momentum down instead of killing it
+  // instantly (was dl = 0, a velocity discontinuity). The guide re-engages
+  // with reduced Mag authority and re-centers over the immunity window.
+  car.dl *= 0.35;
   car.deslotImmunity = PHYSICS.deslotRejoinImmunity;
-  car.magAuthority = 0.55;
+  car.magAuthority = 0.4;
   car.easedThrottle = Math.max(car.easedThrottle, 0.2);
   car.driftState = false;
   car.driftArmed = false;

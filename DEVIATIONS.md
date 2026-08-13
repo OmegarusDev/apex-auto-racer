@@ -119,6 +119,15 @@ Live failure mode is still groove/deslot (Scalextric peg), not free-yaw underste
 
 ## Feel baseline (2026-08-13)
 
+Headless suite green after the slot-breakout force balance + magnetic downforce:
+
+- **Slot-breakout consolidation (2026-08-13)** — the five special-cased deslot triggers (`gripBreak`/`capacityFail`/`magPop`/`pinBendPop` + overspeed) collapsed into one force-balance test in `grooveStep`: the guide holds while centrifugal `v²|κ|` + Mag steering pressure + long-load stays within the slot capacity (which carries the driver margin through `v_deslot`). Removed the now-orphaned `oDeslot`/`oDeslotSpeedFrac`/`grooveCapacityDeslotL`/`grooveCapacityMagnetMin` constants.
+- **Magnetic rail downforce (2026-08-13)** — `aeroForces` adds a speed-independent magnet (`HYBRID_MAG_FORCE`) and `computeAxleLoads` applies a corner/brake "squat" load-up (`HYBRID_MAG_LOADUP`) so cars load into the rail under lateral g — the Scalextric soul, replacing flat grip knobs. `HYBRID_CL_FROM_D` 14→10 to keep high-speed DF sane; garage previews (`predictVDeslot`) include the magnet. Balance re-verified: pin P1 ≤7/8, shift 8/8.
+- **Smooth rejoin (2026-08-13)** — `tryRejoinGroove` ramps lateral momentum (dl×0.35) instead of snapping to zero; guide re-catches with reduced Mag authority over the immunity window.
+- **Dead code sweep (2026-08-13)** — removed the un-wired two-axle tyre/yaw facade (`resolveTwoAxleTyres`/`integrateYaw`/`updateSlipAngle`/`axleBrushForces`/`applyTyreYawStep`), the dead `scenes/race/onboarding.ts`, `raceCamera2dZoomScale`, and the unreferenced `graphics/index.ts` + `graphics/engine/index.ts` barrels. 38/38 gates green.
+
+## Feel baseline (2026-08-13 — gearbox + race-start)
+
 Headless suite green after removing the player pace handicap and adding the redline auto-upshift safety net:
 
 - `validate:feel` 38/38 incl. rewritten `GEAR_ASSIST` (pin-throttle auto-climbs ≥gear 3, coast upshift at valid band, low-rev Shift refused) and `PLAYER_PACE_PHYS` (player vMax/aAccel == raw part+driver stats)
@@ -159,7 +168,7 @@ Change protocol:
 
 ### PHYSICS (freeze-critical)
 
-`dt`, `brainEveryN`, `grooveKappaMin`, `grooveSpring`, `grooveDamp`, `grooveLoadKill`, `grooveCornerKill`, `grooveLatMinV`, `grooveLatFullV`, `grooveMaxDlPerV`, `oDeslot`, `oDeslotSpeedFrac`, `grooveCapacityDeslotL`, `grooveCapacityMagnetMin`, `deslotSkillBase`, `deslotSkillSpan`, `deslotFocusBase`, `deslotFocusSpan`, `deslotBraveryBase`, `deslotBraverySpan`, `deslotMinTime`, `deslotRejoinL`, `deslotRejoinVFrac`, `deslotRejoinImmunity`, `deslotSteerGain`, `deslotSteerFrac`, `deslotSteerMinRoll`, `deslotScrubGain`, `deslotScrubMaxG`, `deslotReleaseImpulse`, `deslotWallPush`, `deslotLatDamp`, `gridHoldSec`, `gridHoldPureFrac`, `gridFollowGainMult`, `gridMaxDl`, `gridColOffset`, `gridRowSpacing`, `aiLaunchSec`, `aiLaunchMinThrottle`, `recoveryBrainSec`, `brakeAuthorityBase`, `brakeAuthoritySpan`, `throttleAuthorityBase`, `throttleAuthoritySpan`, `wallMargin`, `crashSpeed`, `crashSpeedMult`, `crashStun`, `streetWallStunMult` (discipline mult), `crashRecoveryDecel`, `crashRecoveryDecelDeslot`, `wallRestitution`, `wallImpactScrub`, `spinWallSpeed`, `spinStun`, `tyreStartTemp`, `tyreTempMax`, `tyreRecoveryFloor`, `tyreColdGrip`, `tyreHotGrip`, `tyreHeatSpeed`, `tyreHeatOver`, `tyreHeatDrift`, `tyreCool`, `draftSpeedBonus`, `draftAccelBonus`, `draftCornerKappa`, `draftDetBonus`
+`dt`, `brainEveryN`, `grooveKappaMin`, `grooveSpring`, `grooveDamp`, `grooveLoadKill`, `grooveCornerKill`, `grooveLatMinV`, `grooveLatFullV`, `grooveMaxDlPerV`, `deslotSkillBase`, `deslotSkillSpan`, `deslotFocusBase`, `deslotFocusSpan`, `deslotBraveryBase`, `deslotBraverySpan`, `deslotMinTime`, `deslotRejoinL`, `deslotRejoinVFrac`, `deslotRejoinImmunity`, `deslotSteerGain`, `deslotSteerFrac`, `deslotSteerMinRoll`, `deslotScrubGain`, `deslotScrubMaxG`, `deslotReleaseImpulse`, `deslotWallPush`, `deslotLatDamp`, `gridHoldSec`, `gridHoldPureFrac`, `gridFollowGainMult`, `gridMaxDl`, `gridColOffset`, `gridRowSpacing`, `aiLaunchSec`, `aiLaunchMinThrottle`, `recoveryBrainSec`, `brakeAuthorityBase`, `brakeAuthoritySpan`, `throttleAuthorityBase`, `throttleAuthoritySpan`, `wallMargin`, `crashSpeed`, `crashSpeedMult`, `crashStun`, `streetWallStunMult` (discipline mult), `crashRecoveryDecel`, `crashRecoveryDecelDeslot`, `wallRestitution`, `wallImpactScrub`, `spinWallSpeed`, `spinStun`, `tyreStartTemp`, `tyreTempMax`, `tyreRecoveryFloor`, `tyreColdGrip`, `tyreHotGrip`, `tyreHeatSpeed`, `tyreHeatOver`, `tyreHeatDrift`, `tyreCool`, `draftSpeedBonus`, `draftAccelBonus`, `draftCornerKappa`, `draftDetBonus`
 
 ### BALANCE (freeze-critical)
 

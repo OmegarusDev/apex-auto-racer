@@ -5,9 +5,6 @@ import {
   HYBRID_MASS_KG,
   computeAxleLoads,
   gripAccelFromLoads,
-  resolveTwoAxleTyres,
-  integrateYaw,
-  updateSlipAngle,
 } from './dynamics';
 
 export interface DriveLongResult {
@@ -159,44 +156,6 @@ export function computeLongAndGrip(args: {
     loads,
     tyreUsage: O,
   };
-}
-
-/** Apply two-axle tyre solve + Mag yaw; returns refined aLong / body aLat from rubber. */
-export function applyTyreYawStep(args: {
-  car: CarSimState;
-  aLongDemand: number;
-  muEff: number;
-  loads: ReturnType<typeof computeAxleLoads>;
-  kappaEff: number;
-  magMz: number;
-  dt: number;
-}): { aLongTyre: number; aLatTyre: number; usage: number } {
-  const { car, aLongDemand, muEff, loads, kappaEff, magMz, dt } = args;
-  const solved = resolveTwoAxleTyres({
-    massKg: car.setup.massKg,
-    v: car.v,
-    yawRate: car.yawRate,
-    slipAngle: car.slipAngle,
-    steerRad: car.steerRad,
-    muEff,
-    loads,
-    aLongDemand,
-    kappaPath: kappaEff,
-    brakeBiasFront: car.setup.brakeBiasFront,
-    staticFront: car.setup.staticFront,
-  });
-
-  car.yawRate = integrateYaw(car.yawRate, solved.mzTyre, magMz, dt, car.setup.iz);
-  car.slipAngle = updateSlipAngle(
-    car.slipAngle,
-    solved.aLat,
-    car.v,
-    car.yawRate,
-    kappaEff,
-    dt,
-  );
-
-  return { aLongTyre: solved.aLong, aLatTyre: solved.aLat, usage: solved.usage };
 }
 
 export function integrateMotion(

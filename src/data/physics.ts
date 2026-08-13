@@ -75,13 +75,6 @@ export const PHYSICS = {
   /** |kappa| below this is treated as a straight — no deslot at any throttle. */
   grooveKappaMin: 0.012,
   /**
-   * Grip-usage secondary deslot — near peg + overloaded friction circle.
-   * Primary failure is speed vs v_deslot; capacity fail is the pin-throttle path.
-   */
-  oDeslot: 1.26,
-  /** Fraction of v_deslot required before O / capacity can force a deslot. */
-  oDeslotSpeedFrac: 0.92,
-  /**
    * Groove magnet: restoring lateral accel toward personal line.
    * magnet = roll(v) × (1 − loadKill×longLoad) × (1 − cornerKill×cornerLoad)
    * aLat = spring×magnet×err − damp×dl; |dl| ≤ maxDlPerV×v
@@ -98,13 +91,6 @@ export const PHYSICS = {
   grooveLatFullV: 10,
   /** Max |dl| as a fraction of forward speed (no sideways teleport). */
   grooveMaxDlPerV: 0.38,
-  /**
-   * Capacity-fail deslot: magnet collapsed + off personal line + loaded corner.
-   * |l − line| must exceed this (m) while magnet is near zero.
-   */
-  grooveCapacityDeslotL: 0.85,
-  /** Magnet strength below this (0–1) counts as collapsed for capacity deslot. */
-  grooveCapacityMagnetMin: 0.18,
   /** Scales Focus/condition line noise while in groove. */
   grooveWobbleScale: 0.32,
   /**

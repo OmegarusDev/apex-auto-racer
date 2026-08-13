@@ -105,36 +105,27 @@ export function stepGroove(args: {
   car.slipAngle *= Math.exp(-PHYSICS.slipDecay * dt);
 
   const overspeed = car.v > vDeslot;
-  const O = car.gripUsage;
-  const gripBreak = car.v > vDeslot * PHYSICS.oDeslotSpeedFrac && O > PHYSICS.oDeslot;
-  const offLine = Math.abs(car.l - args.lineOffset) > PHYSICS.grooveCapacityDeslotL;
-  const capacityFail =
-    curved &&
-    car.v > vDeslot * PHYSICS.oDeslotSpeedFrac &&
-    magnet < PHYSICS.grooveCapacityMagnetMin &&
-    offLine &&
-    cornerLoad > 0.55 &&
-    longLoad > 0.4;
-  // Mag saturation under load = Newton-derived Scalextric pop.
-  const magPop =
-    curved &&
-    saturated &&
-    cornerLoad > 0.5 &&
-    longLoad > 0.35 &&
-    car.v > vDeslot * 0.88;
-  const pinBendPop =
-    pinOverrule &&
-    car.isPlayerControlled &&
-    curved &&
-    cornerLoad > 0.48 &&
-    longLoad > 0.45 &&
-    car.v > vDeslot * 0.82;
 
-  if (
+  // Single slot-breakout force balance (replaces five special-cased speed/load
+  // pop thresholds). The guide holds while total lateral demand — centrifugal
+  // v²|κ| plus the line-correction steering the Mag is applying — stays within
+  // the slot's lateral capacity. Capacity carries the driver margin through
+  // v_deslot (rookies hold less; elites flirt with the peg), so the skill curve
+  // is preserved. Long load adds pin stress (drive/brake consume friction
+  // circle → less lateral left), the same physics the old load gates faked.
+  const latPath = Math.max(0, aLatPath);
+  const slotCap = Math.max(1, vDeslot * vDeslot * Math.max(1e-4, Math.abs(kappaUse)));
+  const centrifugalFrac = latPath / slotCap; // ≈ (v / vDeslot)²
+  const steerPressure = Math.abs(mag.aLat) / Math.max(aGrip, 1e-6);
+  const pinStress = centrifugalFrac + 0.45 * steerPressure + 0.25 * longLoad;
+
+  const pop =
     curved &&
     car.deslotImmunity <= 0 &&
-    (overspeed || gripBreak || capacityFail || magPop || pinBendPop)
-  ) {
+    car.v > PHYSICS.grooveLatMinV &&
+    (overspeed || pinStress > 1);
+
+  if (pop) {
     enterDeslot(car, kappaUse, vDeslot, discipline);
     if (pinOverrule) {
       car.deslotRemaining = Math.max(

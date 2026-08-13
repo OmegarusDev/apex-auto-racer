@@ -9,6 +9,7 @@ import {
   HYBRID_CD_FROM_CL,
   HYBRID_CL_FROM_D,
   HYBRID_LOAD_SENS_N,
+  HYBRID_MAG_FORCE,
   HYBRID_MASS_KG,
   HYBRID_RHO,
 } from './dynamics';
@@ -135,12 +136,14 @@ export function predictVDeslot(
   downforceD = 0.25,
 ): number {
   const k = Math.max(0.02, Math.abs(kappa));
-  // Seed with no-aero grip, then one DF pass.
+  // Seed with no-aero grip, then one DF pass. Includes the speed-independent
+  // magnetic rail downforce so the garage readout matches the live magnet.
   let aGrip = predictCornerGrip(setup, muSurface, 18);
   let v = Math.sqrt(Math.max(1, aGrip / k));
   const q = 0.5 * HYBRID_RHO * v * v;
   const cl = Math.max(0, downforceD) * HYBRID_CL_FROM_D * setup.clScale;
-  const fz = setup.massKg * 9.81 + q * cl;
+  const fMag = HYBRID_MAG_FORCE * (0.5 + Math.max(0, downforceD));
+  const fz = setup.massKg * 9.81 + q * cl + fMag;
   const fMax =
     muSurface *
     setup.compoundMu *

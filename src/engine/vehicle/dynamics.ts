@@ -20,7 +20,15 @@ export const HYBRID_CG_HEIGHT = 0.42;
 export const HYBRID_LOAD_SENS_N = 0.88;
 export const HYBRID_RHO = 1.225;
 /** Maps stats.D into CL so mid-corner DF ≈ legacy (1+D) grip at vMax. */
-export const HYBRID_CL_FROM_D = 14;
+export const HYBRID_CL_FROM_D = 10;
+/** Base magnetic rail downforce (N) — speed-independent, the Scalextric soul. */
+export const HYBRID_MAG_FORCE = 1100;
+/**
+ * Corner/brake "squat" multiplies magnetic pull — the car loads toward the
+ * rail under lateral g (F_mag ~ 1/gap², bounded). Adds the authentic
+ * "loads up in corners" feel instead of a flat grip knob.
+ */
+export const HYBRID_MAG_LOADUP = 0.5;
 export const HYBRID_CD_BASE = 0.32;
 export const HYBRID_CD_FROM_CL = 0.1;
 /** Front weight distribution at rest (0–1). */
@@ -36,22 +44,6 @@ export interface AxleLoads {
   fDrag: number;
 }
 
-export interface AxleForces {
-  fx: number;
-  fy: number;
-  /** Combined slip usage 0..∞ (1 = at friction limit). */
-  usage: number;
-}
-
-export interface TyreAxleState {
-  slipRatio: number;
-  slipAngle: number;
-  fx: number;
-  fy: number;
-  fz: number;
-  usage: number;
-}
-
 export interface AeroScale {
   clScale?: number;
   cdScale?: number;
@@ -61,6 +53,8 @@ export interface AeroScale {
  * Dynamic pressure q = ½ρv²; DF adds Fz and induced drag.
  * Signs: DF presses down (+Fz), drag opposes long velocity.
  * Spoiler scales CL and CD together so DF is never free.
+ * DownforceD also proxies the magnet's strength — the rail adds a
+ * speed-independent magnetic component on top of the aero part.
  */
 export function aeroForces(
   v: number,
@@ -72,9 +66,11 @@ export function aeroForces(
   const cdScale = scale.cdScale ?? 1;
   const cl = Math.max(0, downforceD) * HYBRID_CL_FROM_D * clScale;
   const cd = (HYBRID_CD_BASE + HYBRID_CD_FROM_CL * cl) * cdScale;
+  // Magnetic rail DF — present even at zero speed (real slot-car magnets).
+  const fMag = HYBRID_MAG_FORCE * (0.5 + Math.max(0, downforceD));
   return {
     q,
-    fDownforce: q * cl,
+    fDownforce: q * cl + fMag,
     fDrag: q * cd,
     cl,
     cd,
@@ -109,7 +105,13 @@ export function computeAxleLoads(
     clScale: opts.clScale,
     cdScale: opts.cdScale,
   });
-  const fzStatic = massKg * g + aero.fDownforce;
+  // Magnetic load-up: cornering / braking squat the car toward the rail, which
+  // pulls the magnet closer → more downforce (1/gap² behaviour, bounded).
+  const squatLoad = Math.min(
+    1.1,
+    (Math.abs(aLat) / g) * 0.6 + (Math.max(0, -aLong) / g) * 0.4,
+  );
+  const fzStatic = massKg * g + aero.fDownforce * (1 + HYBRID_MAG_LOADUP * squatLoad);
 
   // Pitch: brake → front; accel → rear. balanceB soft-filters aLong/scale.
   const pitchRaw = (massKg * aLong * cgH) / HYBRID_WHEELBASE;
@@ -149,38 +151,6 @@ export function axleMuForce(mu: number, fz: number, fzRef: number): number {
 }
 
 /**
- * Brush / MF-lite combined slip on one axle.
- * κ long-slip (−1..1-ish), α slip angle (rad).
- */
-export function axleBrushForces(
-  kappa: number,
-  alpha: number,
-  fz: number,
-  mu: number,
-  fzRef: number,
-  /** Drive/brake preference: +1 drive, −1 brake bias on long axis. */
-  longSign = 0,
-): AxleForces {
-  const fMax = axleMuForce(mu, fz, fzRef);
-  // Cornering / long stiffness proxies (N/rad, N per unit slip).
-  const Cy = fMax * 8.5;
-  const Cx = fMax * 12;
-
-  const fyLin = -Cy * alpha;
-  const fxLin = Cx * kappa + longSign * 0; // kappa carries drive/brake
-
-  // Friction ellipse saturation
-  const fy = fyLin;
-  const fx = fxLin;
-  const mag = Math.hypot(fx, fy);
-  if (mag <= fMax || mag < 1e-9) {
-    return { fx, fy, usage: mag / Math.max(fMax, 1e-6) };
-  }
-  const scale = fMax / mag;
-  return { fx: fx * scale, fy: fy * scale, usage: 1 / scale };
-}
-
-/**
  * Effective lateral grip accel (m/s²) from axle loads — replaces bare µ·g
  * so weight and DF sit on a real Fz path.
  */
@@ -189,133 +159,4 @@ export function gripAccelFromLoads(muEff: number, loads: AxleLoads, massKg: numb
   const fMaxF = axleMuForce(muEff, loads.fzFront, fzRef);
   const fMaxR = axleMuForce(muEff, loads.fzRear, fzRef);
   return (fMaxF + fMaxR) / Math.max(massKg, 1);
-}
-
-/**
- * Split long demand into axle slip ratios and produce combined tyre forces
- * under Mag-commanded front steer (rad).
- */
-export function resolveTwoAxleTyres(args: {
-  massKg: number;
-  v: number;
-  yawRate: number;
-  slipAngle: number;
-  steerRad: number;
-  muEff: number;
-  loads: AxleLoads;
-  /** Desired long accel from drive−brake−coast before tyre limit (m/s²). */
-  aLongDemand: number;
-  /** Path curvature for kinematic yaw (1/m). */
-  kappaPath: number;
-  /** Front brake bias 0–1 (trail-brake story). */
-  brakeBiasFront?: number;
-  staticFront?: number;
-}): {
-  front: TyreAxleState;
-  rear: TyreAxleState;
-  fxTotal: number;
-  fyTotal: number;
-  mzTyre: number;
-  aLong: number;
-  aLat: number;
-  usage: number;
-} {
-  const {
-    massKg,
-    v,
-    yawRate,
-    slipAngle,
-    steerRad,
-    muEff,
-    loads,
-    aLongDemand,
-    kappaPath,
-    brakeBiasFront = 0.58,
-    staticFront = HYBRID_STATIC_FRONT,
-  } = args;
-  const vSafe = Math.max(1.2, v);
-  const lf = HYBRID_WHEELBASE * (1 - staticFront);
-  const lr = HYBRID_WHEELBASE * staticFront;
-
-  // Body-frame slip angles (small-angle bicycle).
-  const alphaF = slipAngle + (lf * yawRate) / vSafe - steerRad;
-  const alphaR = slipAngle - (lr * yawRate) / vSafe;
-
-  // Long slip from accel demand (simplified): κ ≈ aLong * k / (µ g)
-  const fzRef = massKg * PHYSICS.g * 0.5;
-  const fLongDemand = aLongDemand * massKg;
-  // Drive biased rear; brake split from setup bias (trail loads front).
-  const drive = fLongDemand >= 0;
-  const bias = Math.max(0.45, Math.min(0.72, brakeBiasFront));
-  const fxFDemand = drive ? fLongDemand * 0.15 : fLongDemand * bias;
-  const fxRDemand = drive ? fLongDemand * 0.85 : fLongDemand * (1 - bias);
-  const kappaF = fxFDemand / Math.max(axleMuForce(muEff, loads.fzFront, fzRef), 1);
-  const kappaR = fxRDemand / Math.max(axleMuForce(muEff, loads.fzRear, fzRef), 1);
-
-  const front = axleBrushForces(kappaF, alphaF, loads.fzFront, muEff, fzRef);
-  const rear = axleBrushForces(kappaR, alphaR, loads.fzRear, muEff, fzRef);
-
-  const fxTotal = front.fx + rear.fx - loads.fDrag;
-  const fyTotal = front.fy + rear.fy;
-  const mzTyre = lf * front.fy - lr * rear.fy;
-
-  const aLong = fxTotal / massKg;
-  const aLat = fyTotal / massKg;
-  const usage = Math.max(front.usage, rear.usage);
-
-  void kappaPath;
-
-  return {
-    front: {
-      slipRatio: kappaF,
-      slipAngle: alphaF,
-      fx: front.fx,
-      fy: front.fy,
-      fz: loads.fzFront,
-      usage: front.usage,
-    },
-    rear: {
-      slipRatio: kappaR,
-      slipAngle: alphaR,
-      fx: rear.fx,
-      fy: rear.fy,
-      fz: loads.fzRear,
-      usage: rear.usage,
-    },
-    fxTotal,
-    fyTotal,
-    mzTyre,
-    aLong,
-    aLat,
-    usage,
-  };
-}
-
-/** Integrate yaw: ΣMz = I_z α. Mag yaw moment is external (autopilot hands). */
-export function integrateYaw(
-  yawRate: number,
-  mzTyre: number,
-  mzMag: number,
-  dt: number,
-  iz = HYBRID_IZ,
-): number {
-  const alpha = (mzTyre + mzMag) / Math.max(200, iz);
-  return yawRate + alpha * dt;
-}
-
-/** Slip angle / body sideslip from lateral vs forward (Frenet-compatible). */
-export function updateSlipAngle(
-  slipAngle: number,
-  aLatBody: number,
-  v: number,
-  yawRate: number,
-  kappaPath: number,
-  dt: number,
-): number {
-  const vSafe = Math.max(1.5, v);
-  // β̇ ≈ a_y/v − r ; path curvature subtracts steady-state cornering rate.
-  const betaDot = aLatBody / vSafe - yawRate + kappaPath * vSafe * 0.15;
-  let beta = slipAngle + betaDot * dt;
-  beta = Math.max(-0.55, Math.min(0.55, beta));
-  return beta;
 }

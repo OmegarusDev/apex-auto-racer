@@ -37,7 +37,7 @@ import {
 } from './sceneChrome';
 import { disciplineAccent } from '../career/disciplinesUi';
 import { buyPartTier, driverSpendData, repairVehicle } from '../career/garage';
-import { spendStatPoint } from '../career/xp';
+import { grantXp, spendStatPoint } from '../career/xp';
 import { findDriver } from '../career/roster';
 import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
 import { CampaignScene } from './CampaignScene';
@@ -109,13 +109,8 @@ export class ResultsScene implements Scene {
     for (const grant of this.payload.driverXp) {
       const driver = findDriver(state, grant.driverId);
       if (driver === undefined) continue;
-      if (grant.leveledUp) {
-        driver.level = grant.newLevel ?? driver.level;
-        driver.unspentPoints += 1;
-        driver.xp = 0;
-      } else {
-        driver.xp += grant.xpEarned;
-      }
+      // grantXp preserves XP past a level-up and applies every level crossed.
+      grantXp(driver, grant.xpEarned);
     }
 
     for (const obj of this.payload.objectivesCompleted) {
@@ -372,9 +367,19 @@ export class ResultsScene implements Scene {
       const hasSeriesNext = this.payload.nextRaceConfig !== undefined;
       const isQuick = this.payload.config.mode === 'quick';
       const showNext = hasSeriesNext || isQuick;
-      const footerBtns: ButtonDef[] = [
-        { x: 0, y: 0, w: 0, h: 0, label: 'Race Again', onClick: () => this.raceAgain() },
-      ];
+      const footerBtns: ButtonDef[] = [];
+      // Race Again is Quick-only: replaying a tournament race would double-advance
+      // the series (applyResults already bumped raceIndex before the button shows).
+      if (isQuick) {
+        footerBtns.push({
+          x: 0,
+          y: 0,
+          w: 0,
+          h: 0,
+          label: 'Race Again',
+          onClick: () => this.raceAgain(),
+        });
+      }
       if (showNext) {
         footerBtns.push({
           x: 0,

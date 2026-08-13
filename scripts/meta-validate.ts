@@ -4,6 +4,7 @@
  */
 import { FORMATS } from '../src/data/formats.ts';
 import { buildTournamentStandings } from '../src/career/tournamentStandings.ts';
+import { tournamentRaceSeed } from '../src/career/tournamentSeeds.ts';
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -49,7 +50,24 @@ function main(): void {
     'all teams should receive points',
   );
 
+  // Race-seed determinism: the same tournament race must always get the same
+  // seed (single formula in tournamentSeeds) and consecutive races must differ.
+  const seedState = 0xc0ffee;
+  assert(
+    tournamentRaceSeed(seedState, 2) === tournamentRaceSeed(seedState, 2),
+    'tournament race seed must be deterministic',
+  );
+  assert(
+    tournamentRaceSeed(seedState, 0) !== tournamentRaceSeed(seedState, 1),
+    'consecutive tournament races must use different seeds',
+  );
+  assert(
+    tournamentRaceSeed(seedState, 4) === tournamentRaceSeed(seedState, 4),
+    'next-race seed must match resume seed for the same index',
+  );
+
   console.log(`  META_TOURNAMENT_TEAMS: PASS — 2v2v2 standings.length=${standings.length}`);
+  console.log('  TOURNAMENT_SEED_CONSISTENCY: PASS');
   console.log('\nMeta validation OK\n');
 }
 

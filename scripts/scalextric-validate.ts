@@ -277,7 +277,10 @@ async function main() {
   const desPerCar = totDes / totCars;
   const okFinish = finishRate >= 0.75;
   const okDeslotPrimary = totDes >= totSpin && totSpin <= totCars * 0.5;
-  const okDeslotRate = desPerCar <= 5.5;
+  // 6.5 since 2026-08-13: the finish window now lets the whole field complete
+  // its final lap (checkered-flag classification) instead of cutting off at 10s,
+  // so stragglers race ~45s longer and accumulate a few more deslots.
+  const okDeslotRate = desPerCar <= 6.5;
   const okPinDeslots = pin.playerDeslots >= 1;
   const okPinNotSpinSpam = pin.playerSpins <= Math.max(1, pin.playerDeslots);
   // Overspeed must leave the asphalt — runoff and/or hard wall, not a soft reslot.
@@ -291,7 +294,7 @@ async function main() {
   console.log('\nChecks:');
   console.log(`  finish rate >= 75%: ${okFinish ? 'PASS' : 'FAIL'} (${(finishRate * 100).toFixed(1)}%)`);
   console.log(`  deslots primary / spins rare: ${okDeslotPrimary ? 'PASS' : 'FAIL'}`);
-  console.log(`  deslots/car <= 5.5: ${okDeslotRate ? 'PASS' : 'FAIL'} (${desPerCar.toFixed(2)})`);
+  console.log(`  deslots/car <= 6.5: ${okDeslotRate ? 'PASS' : 'FAIL'} (${desPerCar.toFixed(2)})`);
   console.log(`  pin-throttle deslots: ${okPinDeslots ? 'PASS' : 'FAIL'}`);
   console.log(`  pin-throttle not spin-spam: ${okPinNotSpinSpam ? 'PASS' : 'FAIL'}`);
   console.log(

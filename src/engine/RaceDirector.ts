@@ -145,6 +145,11 @@ export class RaceDirector {
   private finished = false;
   private finishWindowOpen = false;
   private finishWindowRemaining = 0;
+  /**
+   * Cars that crossed the line while the checkered flag was out — classified
+   * (possibly lapped) by reaching the line, never by a timer cutting them off.
+   */
+  private flagClassified = new Set<string>();
   private countdownRemaining = 3 * COUNTDOWN_STEP_SEC + GO_FLASH_SEC;
   private countdownPhase: CountdownPhase = 3;
   private standings: StandingEntry[] = [];
@@ -199,6 +204,11 @@ export class RaceDirector {
 
   get isRaceFinished(): boolean {
     return this.finished;
+  }
+
+  /** Car ids that crossed the line after the checkered flag was out. */
+  get flagClassifiedIds(): ReadonlySet<string> {
+    return this.flagClassified;
   }
 
   get raceClock(): number {
@@ -483,11 +493,15 @@ export class RaceDirector {
           this.rain,
           this.raceTime,
         );
+        // After the flag, classified cars cruise (cool-down) instead of racing
+        // — keeps the pack moving on screen without stacking deslots while the
+        // stragglers still on track race to the line for their classification.
+        const cruise = this.finishWindowOpen ? 0.3 : 1;
         updateVehicle(
           entry.car,
           this.track,
           dt,
-          { throttle: entry.brainOut.desiredThrottle, brake: entry.brainOut.desiredBrake },
+          { throttle: entry.brainOut.desiredThrottle * cruise, brake: 0 },
           entry.brainOut,
           ctx,
         );
@@ -643,16 +657,47 @@ export class RaceDirector {
     car.lap += 1;
     this.pushEvent('lap', car, entry.driver.name, String(car.lap));
 
-    if (car.lap >= this.config.laps && !car.finished) {
+    // Checkered flag out: the next line crossing classifies the car — lapped
+    // cars finish a lap (or more) down instead of being cut off mid-lap by a
+    // fixed clock, and the flag-out period stays bounded by one lap.
+    const flagOut = this.finishWindowOpen;
+    if (flagOut && !car.finished) {
+      this.flagClassified.add(car.id);
+    }
+    if (!car.finished && (car.lap >= this.config.laps || flagOut)) {
       car.finished = true;
       car.finishTime = this.raceTime;
-      this.pushEvent('finish', car, entry.driver.name);
+      this.pushEvent('finish', car, entry.driver.name, flagOut ? 'flag' : undefined);
 
       if (!this.finishWindowOpen) {
         this.finishWindowOpen = true;
-        this.finishWindowRemaining = BALANCE.finishWindowSec;
+        this.finishWindowRemaining = this.computeFinishWindow();
       }
     }
+  }
+
+  /**
+   * Budget the checkered-flag window from the trailing field, not a fixed clock.
+   * The old fixed 10 s cut cars off mid-final-lap whenever the pack spread past
+   * it — every race finalized with AI marked finished while 2/3 laps in. Now the
+   * window is the slowest unfinished car's estimated time to the line, floored
+   * at finishWindowSec and capped at finishWindowMax (stranded-car backstop).
+   * Normal races end earlier via allDone once everyone crosses.
+   */
+  private computeFinishWindow(): number {
+    const line = this.track.length;
+    let worst = 0;
+    for (const entry of this.entries) {
+      if (entry.car.finished) continue;
+      const toLine = (line - entry.car.s) % line;
+      const pace = Math.max(entry.car.v, BALANCE.finishWindowMinPace);
+      const need = toLine / pace;
+      if (need > worst) worst = need;
+    }
+    return Math.min(
+      BALANCE.finishWindowMax,
+      Math.max(BALANCE.finishWindowSec, worst * BALANCE.finishWindowMargin),
+    );
   }
 
   private detectCarEvents(entry: RaceCarEntry): void {

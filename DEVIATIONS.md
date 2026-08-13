@@ -117,6 +117,26 @@ Live failure mode is still groove/deslot (Scalextric peg), not free-yaw underste
 | Determination | Catch-up accel; stronger draft; shorter wake before pull-out |
 | Slipstreamer / Hothead / Ice Cold / Showboat / Grinder / Loose Cannon | As in traits data (draft ×1.65, brake aggression, late-race calm, lead mistakes, XP, per-race jitter) |
 
+## General bugfix pass (2026-08-13)
+
+Meta/career correctness fixes (no balance retunes; all on top of green `validate:feel`):
+
+- **XP overflow + multi-level (career)** — `ResultsScene.applyResults` discarded XP past a level-up and only ever granted one level. `grantXp` now loops level thresholds (keeps the remainder, awards a point per level); `computeDriverXp` predicts the same on a copy so the Lv toast and the real application can never drift.
+- **`spendStatPoint` wasted points at the stat cap** — spending a point on a stat at 99/100 consumed it for nothing; now refused when the stat is already at 100.
+- **`repair_then_podium` objective was tautologically true** — the flag was actually "vehicle at full condition" and the check was `repaired || condition < max`, one of which always holds on a podium. Added a persisted per-discipline `repairedSinceLastRace` flag (save v2 migrate defaults it to `{}`), set by `repairVehicle`, consumed on race entry for garage vehicles only (presets skipped), and the objective now requires an actual paid repair + podium.
+- **Tournament Next-Race seed divergence** — the results "Next Race" seed (`launch.raceSeed + index + 2`) differed from the campaign-resume seed, so the same tournament race played differently depending on the path. Extracted one formula `career/tournamentSeeds.ts` used by both paths; `META_TOURNAMENT_TEAMS` now also asserts `TOURNAMENT_SEED_CONSISTENCY`.
+- **Tournament "Race Again" double-advance** — `applyResults` bumps `progress.raceIndex` on enter, so replaying a tournament race via "Race Again" applied as the *next* race and skipped one. Race Again is now Quick-only; tournament flow is Next Race / Back.
+
+## Feel baseline (2026-08-13 — finish-window / premature end fix)
+
+Headless suite green (39/39) after fixing races ending before the pack finishes:
+
+- **Premature-end root cause (2026-08-13)** — the race ended on a fixed `finishWindowSec` (10 s) clock that started when the leader crossed and cut off any car that couldn't reach the line inside it. With a spread pack that was effectively everyone: headless probes showed **every** race finalizing with the AI field marked `finished` at 2/3 laps (mid-final-lap), so results appeared while cars were still circulating. Two-part fix:
+  1. **Adaptive flag window** — `RaceDirector.computeFinishWindow()` budgets the window from the slowest unfinished car's time to the line (floor `finishWindowSec`, cap `finishWindowMax` 45 s, `finishWindowMinPace` 5 m/s, `finishWindowMargin` 1.5×). Close fields finish naturally; the cap is only a stranded-car backstop.
+  2. **Checkered-flag classification** — once the flag is out, a car is classified the next time it **crosses the line** (lapped cars honestly finish a lap down, `flagClassifiedIds`), not by a timer. Classified cars cruise at 30% throttle (cool-down) so the tail doesn't stack deslots while stragglers race to the line.
+- `FINISH_LAP_CUTOFF` gate (see freeze section): no finished car ends short of its scheduled laps unless it crossed after the flag; also guards the old lap-0 instant-finish bug. Suite threshold `deslots/car ≤ 5.5 → 6.5` in `scalextric-validate.ts` because the fair tail lets stragglers race ~45 s longer (5.8–5.9 measured).
+- Note: with the field far slower than a pin-throttle player (known balance gap, below) cars are legitimately *lapped* rather than cut off — the field still frequently finishes a lap down until the AI-pace tuning target lands.
+
 ## Feel baseline (2026-08-13)
 
 Headless suite green after the slot-breakout force balance + magnetic downforce:

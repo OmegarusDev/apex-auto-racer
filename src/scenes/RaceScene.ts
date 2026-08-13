@@ -1,6 +1,5 @@
 import type { Scene } from '../engine/SceneManager';
 import type { GameContext } from '../engine/GameContext';
-import { BALANCE } from '../data/balance';
 import { getTrait } from '../data/traits';
 import { PHYSICS } from '../data/physics';
 import { PRESENT } from '../data/present';
@@ -200,6 +199,16 @@ export class RaceScene implements Scene {
       if (vehicle === undefined) {
         throw new Error(`Missing vehicle for ${this.launch.discipline}`);
       }
+      // repair_then_podium: only the garage vehicle counts (preset showcase cars
+      // are synthetic and skipped); the flag is consumed on race entry so it
+      // cannot leak into later races or other disciplines.
+      const repairedFlag =
+        this.launch.playerVehicleOverride === undefined
+          ? state.repairedSinceLastRace[this.launch.discipline] === true
+          : false;
+      if (state.repairedSinceLastRace[this.launch.discipline] !== undefined) {
+        state.repairedSinceLastRace[this.launch.discipline] = false;
+      }
       this.stats = {
         playerBrakeUsed: false,
         playerWallHits: 0,
@@ -209,7 +218,7 @@ export class RaceScene implements Scene {
         entertainmentScore: 0,
         startGridPosition: 1,
         vehicleConditionAtStart: vehicle.condition,
-        vehicleRepairedBeforeRace: vehicle.condition >= BALANCE.conditionMax - 0.001,
+        vehicleRepairedBeforeRace: repairedFlag,
       };
 
       const raceConfig = buildRaceConfig(state, this.launch);

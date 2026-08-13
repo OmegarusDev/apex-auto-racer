@@ -122,7 +122,17 @@ export const BALANCE = {
   followMinGap: 2.6,
   /** Low-skill AI brakes earlier for traffic (extra time-gap mult). */
   followSkillGapSpan: 0.72,
+  /**
+   * Finish grace (s) after the leader crosses — the minimum checkered-flag
+   * window. Cars that reach the line inside it finish normally.
+   */
   finishWindowSec: 10,
+  /** Safety cap (s): never hold the results screen longer for a stranded car. */
+  finishWindowMax: 45,
+  /** Slowest still-racing pace (m/s) assumed when budgeting the flag window. */
+  finishWindowMinPace: 5,
+  /** Time margin over the trailing car's estimated time to the line. */
+  finishWindowMargin: 1.5,
   standingsInterval: 0.25,
   ghostSampleEveryN: 4,
   activeObjectives: 3,

@@ -237,6 +237,7 @@ export function createNewGame(rng: Rng, seed: number): GameState {
     inProgressTournaments: defaultTournaments(),
     careerStats: { races: 0, wins: 0, earnings: 0 },
     quickRaceNonce: 0,
+    repairedSinceLastRace: {},
     objectives: defaultObjectives(rng),
     onboarding: {
       shownPedalControls: false,
@@ -270,6 +271,10 @@ function migrate(raw: unknown): GameState | null {
 
   if (typeof obj.quickRaceNonce !== 'number' || !Number.isFinite(obj.quickRaceNonce)) {
     obj.quickRaceNonce = 0;
+  }
+
+  if (!isRecord(obj.repairedSinceLastRace)) {
+    obj.repairedSinceLastRace = {};
   }
 
   if (isRecord(obj.onboarding)) {

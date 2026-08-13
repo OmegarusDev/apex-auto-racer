@@ -5,10 +5,11 @@ import { OBJECTIVES } from '../data/objectives';
 import type { ObjectiveKind } from '../data/objectives';
 import { TOURNAMENTS } from '../data/tournaments';
 import type { DisciplineId } from '../data/disciplines';
+import { tournamentRaceSeed } from './tournamentSeeds';
 import type { RaceResult } from '../engine/RaceDirector';
 import type { GameState, TournamentStandingsEntry } from '../engine/types';
 import type { RaceLaunchConfig } from './raceLaunch';
-import { xpToNextLevel } from './xp';
+import { grantXp } from './xp';
 
 export interface RaceResultEntry {
   driverId: string;
@@ -137,9 +138,9 @@ function evaluateObjectives(
         met = playerFinished && handsOffRatio >= 0.5;
         break;
       case 'repair_then_podium':
-        met =
-          playerPosition <= 3 &&
-          (stats.vehicleRepairedBeforeRace || stats.vehicleConditionAtStart < BALANCE.conditionMax);
+        // The player must have paid to repair mid-session damage, then podium —
+        // not merely have started at less-than-perfect condition.
+        met = playerPosition <= 3 && stats.vehicleRepairedBeforeRace;
         break;
       case 'team_win':
         met = playerTeamWon && launch.playerLineup.length >= 2;
@@ -240,13 +241,16 @@ function computeDriverXp(
       if (entertainmentScore >= BALANCE.crowdPleaserScore * 0.6) xpMult *= 1.15;
     }
     const xpEarned = Math.round(baseXp * xpMult);
-    const needed = xpToNextLevel(driver.level);
-    const leveledUp = driver.xp + xpEarned >= needed;
+    // Predict level-ups on a copy so multi-level hauls and XP overflow are
+    // reflected in the toast; applyResults replays the same grantXp on the real
+    // roster so prediction and application can never drift.
+    const sim = { ...driver };
+    const { leveledUp } = grantXp(sim, xpEarned);
     return {
       driverId,
       xpEarned,
       leveledUp,
-      newLevel: leveledUp ? driver.level + 1 : undefined,
+      newLevel: leveledUp ? sim.level : undefined,
     };
   });
 }
@@ -342,10 +346,13 @@ export function buildResultsPayload(
       } else {
         const nextRace = def.races[progress.raceIndex + 1];
         if (nextRace !== undefined) {
+          // Canonical per-race seed (tournamentRaceSeed) — same formula as
+          // CampaignScene.startTournamentRace for the same next index, so
+          // "Next Race" and resume-via-campaign play the identical race.
           nextRaceConfig = {
             discipline: launch.discipline,
             trackSeed: nextRace.trackSeed,
-            raceSeed: (launch.raceSeed + progress.raceIndex + 2) >>> 0,
+            raceSeed: tournamentRaceSeed(state.seed, progress.raceIndex + 1),
             laps: nextRace.laps,
             formatId: nextRace.formatId,
             playerLineup: progress.playerLineup,

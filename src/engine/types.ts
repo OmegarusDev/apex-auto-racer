@@ -194,6 +194,11 @@ export interface GameState {
   careerStats: CareerStats;
   /** Incremented each Quick Race launch so trackSeed changes every click. */
   quickRaceNonce: number;
+  /**
+   * Disciplines whose garage vehicle was repaired (paid) since the last race —
+   * feeds the repair_then_podium objective. Cleared when that race is entered.
+   */
+  repairedSinceLastRace: Partial<Record<DisciplineId, boolean>>;
   objectives: ObjectivesState;
   onboarding: OnboardingFlags;
   options: GameOptions;

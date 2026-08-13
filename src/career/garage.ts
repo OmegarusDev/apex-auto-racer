@@ -16,6 +16,7 @@ export function repairVehicle(state: GameState, discipline: DisciplineId): boole
   if (state.cash < cost) return false;
   state.cash -= cost;
   vehicle.condition = BALANCE.conditionMax;
+  state.repairedSinceLastRace[discipline] = true;
   getGameContext().autosave();
   return true;
 }

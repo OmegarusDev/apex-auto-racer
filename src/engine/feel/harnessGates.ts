@@ -401,6 +401,61 @@ export function runPlayerPacePhysGate(): FeelGateResult {
   };
 }
 
+/**
+ * Races must not cut the pack off mid-final-lap. The player is a slow chicane
+ * (throttle 0.3) so the equal AI field races itself. Invariant: every finished
+ * car either completed all its scheduled laps, or crossed the line after the
+ * checkered flag (classified, possibly lapped) — a car cut off by a timer
+ * without a flag-crossing fails. This catches a regression to the old
+ * fixed-10s finish window (which cut back markers off mid-lap), and guards
+ * the old "finish in ~1.6s" bug: no car ever classifies at lap 0.
+ */
+export function runFinishLapCutoffGate(): FeelGateResult {
+  const format = FORMATS.find((f) => f.id === '1v1v1v1') ?? FORMATS[0]!;
+  const seeds = [11_001, 22_002, 33_003, 44_004, 55_005];
+  let samples = 0;
+  let cutOff = 0;
+  let zeroLap = 0;
+
+  for (const seed of seeds) {
+    for (const laps of [2, 3]) {
+      const director = new RaceDirector({
+        discipline: 'track',
+        trackSeed: 50_000 + seed,
+        raceSeed: seed,
+        laps,
+        format,
+        playerTeamDrivers: [makeDriver('lead', 35)],
+        leadDriverId: 'lead',
+        playerVehicle: defaultVehicleSave(BALANCE.startingPartTier),
+        opponentBudget: [340, 360],
+        opponentPartRange: [5, 5],
+      });
+      skipCountdown(director);
+      let guard = 0;
+      while (!director.isRaceFinished && guard < 60_000) {
+        director.setPlayerPedals(0.3, 0);
+        director.update(PHYSICS.dt * 40);
+        guard += 1;
+      }
+      samples += 1;
+      const classified = director.flagClassifiedIds;
+      for (const c of director.cars) {
+        if (!c.finished) continue;
+        // The player is an intentionally slow chicane and is legitimately lapped.
+        if (c.lap < laps && !classified.has(c.id) && !c.isPlayerControlled) cutOff += 1;
+        if (c.lap <= 0) zeroLap += 1;
+      }
+    }
+  }
+
+  return {
+    id: 'FINISH_LAP_CUTOFF',
+    ok: cutOff === 0 && zeroLap === 0,
+    detail: `samples=${samples} timerCutOff=${cutOff} zeroLap=${zeroLap}`,
+  };
+}
+
 export function runHarnessGates(): FeelGateResult[] {
   void mulberry32;
   return [
@@ -411,5 +466,6 @@ export function runHarnessGates(): FeelGateResult[] {
     runGearNoMissGate(),
     runPlayerPacePhysGate(),
     runPackContactGate(),
+    runFinishLapCutoffGate(),
   ];
 }

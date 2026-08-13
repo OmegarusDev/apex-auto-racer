@@ -5,8 +5,9 @@ import type { RankId } from '../data/balance';
 import { FORMATS } from '../data/formats';
 import { getTournament, TOURNAMENTS } from '../data/tournaments';
 import { generateOpponents } from '../engine/DriverGenerator';
-import { mulberry32, randInt } from '../engine/rng';
+import { mulberry32 } from '../engine/rng';
 import type { DisciplineId } from '../data/disciplines';
+import { tournamentRaceSeed } from '../career/tournamentSeeds';
 import type { RaceLaunchConfig } from '../career/raceLaunch';
 import { buildTournamentStandings } from '../career/tournamentStandings';
 import type { TournamentProgress } from '../engine/types';
@@ -219,7 +220,7 @@ export class CampaignScene implements Scene {
     const config: RaceLaunchConfig = {
       discipline: this.discipline,
       trackSeed: raceDef.trackSeed,
-      raceSeed: randInt(mulberry32(g.state.seed + progress.raceIndex), 1, 0x7fffffff),
+      raceSeed: tournamentRaceSeed(g.state.seed, progress.raceIndex),
       laps: raceDef.laps,
       formatId: raceDef.formatId,
       playerLineup: progress.playerLineup,

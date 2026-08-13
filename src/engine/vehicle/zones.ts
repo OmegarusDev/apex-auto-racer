@@ -4,7 +4,7 @@ import type { DisciplineId } from '../../data/disciplines';
 import { getDisciplineProfile } from '../../data/disciplineProfiles';
 import type { ZoneModifiers } from './types';
 
-/** Match TrackBaker kerb kappa gate so zones align with painted stripes. */
+/** Match the track kerb kappa gate so zones align with painted stripes. */
 const KERB_KAPPA_THRESHOLD = PHYSICS.kerbKappa;
 
 /** Tyre temperature grip multiplier (plan 4.1; cold floor from PHYSICS.tyreColdGrip). */

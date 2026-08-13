@@ -26,7 +26,7 @@ void main() {
 `;
 
 export const LIT_FRAG = `
-precision mediump float;
+precision highp float;
 
 varying vec3 vWorld;
 varying vec3 vNormal;
@@ -44,8 +44,13 @@ uniform float uFogDensity;
 uniform vec3 uCameraPos;
 uniform float uExposure;
 
+// Mediump-safe value-noise hash — no sin(), bounded in fp16 range. The old
+// sin(dot(p, ...)) hash overflows mediump float for large track UVs and yields
+// NaN -> black track on GPUs where mediump is true fp16.
 float hash21(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  p = fract(p * vec2(0.1031, 0.1030));
+  p += dot(p, p.yx + 33.33);
+  return fract((p.x + p.y) * p.x);
 }
 
 float noise(vec2 p) {
@@ -200,3 +205,37 @@ void main() {
   gl_FragColor = vec4(col, uAlpha);
 }
 `;
+
+/**
+ * Mediump-only fallback for GPUs without highp fragment precision (rare).
+ * No procedural noise (that needs highp on large tracks) — flat per-vertex
+ * material colors + basic N·L lighting. Keeps the track visible, never black.
+ */
+export const SIMPLE_LIT_FRAG = `
+precision mediump float;
+
+varying vec3 vNormal;
+varying vec3 vColor;
+varying float vMat;
+
+uniform vec3 uLightDir;
+uniform vec3 uLightColor;
+uniform vec3 uAmbient;
+uniform vec3 uTint;
+uniform float uAlpha;
+uniform float uNight;
+
+void main() {
+  vec3 n = normalize(vNormal);
+  vec3 albedo = vColor * uTint;
+  albedo = max(albedo, vec3(0.06));
+  float ndl = max(dot(n, uLightDir), 0.0);
+  vec3 lit = albedo * (uAmbient + uLightColor * (ndl * 0.8 + 0.2));
+  if (uNight > 0.5) {
+    lit *= vec3(0.6, 0.66, 0.82);
+    lit += vec3(0.02, 0.025, 0.04);
+  }
+  gl_FragColor = vec4(lit, uAlpha);
+}
+`;
+

@@ -29,7 +29,7 @@ import {
   type Mat4,
   type Vec3,
 } from './math';
-import { LIT_FRAG, LIT_VERT } from './shaders';
+import { LIT_FRAG, LIT_VERT, SIMPLE_LIT_FRAG } from './shaders';
 import { buildTrackGeometry } from './TrackGeometry';
 
 export interface ApexRendererPrepareOpts {
@@ -84,7 +84,7 @@ export class ApexRenderer {
   private constructor(canvas: HTMLCanvasElement, gl: WebGLRenderingContext) {
     this.canvas = canvas;
     this.gl = gl;
-    this.litProg = linkProgram(gl, LIT_VERT, LIT_FRAG);
+    this.litProg = buildLitProgram(gl);
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
@@ -514,6 +514,34 @@ export class ApexRenderer {
 
 function mat4CopyInPlace(out: Mat4, a: Mat4): void {
   out.set(a);
+}
+
+/** highp in fragment shaders is optional in GLES2/WebGL1 — detect it. */
+function highpInFragmentSupported(gl: WebGLRenderingContext): boolean {
+  try {
+    const fmt = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+    return fmt !== null && fmt.rangeMin > 0 && fmt.rangeMax > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Full procedural shader needs highp (large track UVs overflow mediump and
+ * NaN the fuzz noise on fp16 GPUs). Without highp, use the flat simple shader
+ * so the track is still visible — never black.
+ */
+function buildLitProgram(gl: WebGLRenderingContext): WebGLProgram {
+  if (highpInFragmentSupported(gl)) {
+    try {
+      return linkProgram(gl, LIT_VERT, LIT_FRAG);
+    } catch (err) {
+      console.warn('[apex] highp lit shader failed, using simple shader', err);
+    }
+  } else {
+    console.warn('[apex] GPU lacks highp fragment precision — using simple shader');
+  }
+  return linkProgram(gl, LIT_VERT, SIMPLE_LIT_FRAG);
 }
 
 function hash(i: number): number {

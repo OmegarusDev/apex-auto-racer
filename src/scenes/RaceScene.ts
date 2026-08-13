@@ -885,11 +885,7 @@ export class RaceScene implements Scene {
     }
 
     this.view.applyFx(this.fxImpulses);
-    this.view.updateFx(
-      this.lastDt,
-      this.g.canvas.clientWidth,
-      this.g.canvas.clientHeight,
-    );
+    this.view.updateFx(this.lastDt);
   }
 
   private updateTicker(events: readonly RaceEvent[], eventSeq: number, dt: number): void {

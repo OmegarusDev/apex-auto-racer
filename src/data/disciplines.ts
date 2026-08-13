@@ -18,7 +18,7 @@ export interface DisciplineDef {
     kerbA: string;
     kerbB: string;
     runoff: string;
-    /** Center-groove channel tint for TrackBaker Scalextric rail. */
+    /** Center-groove channel tint for the WebGL track rail. */
     groove?: string;
   };
 }

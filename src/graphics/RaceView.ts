@@ -1,24 +1,17 @@
 /**
- * Race presentation facade.
- * Prefers the Apex WebGL engine for the world pass; Canvas2D remains HUD + fallback.
+ * Race presentation facade — Apex WebGL engine is the ONLY world path.
+ * Canvas2D is reserved for the HUD; the old TrackBaker/TrackBlit world
+ * fallback was removed (WebGL is required to render the race world).
  */
 
-import { PHYSICS } from '../data/physics';
 import { PRESENT } from '../data/present';
-import type { DisciplineId } from '../data/disciplines';
 import type { VehicleParts } from '../engine/types';
-import { emptyVehicleParts } from '../engine/types';
 import { Camera, type CameraTransform } from './Camera';
-import { PX_PER_M, writeWorldToScreen } from './coords';
-import { drawSlotCarMesh, drawSlotCarShadow } from './car/CarPainter';
 import { ApexRenderer } from './engine/ApexRenderer';
-import { ParticleSystem } from './fx/ParticleSystem';
 import type { TrackPalette } from './materials';
 import { buildTrackPalette } from './materials';
-import { bakeTrack, type BakeMeta, type MinimapPoint } from './track/TrackBaker';
-import { blitNightVignette, blitTrack, buildNightVignette } from './track/TrackBlit';
+import type { MinimapPoint } from './track/MinimapPoint';
 import { writeCarWorld } from './TrackSampler';
-import { raceCamera2dZoomScale } from './raceCameraZoom';
 import type {
   CarFrameDto,
   FxImpulse,
@@ -28,24 +21,17 @@ import type {
   TrackView,
 } from './types';
 
-const screenScratch = { x: 0, y: 0 };
 const carWorldScratch = { x: 0, y: 0, tx: 0, ty: 0, heading: 0 };
 const camScratch: CameraTransform = { x: 0, y: 0, zoom: 1 };
 
 export class RaceView {
   readonly camera = new Camera();
-  readonly particles = new ParticleSystem();
 
   private engine: ApexRenderer | null = null;
   private useEngine = false;
 
-  private baked: HTMLCanvasElement | null = null;
-  private bakeMeta: BakeMeta | null = null;
   private minimapPoints: MinimapPoint[] = [];
-  private nightScreenOverlay: HTMLCanvasElement | null = null;
-  private nightScreenKey = '';
   private track: TrackView | null = null;
-  private discipline: DisciplineId | null = null;
   private palette: TrackPalette | null = null;
 
   /** Bind / create the WebGL world engine on the #world canvas. */
@@ -56,7 +42,6 @@ export class RaceView {
 
   prepare(opts: RaceViewPrepareOpts): void {
     this.track = opts.track;
-    this.discipline = opts.discipline;
     this.palette = buildTrackPalette(opts.discipline, opts.night, opts.rain);
 
     if (this.engine === null) {
@@ -66,29 +51,27 @@ export class RaceView {
       this.attachWorldCanvas(el);
     }
 
-    this.useEngine = this.engine !== null;
-    if (this.engine !== null) {
-      try {
-        this.engine.prepare({
-          track: opts.track,
-          palette: this.palette,
-          night: opts.night,
-          rain: opts.rain,
-        });
-        this.minimapPoints = this.engine.getMinimapPoints();
-        this.baked = null;
-        this.bakeMeta = null;
-      } catch (err) {
-        console.warn('[apex] WebGL track prepare failed — Canvas2D fallback', err);
-        this.dropEngineToCanvas2d(opts.night, opts.rain);
-      }
-    } else {
-      this.bakeCanvas2d(opts.track, opts.discipline, opts.night, opts.rain);
+    if (this.engine === null) {
+      console.error('[apex] WebGL unavailable — no 3D world (WebGL is required)');
+      this.useEngine = false;
+      return;
     }
 
-    this.nightScreenOverlay = null;
-    this.nightScreenKey = '';
-    this.particles.setRaining(opts.rain);
+    try {
+      this.engine.prepare({
+        track: opts.track,
+        palette: this.palette,
+        night: opts.night,
+        rain: opts.rain,
+      });
+      this.minimapPoints = this.engine.getMinimapPoints();
+      this.useEngine = true;
+    } catch (err) {
+      // WebGL-only: do not fall back to a Canvas2D track. Keep the race
+      // running (HUD + physics intact) with the world blank.
+      console.error('[apex] WebGL track prepare failed — no 3D world', err);
+      this.useEngine = false;
+    }
   }
 
   /** Resize the GL surface (CSS pixels + DPR). */
@@ -116,39 +99,6 @@ export class RaceView {
   /** True when the WebGL engine is driving the race world. */
   get usingEngine(): boolean {
     return this.useEngine;
-  }
-
-  /** Drop a dead GL context and bake a Canvas2D track so cars stay visible. */
-  private dropEngineToCanvas2d(night: boolean, rain: boolean): void {
-    if (this.engine !== null) {
-      try {
-        this.engine.dispose();
-      } catch {
-        /* ignore */
-      }
-    }
-    this.engine = null;
-    this.useEngine = false;
-    if (typeof document !== 'undefined') {
-      document.querySelector('#world')?.classList.remove('is-live');
-    }
-    if (this.track !== null && this.discipline !== null) {
-      this.bakeCanvas2d(this.track, this.discipline, night, rain);
-    }
-  }
-
-  private bakeCanvas2d(
-    track: TrackView,
-    discipline: DisciplineId,
-    night: boolean,
-    rain: boolean,
-  ): void {
-    const result = bakeTrack(track, discipline, night, rain);
-    this.baked = result.canvas;
-    this.bakeMeta = result.meta;
-    this.minimapPoints = result.minimap;
-    this.palette = result.palette;
-    this.particles.setRaining(rain);
   }
 
   writeCamera(out: CameraTransform = camScratch): CameraTransform {
@@ -182,87 +132,47 @@ export class RaceView {
   applyFx(impulses: readonly FxImpulse[]): void {
     if (this.useEngine && this.engine !== null) {
       this.engine.applyFx(impulses);
-      return;
-    }
-    for (const fx of impulses) {
-      switch (fx.kind) {
-        case 'skid':
-          this.particles.emitSkid(fx.x, fx.y, fx.x2 ?? fx.x, fx.y2 ?? fx.y);
-          break;
-        case 'dust':
-          this.particles.emitDust(fx.x, fx.y, fx.index, fx.intensity ?? 1);
-          break;
-        case 'smoke':
-          this.particles.emitSmoke(fx.x, fx.y, fx.index);
-          break;
-        case 'sparks':
-          this.particles.emitSparks(fx.x, fx.y, fx.index, fx.count ?? 4);
-          break;
-      }
     }
   }
 
-  updateFx(dt: number, screenW = 800, screenH = 600): void {
+  updateFx(dt: number): void {
     if (this.useEngine && this.engine !== null) {
       this.engine.updateFx(dt, this.camera.x, this.camera.y);
-      return;
     }
-    this.particles.update(dt, screenW, screenH);
   }
 
   draw(ctx: CanvasRenderingContext2D, frame: RaceFrameView): void {
-    if (this.useEngine && this.engine !== null) {
-      if (this.engine.isLost()) {
-        console.warn('[apex] WebGL context lost — falling back to Canvas2D');
-        this.dropEngineToCanvas2d(frame.night, frame.rain);
-      } else {
-        this.engine.resize(
-          frame.screenW,
-          frame.screenH,
-          Math.min(window.devicePixelRatio || 1, PRESENT.dprCap),
-        );
-        const drew = this.engine.render(frame);
-        if (drew) {
-          // HUD canvas stays transparent over the GL world.
-          ctx.clearRect(0, 0, frame.screenW, frame.screenH);
-          return;
-        }
-        // Tiny / missing mesh frame — keep prior HUD, or fall through if baked.
-        if (!this.baked || !this.bakeMeta) return;
+    if (this.engine === null) {
+      // WebGL-only: no world. Keep the HUD canvas transparent/cleared.
+      ctx.clearRect(0, 0, frame.screenW, frame.screenH);
+      return;
+    }
+
+    if (this.engine.isLost()) {
+      console.error('[apex] WebGL context lost — race world disabled');
+      try {
+        this.engine.dispose();
+      } catch {
+        /* ignore */
       }
-    }
-
-    if (!this.baked || !this.bakeMeta) return;
-    const { camera, screenW, screenH } = frame;
-    const cam2d = {
-      x: camera.x,
-      y: camera.y,
-      zoom: camera.zoom * raceCamera2dZoomScale(frame.raceZoom),
-    };
-
-    blitTrack(ctx, this.baked, this.bakeMeta, cam2d, screenW, screenH);
-
-    if (frame.night) {
-      const key = `${screenW}x${screenH}`;
-      if (this.nightScreenOverlay === null || this.nightScreenKey !== key) {
-        this.nightScreenOverlay = buildNightVignette(screenW, screenH);
-        this.nightScreenKey = key;
+      this.engine = null;
+      this.useEngine = false;
+      if (typeof document !== 'undefined') {
+        document.querySelector('#world')?.classList.remove('is-live');
       }
-      blitNightVignette(ctx, this.nightScreenOverlay, screenW, screenH);
+      ctx.clearRect(0, 0, frame.screenW, frame.screenH);
+      return;
     }
 
-    if (frame.ghost !== null) {
-      this.drawGhostAt(ctx, frame.ghost, cam2d, screenW, screenH);
+    this.engine.resize(
+      frame.screenW,
+      frame.screenH,
+      Math.min(window.devicePixelRatio || 1, PRESENT.dprCap),
+    );
+    if (this.engine.render(frame)) {
+      // HUD canvas stays transparent over the GL world.
+      ctx.clearRect(0, 0, frame.screenW, frame.screenH);
     }
-
-    this.particles.renderGround(ctx, cam2d, screenW, screenH);
-
-    for (const car of frame.cars) {
-      this.drawCarDto(ctx, car, cam2d, screenW, screenH);
-    }
-
-    this.particles.renderAir(ctx, cam2d, screenW, screenH);
-    this.particles.renderRain(ctx, screenW, screenH);
   }
 
   drawMinimap(
@@ -347,74 +257,6 @@ export class RaceView {
       ty: carWorldScratch.ty,
     };
   }
-
-  private drawCarDto(
-    ctx: CanvasRenderingContext2D,
-    car: CarFrameDto,
-    camera: CameraTransform,
-    screenW: number,
-    screenH: number,
-  ): void {
-    writeWorldToScreen(car.worldX, car.worldY, camera, screenW, screenH, screenScratch);
-    const len = PHYSICS.carLength * PX_PER_M * camera.zoom;
-    const wid = PHYSICS.carWidth * PX_PER_M * camera.zoom;
-    const deslot = car.slotMode === 'deslot';
-    const wobble = Math.min(1, car.lineNoise / 1.2);
-
-    ctx.save();
-    ctx.translate(screenScratch.x, screenScratch.y);
-    drawSlotCarShadow(ctx, len, wid, car.isPlayer ? 0.42 : 0.34, deslot);
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(screenScratch.x, screenScratch.y);
-    ctx.rotate(-car.heading);
-    drawSlotCarMesh(ctx, {
-      len,
-      wid,
-      color: car.color,
-      isPlayer: car.isPlayer,
-      detail: 'race',
-      discipline: this.discipline ?? undefined,
-      tyreTemp: car.tyreTemp,
-      deslot,
-      condition: car.condition,
-      partTiers: car.partTiers,
-      lineWobble: deslot ? 0 : wobble * 0.35,
-    });
-    ctx.restore();
-  }
-
-  private drawGhostAt(
-    ctx: CanvasRenderingContext2D,
-    ghost: NonNullable<RaceFrameView['ghost']>,
-    camera: CameraTransform,
-    screenW: number,
-    screenH: number,
-  ): void {
-    writeWorldToScreen(ghost.worldX, ghost.worldY, camera, screenW, screenH, screenScratch);
-    const len = PHYSICS.carLength * PX_PER_M * camera.zoom;
-    const wid = PHYSICS.carWidth * PX_PER_M * camera.zoom;
-
-    ctx.save();
-    ctx.translate(screenScratch.x, screenScratch.y);
-    drawSlotCarShadow(ctx, len, wid, 0.12, false);
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(screenScratch.x, screenScratch.y);
-    ctx.rotate(-ghost.heading);
-    drawSlotCarMesh(ctx, {
-      len,
-      wid,
-      color: ghost.color,
-      alpha: 0.32,
-      detail: 'race',
-      discipline: this.discipline ?? undefined,
-      partTiers: emptyVehicleParts(1),
-    });
-    ctx.restore();
-  }
 }
 
 function roundRectPath(
@@ -433,7 +275,7 @@ function roundRectPath(
   ctx.lineTo(x + w, y + h - radius);
   ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
   ctx.lineTo(x + radius, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.quadraticCurveTo(x, y + h, x, y + radius);
   ctx.lineTo(x, y + radius);
   ctx.quadraticCurveTo(x, y, x + radius, y);
   ctx.closePath();

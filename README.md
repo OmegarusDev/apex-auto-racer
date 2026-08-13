@@ -1,3 +1,11 @@
+<p align="center">
+  <a href="https://omegarusdev.github.io/apex-auto-racer/">
+    <img src="https://img.shields.io/badge/▶_PLAY_NOW-playable_in_browser-brightgreen?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Play Now" height="40" />
+  </a>
+</p>
+
+<p align="center"><strong>No install.</strong> Works in the browser (desktop &amp; mobile).</p>
+
 # Apex Auto-Racer
 
 Scalextric-style pedal autobattler. **Hold gas — steering is Mag autopilot** (no steer stick). Manage speed vs grip; advanced players use trail brake + SHIFT rev windows + Street clutch-kick. Drivers are fallible autopilots — upgrades push the game toward hands-off watching.

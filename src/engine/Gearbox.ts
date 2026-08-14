@@ -30,8 +30,10 @@ export type ShiftWindowKind = 'low' | 'green' | 'amber' | 'red';
 
 const TRACK_BOX: GearboxProfile = {
   gearCount: 6,
-  topFrac: [0, 0.22, 0.38, 0.55, 0.72, 0.88, 1.0],
-  torque: [0, 1.18, 1.1, 1.04, 0.98, 0.94, 0.9],
+  // Low gears short and punchy (quick climb), high gears long and heavy —
+  // the higher the gear, the harder it pulls.
+  topFrac: [0, 0.22, 0.4, 0.57, 0.73, 0.87, 1.0],
+  torque: [0, 1.32, 1.18, 1.08, 1.0, 0.94, 0.89],
   earlyUpshiftBand: 0.42,
   downshiftBand: 0.18,
   playerDownshiftThrottle: 0.28,
@@ -42,8 +44,8 @@ const TRACK_BOX: GearboxProfile = {
 
 const STREET_BOX: GearboxProfile = {
   gearCount: 5,
-  topFrac: [0, 0.28, 0.48, 0.68, 0.86, 1.0],
-  torque: [0, 1.22, 1.1, 1.02, 0.94, 0.88],
+  topFrac: [0, 0.26, 0.47, 0.66, 0.84, 1.0],
+  torque: [0, 1.36, 1.18, 1.06, 0.96, 0.88],
   earlyUpshiftBand: 0.4,
   downshiftBand: 0.16,
   playerDownshiftThrottle: 0.28,
@@ -54,8 +56,8 @@ const STREET_BOX: GearboxProfile = {
 
 const RALLY_BOX: GearboxProfile = {
   gearCount: 4,
-  topFrac: [0, 0.32, 0.58, 0.8, 1.0],
-  torque: [0, 1.25, 1.08, 0.98, 0.9],
+  topFrac: [0, 0.3, 0.56, 0.79, 1.0],
+  torque: [0, 1.38, 1.14, 1.0, 0.9],
   earlyUpshiftBand: 0.38,
   downshiftBand: 0.14,
   playerDownshiftThrottle: 0.3,
@@ -90,11 +92,20 @@ export function gearTorque(gear: number, box: GearboxProfile): number {
   return box.torque[g] ?? 1;
 }
 
-/** Band fraction inside current gear (0 = bottom, 1 = redline / top of gear). */
+/**
+ * Band fraction inside current gear (0 = bottom, 1 = redline / top of gear).
+ * Each gear starts a little BELOW the previous gear's top (BAND_OVERLAP), so
+ * an upshift lands at band ≈ 0.25 — mid-torque — instead of 0 (the torque
+ * curve's trough). Without that, every upshift bogs: the classic "gear 2
+ * crawls" complaint.
+ */
+const BAND_OVERLAP = 0.25;
+
 export function gearBandFrac(v: number, vMaxEff: number, gear: number, box: GearboxProfile): number {
   const g = Math.max(1, Math.min(box.gearCount, gear));
-  const lo = g <= 1 ? 0 : vMaxEff * (box.topFrac[g - 1] ?? 0);
   const hi = gearTopSpeed(vMaxEff, g, box);
+  const prevTop = g <= 1 ? 0 : vMaxEff * (box.topFrac[g - 1] ?? 0);
+  const lo = g <= 1 ? 0 : prevTop - BAND_OVERLAP * (hi - prevTop);
   const span = Math.max(0.5, hi - lo);
   return Math.max(0, Math.min(1.15, (v - lo) / span));
 }
@@ -104,12 +115,14 @@ export function torqueCurveAtBand(band: number, discipline: DisciplineId): numbe
   const b = Math.max(0, Math.min(1.1, band));
   if (discipline === 'street') {
     const peak = 0.7;
-    return Math.max(0.75, 1.12 - 2.8 * (b - peak) * (b - peak));
+    return Math.max(0.78, 1.14 - 2.6 * (b - peak) * (b - peak));
   }
   if (discipline === 'rally') {
     return Math.max(0.85, 1.15 - 0.35 * b);
   }
-  return Math.max(0.88, 1.05 - 1.4 * (b - 0.68) * (b - 0.68));
+  // Flatter low end than the old 0.40 trough: a motor that still pulls at the
+  // bottom of the gear, peaking into the green window.
+  return Math.max(0.78, 1.08 - 0.85 * (b - 0.6) * (b - 0.6));
 }
 
 export function shiftWindow(band: number, box: GearboxProfile): ShiftWindowKind {

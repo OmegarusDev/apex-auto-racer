@@ -524,3 +524,42 @@ AI at higher levels keeps its speed better and so wins.
 Three distinctive starter builds for insta-match: Track (balanced RWD GT,
 engine/tyres/brakes), Street (RWD + LSD drift car, engine/intake/tyres/brakes/
 differential), Rally (AWD, tyres/suspension/differential).
+
+---
+
+## 16. Addendum — paint customisation (post-core, deferred)
+
+Post-core cosmetic layer (after Phase 9 / the deferred menus slice — garage
+customisation lives in that deferred bucket, but it is planned now so the paint
+pipeline lands with the car visuals rather than being retrofitted).
+
+### Player — freehand panel painting
+- Player draws **freehand directly on their car panels** in the garage
+  (finger/pointer strokes over a panel-flat preview, then unwrapped onto the
+  body mesh) — racing liveries, team colours, gaffer-tape patches, chaos.
+- Stored **per vehicle** (a paint layer per panel, bundled with the save's
+  vehicle record, not global).
+- **Presentation-only** (L4 — zero assets): a paint texture/UV pass on the
+  procedural car mesh; it must NOT touch the sim, the mesh-is-collision rule,
+  or any balance number. The mesh stays the physics shape (L1).
+
+### Opponents — procedural paint schemes
+Once paint is unlocked for the player, the field gets **basic procedural
+schemes** so the grid reads like a real race:
+- **Racing stripes** — different flavours: single centre, twin, offset,
+  contrast or matching accent, full-length or bonnet-only.
+- **Side art** — flames along the flank, lightning-bolt zig-zags, pinstripe
+  runs, number-panel blobs.
+- Scheme picks are seeded per opponent (deterministic, L5), and should make
+  the **player's own painted car read clearly against the field** — opponent
+  schemes should stay visibly simpler/plainer than a customised player car.
+- The player-highlight system (glow ring + body rim) stays independent of
+  paint, so the player car is never lost regardless of livery.
+
+### Pipeline notes
+- Paint is a **texture-space** concern: the car's panel UV layout exists once,
+  freehand strokes and procedural schemes both write into it, and the lit
+  shader gains a `uPaintTex` sample layered under/over the tint.
+- Gates (when the phase ships): `FREEFHAND_PAINTS_PANEL`, `PAINT_PER_VEHICLE`,
+  `RIVAL_SCHEMES_SEEDED`, `PAINT_NEVER_TOUCHES_SIM`, `PLAYER_STILL_FINDABLE`.
+

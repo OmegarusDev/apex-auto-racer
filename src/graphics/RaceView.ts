@@ -199,8 +199,8 @@ export class RaceView {
     const iw = rect.w - pad * 2;
     const ih = rect.h - pad * 2;
 
-    // The minimap is tied to what is DRAWN — the sampled extent (the raced
-    // sprint ribbon), not the full mother loop.
+    // The minimap is tied to what is DRAWN — the full closed loop, for
+    // circuits and sprints alike.
     const me = this.minimapExtent;
     const spanX = Math.max(me.maxX - me.minX, 1);
     const spanY = Math.max(me.maxY - me.minY, 1);
@@ -224,10 +224,8 @@ export class RaceView {
       const p = this.minimapPoints[i]!;
       ctx.lineTo(ix + ox + p.nx * drawW, iy + oy + p.ny * drawH);
     }
-    // A circuit closes its loop; a sprint is a line (start → finish) and must
-    // NOT close — closing draws a fake "return" chord that looks like the loop.
-    const isSprint = this.track.sprintFinishS !== undefined;
-    if (!isSprint) ctx.closePath();
+    // The full loop always closes on itself.
+    ctx.closePath();
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fill();
     ctx.strokeStyle = this.palette?.accentDim ?? '#a88410';

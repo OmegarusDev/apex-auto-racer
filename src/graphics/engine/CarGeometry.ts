@@ -64,3 +64,31 @@ export function buildCarGeometry(): { vertices: Float32Array; indices: Uint16Arr
 
   return mb.build();
 }
+
+/**
+ * Flat glowing annulus laid under the player car — the "you are this one"
+ * marker. Tinted per draw via uTint; additive-blended in the renderer.
+ */
+export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Uint16Array | Uint32Array } {
+  const mb = new MeshBuilder();
+  // The rendered car is scaled 1.2× (half-length ≈ 3.06 m), so the ring must
+  // poke out beyond the whole silhouette — a car-sized ring is hidden under
+  // the body from the tabletop camera.
+  const inner = 3.5;
+  const outer = 4.2;
+  const segs = 30;
+  for (let i = 0; i < segs; i++) {
+    const a0 = (i / segs) * Math.PI * 2;
+    const a1 = ((i + 1) / segs) * Math.PI * 2;
+    const c0 = Math.cos(a0);
+    const s0 = Math.sin(a0);
+    const c1 = Math.cos(a1);
+    const s1 = Math.sin(a1);
+    const i0 = mb.vertex(inner * c0, 0, inner * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i1 = mb.vertex(inner * c1, 0, inner * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i2 = mb.vertex(outer * c1, 0, outer * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i3 = mb.vertex(outer * c0, 0, outer * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    mb.quad(i0, i1, i2, i3);
+  }
+  return mb.build();
+}

@@ -43,6 +43,8 @@ uniform vec3 uFogColor;
 uniform float uFogDensity;
 uniform vec3 uCameraPos;
 uniform float uExposure;
+uniform float uHighlight;
+uniform vec3 uHighlightColor;
 
 // Mediump-safe value-noise hash — no sin(), bounded in fp16 range. The old
 // sin(dot(p, ...)) hash overflows mediump float for large track UVs and yields
@@ -197,6 +199,13 @@ void main() {
 
   col *= uExposure;
 
+  // Player-car rim: subtle border glow on the body silhouette (car material only).
+  if (uHighlight > 0.001 && matId < 0.5) {
+    vec3 viewDir = normalize(uCameraPos - vWorld);
+    float rim = pow(1.0 - abs(dot(n, viewDir)), 2.0);
+    col += uHighlightColor * rim * uHighlight * 0.6;
+  }
+
   if (uNight > 0.5) {
     col *= vec3(0.58, 0.64, 0.78);
     col += vec3(0.03, 0.035, 0.05);
@@ -214,6 +223,7 @@ void main() {
 export const SIMPLE_LIT_FRAG = `
 precision mediump float;
 
+varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec3 vColor;
 varying float vMat;
@@ -224,6 +234,9 @@ uniform vec3 uAmbient;
 uniform vec3 uTint;
 uniform float uAlpha;
 uniform float uNight;
+uniform vec3 uCameraPos;
+uniform float uHighlight;
+uniform vec3 uHighlightColor;
 
 void main() {
   vec3 n = normalize(vNormal);
@@ -231,6 +244,11 @@ void main() {
   albedo = max(albedo, vec3(0.06));
   float ndl = max(dot(n, uLightDir), 0.0);
   vec3 lit = albedo * (uAmbient + uLightColor * (ndl * 0.8 + 0.2));
+  if (uHighlight > 0.001 && vMat < 0.5) {
+    vec3 viewDir = normalize(uCameraPos - vWorld);
+    float rim = pow(1.0 - abs(dot(n, viewDir)), 2.0);
+    lit += uHighlightColor * rim * uHighlight * 0.6;
+  }
   if (uNight > 0.5) {
     lit *= vec3(0.6, 0.66, 0.82);
     lit += vec3(0.02, 0.025, 0.04);

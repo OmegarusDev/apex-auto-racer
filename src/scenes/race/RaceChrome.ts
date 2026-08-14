@@ -5,8 +5,7 @@
 import type { ThemeTokens } from '../../ui/theme';
 import { pad } from '../../ui/theme';
 import { raceChromeLayout, type RaceChromeLayout } from '../../graphics/hud/raceChromeLayout';
-import { revMeterNorm } from '../../engine/Gearbox';
-import type { ShiftWindowKind } from '../../engine/Gearbox';
+import type { GearboxProfile, ShiftWindowKind } from '../../engine/Gearbox';
 
 export type RaceChromeDrawArgs = {
   ctx: CanvasRenderingContext2D;
@@ -25,10 +24,12 @@ export type PedalDeckArgs = {
   shifting: boolean;
   shiftCueArmed: boolean;
   animTime: number;
-  /** Player RPM for SHIFT rev strip. */
-  rpm: number;
+  /** Position inside the current gear 0..1+ (the SHIFT pad fill IS this). */
+  gearBand: number;
   shiftWindow: ShiftWindowKind;
   gear: number;
+  /** Window tick positions come from the live gearbox profile. */
+  box: GearboxProfile;
 };
 
 function windowColor(kind: ShiftWindowKind): string {
@@ -53,9 +54,10 @@ export function drawPedalDeck(args: PedalDeckArgs): RaceChromeLayout {
     shifting,
     shiftCueArmed,
     animTime,
-    rpm,
+    gearBand,
     shiftWindow,
     gear,
+    box,
   } = args;
   const chrome = raceChromeLayout(w, h, token);
 
@@ -144,39 +146,59 @@ export function drawPedalDeck(args: PedalDeckArgs): RaceChromeLayout {
     throttle > 0.08 ? token.text : 'rgba(94,207,142,0.7)',
   );
 
-  const shiftPulse = shiftCueArmed ? 0.15 + 0.1 * Math.sin(animTime * 10) : 0;
-  const shiftAmt = shifting ? 1 : shiftPulse > 0 ? 0.35 + shiftPulse : 0;
-  paintPad(
-    chrome.shift,
-    `rgba(36,30,10,${0.7 + shiftPulse})`,
-    '240,196,26',
-    shiftAmt,
-    shiftCueArmed ? 'SHIFT!' : 'SHIFT',
-    shifting || shiftCueArmed ? '#f0c41a' : token.textMuted,
-  );
-
-  // Rev meter strip along top of SHIFT pad — green/amber/red window.
-  const rev = revMeterNorm(rpm);
+  // The SHIFT pad IS the rev bar. Fill height = the live band inside the
+  // current gear (0 bottom → 1 top), so it always reads the real gearing;
+  // colour tracks the shift window. The only animation is the border cue
+  // when it is time to shift — never the meter itself.
+  const r = chrome.shift;
+  const band = Math.max(0, Math.min(1, gearBand));
   const rgb = windowColor(shiftWindow);
-  const stripH = Math.max(4, chrome.shift.h * 0.08);
-  const stripY = chrome.shift.y + pad(token, 0.4);
-  const stripX = chrome.shift.x + pad(token, 0.5);
-  const stripW = chrome.shift.w - pad(token, 1);
+  const radius = Math.max(2, pad(token, 0.3));
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.fillRect(stripX, stripY, stripW, stripH);
-  ctx.fillStyle = `rgba(${rgb},0.9)`;
-  ctx.fillRect(stripX, stripY, stripW * rev, stripH);
-  // Window tick marks
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  for (const t of [0.55, 0.72, 0.88]) {
-    ctx.fillRect(stripX + stripW * t, stripY, 1, stripH);
+  ctx.fillStyle = 'rgba(22,19,13,0.82)';
+  ctx.beginPath();
+  ctx.roundRect(r.x, r.y, r.w, r.h, radius);
+  ctx.fill();
+
+  // Window tick marks — where green starts, where green ends, redline.
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  for (const t of [box.greenBandLo, box.greenBandHi, box.amberBandHi]) {
+    const ty = r.y + r.h - Math.max(0, Math.min(1, t)) * r.h;
+    ctx.fillRect(r.x + 3, ty - 0.5, r.w - 6, 1);
   }
-  ctx.font = `500 ${Math.max(9, token.fontCaption * 0.85)}px ${token.fontFamily}`;
-  ctx.fillStyle = `rgba(${rgb},0.95)`;
+
+  // Rev fill from the bottom — height is the gear's band, not a pulse.
+  const fillH = r.h * band;
+  if (fillH > 1) {
+    const gy = ctx.createLinearGradient(r.x, r.y + r.h - fillH, r.x, r.y + r.h);
+    gy.addColorStop(0, `rgba(${rgb},0.16)`);
+    gy.addColorStop(1, `rgba(${rgb},0.62)`);
+    ctx.fillStyle = gy;
+    ctx.beginPath();
+    ctx.roundRect(r.x, r.y + r.h - fillH, r.w, fillH, radius);
+    ctx.fill();
+  }
+
+  const inWindow = shiftWindow === 'green' || shiftWindow === 'amber';
+  const cuePulse = shiftCueArmed ? 0.5 + 0.4 * Math.sin(animTime * 9) : 0;
+  ctx.strokeStyle = shifting
+    ? 'rgba(255,255,255,0.9)'
+    : inWindow
+      ? `rgba(${rgb},${0.6 + cuePulse * 0.4})`
+      : `rgba(${rgb},0.35)`;
+  ctx.lineWidth = shifting || shiftCueArmed ? 3 : 2;
+  ctx.beginPath();
+  ctx.roundRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, radius);
+  ctx.stroke();
+
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.fillText(`G${gear}`, chrome.shift.x + chrome.shift.w * 0.5, stripY + stripH + 2);
+  ctx.textBaseline = 'middle';
+  ctx.font = `700 ${Math.min(r.h * 0.24, token.fontDisplay * 1.05)}px ${token.fontDisplayFamily}`;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(`G${gear}`, r.x + r.w * 0.5, r.y + r.h * 0.5);
+  ctx.font = `400 ${Math.max(9, token.fontCaption * 0.85)}px ${token.fontDisplayFamily}`;
+  ctx.fillStyle = shiftCueArmed ? '#f0c41a' : token.textMuted;
+  ctx.fillText(shiftCueArmed ? 'SHIFT!' : 'SHIFT', r.x + r.w * 0.5, r.y + r.h * 0.84);
   ctx.restore();
 
   return chrome;

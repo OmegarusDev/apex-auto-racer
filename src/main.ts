@@ -154,7 +154,17 @@ document.querySelector('#splash')?.setAttribute('data-apex-boot', 'loading');
 
 try {
   main();
-  hideSplash();
+  // Gate the splash→title handoff on the brand font being ready. The HTML
+  // splash uses display=block (text invisible until the font loads), and the
+  // canvas title would otherwise draw with a FALLBACK font first, then pop to
+  // Bebas Neue mid-title — the "font changes, then changes again" jank. One
+  // clean reveal: splash (Bebas) → title (Bebas), no fallback flash.
+  const fontsReady =
+    typeof document !== 'undefined' && 'fonts' in document
+      ? (document as Document & { fonts: { ready: Promise<unknown> } }).fonts.ready
+      : Promise.resolve();
+  const fontTimeout = new Promise<void>((res) => window.setTimeout(res, 2500));
+  Promise.race([fontsReady, fontTimeout]).then(() => hideSplash());
 } catch (err) {
   showBootError(err);
 }

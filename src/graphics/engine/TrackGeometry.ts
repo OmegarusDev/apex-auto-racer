@@ -71,15 +71,11 @@ export interface BuiltTrackMesh {
   indices: Uint16Array | Uint32Array;
   /** Normalized polyline for minimap (nx, ny in 0..1). */
   minimap: Array<{ nx: number; ny: number }>;
-  /** World extent the minimap is normalized to (the SAMPLED ribbon — for a
-   *  sprint this is the raced portion only, not the full mother loop). */
+  /** World extent the minimap is normalized to (the full closed loop). */
   minimapExtent: { minX: number; maxX: number; minY: number; maxY: number };
 }
 
-function sampleClosed(
-  track: TrackView,
-  segments: number,
-): Array<{
+interface RibbonSample {
   x: number;
   z: number;
   tx: number;
@@ -89,26 +85,19 @@ function sampleClosed(
   halfW: number;
   runoff: number;
   kappa: number;
-}> {
+}
+
+function sampleClosed(
+  track: TrackView,
+  segments: number,
+): RibbonSample[] {
   const nodes = track.nodes;
   const n = nodes.length;
-  // A sprint is a point-to-point ribbon: sample up to just past the finish so
-  // the banner sits fully on tarmac with a short roll-out strip, and leave it
-  // OPEN (no closing vertex) — the loop's return half is never drawn.
-  const sprintRunoff = 8;
-  const sprintEnd = track.sprintFinishS !== undefined ? track.sprintFinishS + sprintRunoff : null;
-  const length = sprintEnd ?? track.length;
-  const out: Array<{
-    x: number;
-    z: number;
-    tx: number;
-    tz: number;
-    nx: number;
-    nz: number;
-    halfW: number;
-    runoff: number;
-    kappa: number;
-  }> = [];
+  // Always sample the full closed mother loop — even a sprint races on the
+  // whole loop (the finish banner sits at sprintFinishS on it). The loop is
+  // validated non-self-intersecting, so the ribbon never crosses itself.
+  const length = track.length;
+  const out: RibbonSample[] = [];
 
   for (let i = 0; i < segments; i++) {
     const sQuery = (i / segments) * length;
@@ -141,8 +130,112 @@ function sampleClosed(
       kappa,
     });
   }
-  if (sprintEnd === null) out.push(out[0]!);
+  out.push(out[0]!);
   return out;
+}
+
+function placeBox(
+  mb: MeshBuilder,
+  cx: number,
+  cy: number,
+  cz: number,
+  hx: number,
+  hy: number,
+  hz: number,
+  r: number,
+  g: number,
+  b: number,
+): void {
+  const x0 = cx - hx;
+  const x1 = cx + hx;
+  const y0 = cy - hy;
+  const y1 = cy + hy;
+  const z0 = cz - hz;
+  const z1 = cz + hz;
+  const dark = 0.62;
+  const mid = 0.82;
+  mb.addFace(x0, y0, z0, x1, y0, z0, x1, y0, z1, x0, y0, z1, 0, -1, 0, r * dark, g * dark, b * dark, MAT_GENERIC);
+  mb.addFace(x0, y1, z1, x1, y1, z1, x1, y1, z0, x0, y1, z0, 0, 1, 0, r, g, b, MAT_GENERIC);
+  mb.addFace(x0, y0, z1, x1, y0, z1, x1, y1, z1, x0, y1, z1, 0, 0, 1, r * mid, g * mid, b * mid, MAT_GENERIC);
+  mb.addFace(x1, y0, z0, x0, y0, z0, x0, y1, z0, x1, y1, z0, 0, 0, -1, r * 0.74, g * 0.74, b * 0.74, MAT_GENERIC);
+  mb.addFace(x0, y0, z0, x0, y0, z1, x0, y1, z1, x0, y1, z0, -1, 0, 0, r * 0.7, g * 0.7, b * 0.7, MAT_GENERIC);
+  mb.addFace(x1, y0, z1, x1, y0, z0, x1, y1, z0, x1, y1, z1, 1, 0, 0, r * 0.92, g * 0.92, b * 0.92, MAT_GENERIC);
+}
+
+function scatterBush(mb: MeshBuilder, x: number, z: number, size: number, r: number, g: number, b: number): void {
+  placeBox(mb, x, size * 0.5 - 0.04, z, size * 0.72, size * 0.5, size * 0.72, r, g, b);
+  placeBox(mb, x + size * 0.3, size * 0.36 - 0.04, z - size * 0.22, size * 0.45, size * 0.36, size * 0.45, r * 0.8, g * 0.82, b * 0.78);
+}
+
+function scatterTree(mb: MeshBuilder, x: number, z: number, size: number, r: number, g: number, b: number): void {
+  placeBox(mb, x, size * 0.55 - 0.04, z, size * 0.16, size * 0.55, size * 0.16, 0.34, 0.23, 0.14);
+  placeBox(mb, x, size * 1.25 - 0.04, z, size * 0.62, size * 0.38, size * 0.62, r, g, b);
+  placeBox(mb, x, size * 1.85 - 0.04, z, size * 0.48, size * 0.32, size * 0.48, r * 1.06, g * 1.08, b * 1.02);
+  placeBox(mb, x, size * 2.35 - 0.04, z, size * 0.3, size * 0.26, size * 0.3, r * 1.12, g * 1.14, b * 1.05);
+}
+
+function scatterRng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Toy trees and bushes scattered over the grass around the track — pure
+ * tabletop-diorama dressing. Deterministic per track; never within clearance
+ * of the ribbon, so nothing overlaps the racing surface or the barriers.
+ */
+function scatterScenery(
+  mb: MeshBuilder,
+  track: TrackView,
+  raced: readonly RibbonSample[],
+): void {
+  const b = track.bounds;
+  const seed = Math.abs(Math.round(b.minX * 97.3 + b.minY * 41.7 + b.maxX * 13.1 + b.maxY * 61.9)) >>> 0;
+  const rng = scatterRng(seed);
+  // Scatter region: the track locus plus a generous margin of quiet grass.
+  const margin = 160;
+  const x0 = b.minX - margin;
+  const x1 = b.maxX + margin;
+  const y0 = b.minY - margin;
+  const y1 = b.maxY + margin;
+  const clearance: Array<{ x: number; z: number; minR: number }> = [];
+  for (const s of raced) {
+    clearance.push({ x: s.x, z: s.z, minR: s.halfW + s.runoff + 7 });
+  }
+
+  const target = 120;
+  let placed = 0;
+  for (let attempt = 0; attempt < 6000 && placed < target; attempt++) {
+    const x = x0 + rng() * (x1 - x0);
+    const z = -(y0 + rng() * (y1 - y0));
+    let ok = true;
+    for (const c of clearance) {
+      const dx = x - c.x;
+      const dz = z - c.z;
+      if (dx * dx + dz * dz < c.minR * c.minR) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) continue;
+    const size = 1.0 + rng() * 1.6;
+    const shade = 0.75 + rng() * 0.25;
+    const r = 0.12 * shade + rng() * 0.05;
+    const g = 0.34 * shade + rng() * 0.12;
+    const bl = 0.1 * shade + rng() * 0.05;
+    if (rng() < 0.55) {
+      scatterBush(mb, x, z, size * 0.8, r, g, bl);
+    } else {
+      scatterTree(mb, x, z, size * 0.7, r, g, bl);
+    }
+    placed++;
+  }
 }
 export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): BuiltTrackMesh {
   void _palette;
@@ -363,9 +456,12 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     }
   }
 
-  // Far grass ground plate
+  // Far grass ground plate — covers the WHOLE background, far beyond the
+  // track locus, so the tabletop reads as sitting on grass to the horizon
+  // (no clear-colour seams anywhere the camera can reach).
   const b = track.bounds;
-  const pad = 36;
+  const span = Math.max(b.maxX - b.minX, b.maxY - b.minY);
+  const pad = Math.max(36, span * 4);
   const minX = b.minX - pad;
   const maxX = b.maxX + pad;
   const minZ = -(b.maxY + pad);
@@ -392,6 +488,9 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     MAT_GRASS,
   );
 
+  // Diorama dressing — toy trees/bushes around the grass, clear of the ribbon.
+  scatterScenery(mb, track, samples);
+
   // Start line (s=0) always; a sprint also banners its finish wherever it
   // lands on the loop. Circuits share one line (start == finish).
   buildLineBand(mb, track, 0);
@@ -401,9 +500,8 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
 
   const { vertices, indices } = mb.build();
 
-  // Normalize the minimap to the SAMPLED extent — for a sprint the samples are
-  // the raced portion only, so the minimap shows the point-to-point ribbon
-  // filling its own box rather than squishing into the full-loop bounds.
+  // Normalize the minimap to the sampled extent — the full closed loop for
+  // both circuits and sprints, so the map shows the same loop the ribbon shows.
   let mmMinX = Infinity;
   let mmMaxX = -Infinity;
   let mmMinY = Infinity;

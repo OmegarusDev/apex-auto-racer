@@ -19,6 +19,22 @@ export class Camera {
   private targetX = 0;
   private targetY = 0;
   private targetZoom = 1;
+  /** Speed-based follow zoom (no start boost). */
+  private baseTargetZoom = 1;
+  /**
+   * Extra zoom-in on the player's car just after lights-out — the race starts
+   * tight on the player, then eases out to the normal speed-based frame.
+   */
+  private startBoost = 0;
+
+  private static readonly START_ZOOM_BOOST = 0.28;
+  private static readonly START_ZOOM_DECAY = 1.1;
+  /** How much of the remaining boost may push zoom past zoomMax. */
+  private static readonly BOOST_OVERSHOOT = 0.75;
+
+  private maxZoomNow(): number {
+    return PHYSICS.zoomMax + this.startBoost * Camera.BOOST_OVERSHOOT;
+  }
 
   /** Fit all car world positions on screen (countdown). */
   setCountdownTargets(
@@ -66,6 +82,8 @@ export class Camera {
    * orientation stays fixed in the WebGL pass (not a chase cam).
    */
   setFollowTarget(worldPos: Vec2, speedMs: number, lookAhead?: Vec2): void {
+    // Countdown → follow transition = lights-out: arm the start punch-in.
+    const enteringFollow = this.mode !== 'follow';
     this.mode = 'follow';
     const ahead = clamp(speedMs * 0.08, 1.5, 7);
     if (lookAhead !== undefined) {
@@ -76,7 +94,17 @@ export class Camera {
       this.targetX = worldPos.x;
       this.targetY = worldPos.y;
     }
-    this.targetZoom = clamp(0.68 - 0.18 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
+    this.baseTargetZoom = clamp(0.68 - 0.18 * (speedMs / 70), PHYSICS.zoomMin, PHYSICS.zoomMax);
+    if (enteringFollow) {
+      this.startBoost = Camera.START_ZOOM_BOOST;
+    }
+    // The punch-in may exceed zoomMax — the countdown fit for a long sprint
+    // already sits at zoomMax, so without overshoot the start zoom is invisible.
+    this.targetZoom = clamp(
+      this.baseTargetZoom + this.startBoost,
+      PHYSICS.zoomMin,
+      this.maxZoomNow(),
+    );
   }
 
   update(dt: number): void {
@@ -84,8 +112,16 @@ export class Camera {
     const zoomK = 1 - Math.exp(-PHYSICS.cameraZoomRate * dt);
     this.x += (this.targetX - this.x) * posK;
     this.y += (this.targetY - this.y) * posK;
+    if (this.mode === 'follow' && this.startBoost > 0.001) {
+      this.startBoost *= Math.exp(-Camera.START_ZOOM_DECAY * dt);
+      this.targetZoom = clamp(
+        this.baseTargetZoom + this.startBoost,
+        PHYSICS.zoomMin,
+        this.maxZoomNow(),
+      );
+    }
     this.zoom += (this.targetZoom - this.zoom) * zoomK;
-    this.zoom = clamp(this.zoom, PHYSICS.zoomMin, PHYSICS.zoomMax);
+    this.zoom = clamp(this.zoom, PHYSICS.zoomMin, this.maxZoomNow());
   }
 
   /** Jump live pose onto current targets (race enter / countdown setup). */

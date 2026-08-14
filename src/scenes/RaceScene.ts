@@ -1233,7 +1233,7 @@ export class RaceScene implements Scene {
     h: number,
     token: ThemeTokens,
     accent: string,
-    player?: { rpm: number; shiftWindow: import('../engine/Gearbox').ShiftWindowKind; gear: number } | null,
+    player?: { rpm: number; gearBand: number; shiftWindow: import('../engine/Gearbox').ShiftWindowKind; gear: number } | null,
   ): void {
     const chrome = drawPedalDeckChrome({
       ctx,
@@ -1247,9 +1247,10 @@ export class RaceScene implements Scene {
         this.g.input.isKeyDown('ShiftLeft') || this.g.input.isKeyDown('ShiftRight'),
       shiftCueArmed: this.shiftCueArmed,
       animTime: this.animTime,
-      rpm: player?.rpm ?? 900,
+      gearBand: player?.gearBand ?? 0,
       shiftWindow: player?.shiftWindow ?? 'low',
       gear: player?.gear ?? 1,
+      box: gearboxFor(this.launch.discipline),
     });
     this.chrome = chrome;
     this.g.input.setRaceChrome(chrome);

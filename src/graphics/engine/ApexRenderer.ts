@@ -7,7 +7,7 @@ import { PHYSICS } from '../../data/physics';
 import type { TrackPalette } from '../materials';
 import { raceCameraPull } from '../raceCameraZoom';
 import type { CarFrameDto, FxImpulse, RaceFrameView, TrackView } from '../types';
-import { buildCarGeometry } from './CarGeometry';
+import { buildCarGeometry, buildPlayerRingGeometry } from './CarGeometry';
 import {
   bindLitAttribs,
   createGL,
@@ -63,6 +63,7 @@ export class ApexRenderer {
   private readonly litProg: WebGLProgram;
   private trackMesh: GpuMesh | null = null;
   private carMesh: GpuMesh | null = null;
+  private playerRingMesh: GpuMesh | null = null;
   private minimap: Array<{ nx: number; ny: number }> = [];
   private minimapExtent: { minX: number; maxX: number; minY: number; maxY: number } = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
   private night = false;
@@ -125,8 +126,10 @@ export class ApexRenderer {
     const gl = this.gl;
     if (this.trackMesh) destroyMesh(gl, this.trackMesh);
     if (this.carMesh) destroyMesh(gl, this.carMesh);
+    if (this.playerRingMesh) destroyMesh(gl, this.playerRingMesh);
     this.trackMesh = null;
     this.carMesh = null;
+    this.playerRingMesh = null;
     gl.deleteProgram(this.litProg);
   }
 
@@ -160,6 +163,10 @@ export class ApexRenderer {
       destroyMesh(gl, this.carMesh);
       this.carMesh = null;
     }
+    if (this.playerRingMesh) {
+      destroyMesh(gl, this.playerRingMesh);
+      this.playerRingMesh = null;
+    }
 
     const track = buildTrackGeometry(opts.track, opts.palette);
     this.trackMesh = createMesh(gl, track.vertices, track.indices);
@@ -168,6 +175,8 @@ export class ApexRenderer {
 
     const car = buildCarGeometry();
     this.carMesh = createMesh(gl, car.vertices, car.indices);
+    const ring = buildPlayerRingGeometry();
+    this.playerRingMesh = createMesh(gl, ring.vertices, ring.indices);
 
     this.night = opts.night;
     this.rain = opts.rain;
@@ -316,6 +325,21 @@ export class ApexRenderer {
     this.drawMesh(this.trackMesh, [1, 1, 1], 1);
     gl.disable(gl.POLYGON_OFFSET_FILL);
 
+    // Player glow ring — subtle pulsing halo under the car so it is always
+    // findable in the pack. Additive, drawn under the solid cars.
+    if (this.playerRingMesh !== null && player !== undefined && player.isPlayer) {
+      const t = performance.now() / 1000;
+      const glow = 0.26 + 0.12 * Math.sin(t * 2.6);
+      gl.enable(gl.BLEND);
+      gl.depthMask(false);
+      this.placeRing(player.worldX, player.worldY);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      this.drawMesh(this.playerRingMesh, hexToRgb(player.color), glow);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+    }
+
     // Solid cars first (no blend)
     for (const car of frame.cars) {
       const lift = car.slotMode === 'deslot' ? 0.35 : 0.12;
@@ -331,7 +355,8 @@ export class ApexRenderer {
       tint[0]! = tint[0]! * (0.7 + cond * 0.35);
       tint[1]! = tint[1]! * (0.7 + cond * 0.35);
       tint[2]! = tint[2]! * (0.7 + cond * 0.35);
-      this.drawMesh(this.carMesh, tint, 1);
+      // Player keeps a steady rim highlight (subtle border glow on the body).
+      this.drawMesh(this.carMesh, tint, 1, car.isPlayer ? 0.8 : 0, tint);
     }
 
     // Ghost + FX need blending (ghost alpha is ignored with blend off).
@@ -340,6 +365,17 @@ export class ApexRenderer {
     if (frame.ghost) {
       this.placeCar(frame.ghost.worldX, frame.ghost.worldY, frame.ghost.heading, 1);
       this.drawMesh(this.carMesh, hexToRgb(frame.ghost.color), 0.35);
+    }
+    // Player halo — an additive silhouette glow poking out around the car's
+    // outline. Depth writes are off and the solid car already occupies the
+    // centre, so only the ring of body poking outside shows: a clear border
+    // that reads from the tabletop angle (the fresnel rim alone is invisible
+    // at ~45° elevation).
+    if (player !== undefined && player.isPlayer) {
+      this.placeCar(player.worldX, player.worldY, player.heading, 0.12, 1.1);
+      gl.blendFunc(gl.ONE, gl.ONE);
+      this.drawMesh(this.carMesh, hexToRgb(player.color), 0.5);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
     this.drawFxPoints(frame);
     gl.depthMask(true);
@@ -407,11 +443,11 @@ export class ApexRenderer {
     gl.uniform3f(gl.getUniformLocation(p, 'uCameraPos'), this.eyeX, this.eyeY, this.eyeZ);
   }
 
-  private placeCar(worldX: number, worldY: number, heading: number, lift: number): void {
+  private placeCar(worldX: number, worldY: number, heading: number, lift: number, scale = 1.2): void {
     // Engine Z = -worldY, so yaw must match Canvas2D's rotate(-heading).
     // Local +X is car forward (same as CarPainter length axis).
     // Mild toy scale — distance is user-controlled via raceZoom.
-    const s = 1.2;
+    const s = scale;
     mat4Identity(this.tmp);
     mat4RotateY(this.model, this.tmp, -heading);
     mat4Scale(this.tmp, this.model, s, s, s);
@@ -423,7 +459,13 @@ export class ApexRenderer {
     void PHYSICS;
   }
 
-  private drawMesh(mesh: GpuMesh, tint: Vec3, alpha: number): void {
+  private placeRing(worldX: number, worldY: number): void {
+    mat4Identity(this.tmp);
+    mat4Translate(this.model, this.tmp, worldX, 0.015, -worldY);
+    mat4CopyInPlace(this.model, this.tmp);
+  }
+
+  private drawMesh(mesh: GpuMesh, tint: Vec3, alpha: number, highlight = 0, highlightColor: Vec3 = tint): void {
     const gl = this.gl;
     const p = this.litProg;
     mat4Multiply(this.mvp, this.viewProj, this.model);
@@ -442,6 +484,13 @@ export class ApexRenderer {
     gl.uniformMatrix3fv(gl.getUniformLocation(p, 'uNormalMat'), false, this.normalMat);
     gl.uniform3f(gl.getUniformLocation(p, 'uTint'), tint[0], tint[1], tint[2]);
     gl.uniform1f(gl.getUniformLocation(p, 'uAlpha'), alpha);
+    gl.uniform1f(gl.getUniformLocation(p, 'uHighlight'), highlight);
+    gl.uniform3f(
+      gl.getUniformLocation(p, 'uHighlightColor'),
+      highlightColor[0],
+      highlightColor[1],
+      highlightColor[2],
+    );
     bindLitAttribs(gl, p, mesh);
     // indexType must match the buffer uploaded in createMesh (Uint16 vs Uint32).
     // Inferring from indexCount alone drew UNSIGNED_INT into Uint16 meshes when

@@ -30,6 +30,8 @@ export interface TrackData {
   seed: number;
   discipline: DisciplineId;
   bounds: TrackBounds;
+  /** Sprint: render the ribbon only up to this arc length (point-to-point). */
+  sprintFinishS?: number;
 }
 
 export interface SpeedProfiles {
@@ -43,14 +45,42 @@ export interface TrackScaleOpts {
   lengthMult?: number;
   /** Multiplies asphalt / runoff width. */
   widthMult?: number;
+  /** Sprint shape overrides — a long, thin loop raced point-to-point. */
+  sprint?: {
+    /** Loop length multiplier (a doubled loop, finished at ~50%). */
+    lengthMult?: number;
+    /** Extra elongation → the "trip from A to B" feel. */
+    elongation?: number;
+    /** Radial noise — low keeps long smooth straights. */
+    radialNoise?: number;
+  };
 }
 
-const DEFAULT_SCALE: Required<TrackScaleOpts> = { lengthMult: 1, widthMult: 1 };
+type ResolvedScale = {
+  lengthMult: number;
+  widthMult: number;
+  sprint: { lengthMult: number; elongation: number; radialNoise: number } | undefined;
+};
 
-function resolveScale(opts?: TrackScaleOpts): Required<TrackScaleOpts> {
-  const lengthMult = Math.max(0.45, Math.min(1.35, opts?.lengthMult ?? 1));
+function resolveScale(opts?: TrackScaleOpts): ResolvedScale {
+  // Sprints race a doubled loop point-to-point, so they need a much longer
+  // circuit than a normal race — raise the length clamp for them.
+  const sprint = opts?.sprint;
+  const maxLen = sprint ? 2.6 : 1.35;
+  const lengthMult = Math.max(
+    0.45,
+    Math.min(maxLen, sprint?.lengthMult ?? opts?.lengthMult ?? 1),
+  );
   const widthMult = Math.max(0.75, Math.min(1.2, opts?.widthMult ?? 1));
-  return { lengthMult, widthMult };
+  const sprintResolved =
+    sprint !== undefined
+      ? {
+          lengthMult: lengthMult,
+          elongation: sprint.elongation ?? 2.0,
+          radialNoise: sprint.radialNoise ?? 0.12,
+        }
+      : undefined;
+  return { lengthMult, widthMult, sprint: sprintResolved };
 }
 
 export type TrackFailReason =
@@ -96,19 +126,21 @@ function generateWaypoints(
   rng: Rng,
   archetype: ArchetypeDefLike,
   lengthMult = 1,
+  shape?: { elongation?: number; radialNoise?: number },
 ): { x: number; y: number }[] {
   const [minN, maxN] = archetype.waypointCount;
   const n = minN === maxN ? minN : randInt(rng, minN, maxN);
   const baseRadius = randRange(rng, PHYSICS.baseRadiusMin, PHYSICS.baseRadiusMax) * lengthMult;
-  const rx = baseRadius * archetype.elongation;
+  const rx = baseRadius * (shape?.elongation ?? archetype.elongation);
   const ry = baseRadius;
+  const radialNoise = shape?.radialNoise ?? archetype.radialNoise;
 
   const points: { x: number; y: number }[] = [];
   for (let i = 0; i < n; i++) {
     const baseAngle = (2 * Math.PI * i) / n;
     const angleJitter = randRange(rng, -0.2, 0.2);
     const angle = baseAngle + angleJitter;
-    const rNoise = 1 + randRange(rng, -archetype.radialNoise, archetype.radialNoise);
+    const rNoise = 1 + randRange(rng, -radialNoise, radialNoise);
     points.push({
       x: rx * Math.cos(angle) * rNoise,
       y: ry * Math.sin(angle) * rNoise,
@@ -306,7 +338,12 @@ export function generateTrackAttempt(
   const scale = resolveScale(scaleOpts);
   const rng = mulberry32(seed);
   const archetype = scaledArchetype(pickArchetype(rng, discipline, archetypeHint), scale.widthMult);
-  const waypoints = generateWaypoints(rng, archetype, scale.lengthMult);
+  const waypoints = generateWaypoints(
+    rng,
+    archetype,
+    scale.lengthMult,
+    scale.sprint ? { elongation: scale.sprint.elongation, radialNoise: scale.sprint.radialNoise } : undefined,
+  );
   return buildTrackFromWaypoints(waypoints, archetype, seed, discipline);
 }
 
@@ -317,7 +354,7 @@ export function generateTrack(
   archetypeHint?: ArchetypeId,
   scaleOpts?: TrackScaleOpts,
 ): TrackData {
-  const scale = resolveScale(scaleOpts ?? DEFAULT_SCALE);
+  const scale = resolveScale(scaleOpts);
   for (let attempt = 0; attempt < PHYSICS.maxGenAttempts; attempt++) {
     const attemptSeed = (seed + attempt * 0x9e3779b9) >>> 0;
     const track = generateTrackAttempt(
@@ -371,23 +408,6 @@ export function buildSpeedProfiles(
   }
 
   return { vSafe, vProfile: vProfileExt.slice(0, n) };
-}
-
-/**
- * Driver target speed under the Scalextric deslot limit.
- * Skill raises the ceiling; Bravery pushes the target closer to it.
- * Physical v_deslot uses Skill/Focus/Bravery in Vehicle.computeVDeslot.
- */
-export function buildVDriverProfile(
-  vProfile: readonly number[],
-  skill: number,
-  bravery: number,
-): number[] {
-  // Wide RPG span: low Skill crawls under the peg; elites + bravery flirt with it.
-  const skillCeil = 0.38 + 0.58 * (skill / 100);
-  const braveryPush = 0.58 + 0.42 * (bravery / 100);
-  const confidence = Math.min(0.98, skillCeil * braveryPush);
-  return vProfile.map((v) => v * confidence);
 }
 
 /** Estimate lap time by integrating ds / vProfile (plan 5.3). */

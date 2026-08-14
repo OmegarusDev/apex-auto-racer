@@ -2,7 +2,7 @@ import { BALANCE } from '../data/balance';
 import { FORMATS, formatsForRoster } from '../data/formats';
 import type { DisciplineId } from '../data/disciplines';
 import { getGameContext } from '../engine/GameContext';
-import { mulberry32, pick, randInt, shuffleInPlace, weightedPick } from '../engine/rng';
+import { mulberry32, pick, randInt, randRange, shuffleInPlace, weightedPick } from '../engine/rng';
 import type { GameState } from '../engine/types';
 import type { RaceLaunchConfig } from './raceLaunch';
 import { applyQuickRacePreset } from './raceLaunch';
@@ -55,6 +55,12 @@ export function makeQuickRaceConfig(
   const lapCap = maxLapsForPaceBand(paceBand);
   const laps = randInt(rng, BALANCE.minLaps, Math.max(BALANCE.minLaps, lapCap));
 
+  // ~25% of Quick Races are a point-to-point sprint instead of a circuit.
+  // The finish line lands at a random 42–58% of the doubled loop.
+  const isSprint = rng() < 0.25;
+  const sprintFinishFrac = isSprint ? randRange(rng, 0.42, 0.58) : undefined;
+  const session = isSprint ? ('sprint' as const) : undefined;
+
   const base: RaceLaunchConfig = {
     discipline,
     trackSeed,
@@ -64,15 +70,59 @@ export function makeQuickRaceConfig(
     playerLineup,
     leadDriverId,
     mode: 'quick',
+    session,
+    sprintFinishFrac,
     returnTo,
   };
 
   return applyQuickRacePreset(state, base, presetId);
 }
 
-let raceLaunchInFlight = false;
+/** Single-car time trial: one driver, a timer, 1–3 laps scaled to track length. */
+export function makeTimeTrialConfig(
+  state: GameState,
+  discipline: DisciplineId,
+  returnTo: 'title' | 'campaign' = 'title',
+): RaceLaunchConfig {
+  state.quickRaceNonce = ((state.quickRaceNonce >>> 0) + 1) >>> 0;
+  try {
+    getGameContext().autosave();
+  } catch {
+    // Context may be absent in headless harnesses.
+  }
+  const seedMaterial =
+    (state.seed +
+      state.careerStats.races * 9973 +
+      state.careerStats.earnings +
+      discipline.charCodeAt(0) * 131 +
+      state.quickRaceNonce * 7919) >>>
+    0;
+  const rng = mulberry32(seedMaterial);
+  const raceSeed = randInt(rng, 1, 0x7fffffff);
+  const trackSeed = randInt(rng, 1, 0x7fffffff);
 
-function formatLaunchError(err: unknown): string {
+  const roster = [...state.roster];
+  const leadDriverId = roster.length > 0 ? pick(rng, roster).id : '';
+
+  const paceBand = paceBandFromState(state, discipline);
+  const lapCap = maxLapsForPaceBand(paceBand);
+  const laps = randInt(rng, BALANCE.minLaps, Math.max(BALANCE.minLaps, lapCap));
+
+  return {
+    discipline,
+    trackSeed,
+    raceSeed,
+    laps,
+    formatId: 'tt',
+    playerLineup: leadDriverId ? [leadDriverId] : [],
+    leadDriverId,
+    mode: 'quick',
+    session: 'timeTrial',
+    returnTo,
+  };
+}
+
+let raceLaunchInFlight = false;function formatLaunchError(err: unknown): string {
   if (err instanceof Error) {
     const msg = err.message.trim();
     return msg.length > 0 ? msg : err.name;

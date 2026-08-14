@@ -84,6 +84,7 @@ export function drawPreRaceCard(
     traitName: string;
     phase: 3 | 2 | 1 | 'go' | null;
     partTiers?: import('../engine/types').VehicleParts;
+    session?: 'race' | 'timeTrial' | 'sprint';
   },
 ): void {
   // Only on the first countdown beat so the big numeral has room.
@@ -116,16 +117,22 @@ export function drawPreRaceCard(
 
   ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
   ctx.fillStyle = token.text;
-  const driverLine = `${opts.laps} lap${opts.laps === 1 ? '' : 's'} · ${opts.driverName}`;
+  const sessionLabel =
+    opts.session === 'sprint'
+      ? 'SPRINT'
+      : opts.session === 'timeTrial'
+        ? 'TIME TRIAL'
+        : `${opts.laps} lap${opts.laps === 1 ? '' : 's'}`;
+  const driverLine = `${sessionLabel} · ${opts.driverName}`;
   // Soft truncate long driver names.
   let shown = driverLine;
   const maxW = cardW - pad(token, 3);
   if (ctx.measureText(shown).width > maxW) {
     let t = opts.driverName;
-    while (t.length > 2 && ctx.measureText(`${opts.laps} laps · ${t}…`).width > maxW) {
+    while (t.length > 2 && ctx.measureText(`${sessionLabel} · ${t}…`).width > maxW) {
       t = t.slice(0, -1);
     }
-    shown = `${opts.laps} lap${opts.laps === 1 ? '' : 's'} · ${t}…`;
+    shown = `${sessionLabel} · ${t}…`;
   }
   ctx.fillText(shown, x + cardW * 0.5, ty);
   ty += token.fontBody + pad(token, 0.35);

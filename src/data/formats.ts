@@ -8,6 +8,7 @@ export interface RaceFormat {
 }
 
 export const FORMATS: RaceFormat[] = [
+  { id: 'tt', label: 'Time Trial', teamSize: 1, teamCount: 1, weight: 0, minRoster: 1 },
   { id: '1v1', label: '1v1', teamSize: 1, teamCount: 2, weight: 3, minRoster: 1 },
   { id: '2v2', label: '2v2', teamSize: 2, teamCount: 2, weight: 3, minRoster: 2 },
   { id: '1v1v1v1', label: '1v1v1v1', teamSize: 1, teamCount: 4, weight: 3, minRoster: 1 },

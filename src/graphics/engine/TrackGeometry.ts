@@ -9,12 +9,62 @@ import type { TrackView } from '../types';
 import {
   MAT_CONCRETE,
   MAT_DIRT,
+  MAT_GENERIC,
   MAT_GRASS,
   MAT_GROOVE,
   MAT_RUMBLE,
   MAT_TARMAC,
 } from './materials';
 import { MeshBuilder } from './MeshBuilder';
+import { sampleTrack } from '../TrackSampler';
+
+/**
+ * Checkered start/finish band across the track at arc position s — the "line"
+ * the cars cross. Always drawn at the start (s=0) and again at the sprint
+ * finish, wherever that lands on the loop.
+ */
+function buildLineBand(
+  mb: MeshBuilder,
+  track: TrackView,
+  s: number,
+): void {
+  const halfLen = 1.5;
+  const alongSteps = 2;
+  const center = sampleTrack(track, s);
+  const acrossCells = Math.max(3, Math.min(12, Math.round(center.width / 2)));
+  const light: readonly [number, number, number] = [0.93, 0.93, 0.88];
+  const dark: readonly [number, number, number] = [0.13, 0.13, 0.14];
+  const yLift = 0.05;
+
+  for (let i = 0; i < alongSteps; i++) {
+    const a0 = sampleTrack(track, s - halfLen + (2 * halfLen * i) / alongSteps);
+    const a1 = sampleTrack(track, s - halfLen + (2 * halfLen * (i + 1)) / alongSteps);
+    const w0 = a0.width / 2;
+    const w1 = a1.width / 2;
+    for (let j = 0; j < acrossCells; j++) {
+      const c = (i + j) % 2 === 0 ? light : dark;
+      const t0 = -1 + (2 * j) / acrossCells;
+      const t1 = -1 + (2 * (j + 1)) / acrossCells;
+      const ax = a0.pos.x + a0.normal.x * t0 * w0;
+      const ay = a0.pos.y + a0.normal.y * t0 * w0;
+      const bx = a0.pos.x + a0.normal.x * t1 * w0;
+      const by = a0.pos.y + a0.normal.y * t1 * w0;
+      const cx = a1.pos.x + a1.normal.x * t1 * w1;
+      const cy = a1.pos.y + a1.normal.y * t1 * w1;
+      const dx = a1.pos.x + a1.normal.x * t0 * w1;
+      const dy = a1.pos.y + a1.normal.y * t0 * w1;
+      mb.addFace(
+        ax, yLift, -ay,
+        bx, yLift, -by,
+        cx, yLift, -cy,
+        dx, yLift, -dy,
+        0, 1, 0,
+        c[0], c[1], c[2],
+        MAT_GENERIC,
+      );
+    }
+  }
+}
 
 export interface BuiltTrackMesh {
   vertices: Float32Array;
@@ -39,7 +89,12 @@ function sampleClosed(
 }> {
   const nodes = track.nodes;
   const n = nodes.length;
-  const length = track.length;
+  // A sprint is a point-to-point ribbon: sample up to just past the finish so
+  // the banner sits fully on tarmac with a short roll-out strip, and leave it
+  // OPEN (no closing vertex) — the loop's return half is never drawn.
+  const sprintRunoff = 8;
+  const sprintEnd = track.sprintFinishS !== undefined ? track.sprintFinishS + sprintRunoff : null;
+  const length = sprintEnd ?? track.length;
   const out: Array<{
     x: number;
     z: number;
@@ -83,10 +138,9 @@ function sampleClosed(
       kappa,
     });
   }
-  out.push(out[0]!);
+  if (sprintEnd === null) out.push(out[0]!);
   return out;
 }
-
 export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): BuiltTrackMesh {
   void _palette;
   const mb = new MeshBuilder();
@@ -335,13 +389,33 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     MAT_GRASS,
   );
 
+  // Start line (s=0) always; a sprint also banners its finish wherever it
+  // lands on the loop. Circuits share one line (start == finish).
+  buildLineBand(mb, track, 0);
+  if (track.sprintFinishS !== undefined) {
+    buildLineBand(mb, track, track.sprintFinishS);
+  }
+
   const { vertices, indices } = mb.build();
 
-  const spanX = Math.max(b.maxX - b.minX, 1);
-  const spanY = Math.max(b.maxY - b.minY, 1);
+  // Normalize the minimap to the SAMPLED extent — for a sprint the samples are
+  // the raced portion only, so the minimap shows the point-to-point ribbon
+  // filling its own box rather than squishing into the full-loop bounds.
+  let mmMinX = Infinity;
+  let mmMaxX = -Infinity;
+  let mmMinY = Infinity;
+  let mmMaxY = -Infinity;
+  for (const s of samples) {
+    mmMinX = Math.min(mmMinX, s.x);
+    mmMaxX = Math.max(mmMaxX, s.x);
+    mmMinY = Math.min(mmMinY, -s.z);
+    mmMaxY = Math.max(mmMaxY, -s.z);
+  }
+  const spanX = Math.max(mmMaxX - mmMinX, 1);
+  const spanY = Math.max(mmMaxY - mmMinY, 1);
   const minimap = samples.slice(0, -1).map((s) => ({
-    nx: (s.x - b.minX) / spanX,
-    ny: 1 - (-s.z - b.minY) / spanY,
+    nx: (s.x - mmMinX) / spanX,
+    ny: 1 - (-s.z - mmMinY) / spanY,
   }));
 
   return { vertices, indices, minimap };

@@ -69,7 +69,6 @@ export function stepTransmission(
   const canUp =
     car.gear < box.gearCount &&
     car.shiftCooldown <= 0 &&
-    car.slotMode === 'groove' &&
     car.spinRemaining <= 0 &&
     !car.holdGear; // Rally/Street slide: hold-gear friendly
 
@@ -111,7 +110,6 @@ export function stepTransmission(
     (car.driftState || car.driftArmed || car.gripUsage > 0.82 || car.slotMode === 'deslot');
   if (kickOk) {
     car.clutchKickRemaining = 0.28;
-    car.magInterrupt = Math.max(car.magInterrupt, 0.9);
     if (!car.driftState) {
       car.driftState = true;
       car.slipAngle += Math.sign(car.slipAngle || car.dl || 1) * 0.18;
@@ -120,8 +118,11 @@ export function stepTransmission(
   if (car.clutchKickRemaining > 0) {
     clutchKick = Math.min(1, car.clutchKickRemaining / 0.12);
   }
-  if (car.magInterrupt > 0) {
-    car.magInterrupt = Math.max(0, car.magInterrupt - dt * 2.8);
+
+  // Drift state is a live flag, not a latch — clear it once the slide is gone
+  // (otherwise HUD/audio/"drifting" modifier stick on for the whole race).
+  if (car.driftState && Math.abs(car.slipAngle) < 0.15 && car.gripUsage < 0.7 && car.v > 4) {
+    car.driftState = false;
   }
 
   const bandNow = gearBandFrac(car.v, vMaxEff, car.gear, box);

@@ -39,7 +39,7 @@ import { disciplineAccent } from '../career/disciplinesUi';
 import { buyPartTier, driverSpendData, repairVehicle } from '../career/garage';
 import { grantXp, spendStatPoint } from '../career/xp';
 import { findDriver } from '../career/roster';
-import { launchRace, makeQuickRaceConfig } from '../career/launchRace';
+import { launchRace, makeQuickRaceConfig, makeTimeTrialConfig } from '../career/launchRace';
 import { CampaignScene } from './CampaignScene';
 
 type ResultsPhase = 'podium' | 'standings' | 'payout' | 'xp' | 'done';
@@ -226,17 +226,26 @@ export class ResultsScene implements Scene {
       return;
     }
     const g = getGameContext();
-    if (g.state !== null && this.payload.config.mode === 'quick') {
-      launchRace(
-        makeQuickRaceConfig(
-          g.state,
-          this.payload.discipline,
-          this.payload.config.returnTo ?? 'title',
-          this.payload.config.quickPresetId ?? 'garage',
-        ),
-        this.toasts,
-      );
-      return;
+    if (g.state !== null) {
+      if (this.payload.config.session === 'timeTrial') {
+        launchRace(
+          makeTimeTrialConfig(g.state, this.payload.discipline, this.payload.config.returnTo ?? 'title'),
+          this.toasts,
+        );
+        return;
+      }
+      if (this.payload.config.mode === 'quick') {
+        launchRace(
+          makeQuickRaceConfig(
+            g.state,
+            this.payload.discipline,
+            this.payload.config.returnTo ?? 'title',
+            this.payload.config.quickPresetId ?? 'garage',
+          ),
+          this.toasts,
+        );
+        return;
+      }
     }
     this.navigateBack();
   }
@@ -475,11 +484,30 @@ export class ResultsScene implements Scene {
     ctx.fillText(`P${place}`, x + w * 0.5, y + pad(token, 0.5));
 
     if (won) {
-      ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
-      ctx.fillStyle = accent;
-      ctx.globalAlpha = 0.85;
-      ctx.fillText('WINNER', x + w * 0.5, y + pad(token, 0.5) + placeSize + pad(token, 0.25));
-      ctx.globalAlpha = 1;
+      const isTT = this.payload.config.session === 'timeTrial';
+      if (isTT) {
+        // A time trial's result IS the time — show it where "WINNER" would be.
+        const t = this.payload.finishers.find((f) => f.isPlayer)?.finishTime;
+        if (t !== undefined) {
+          const m = Math.floor(t / 60);
+          const s = (t % 60).toFixed(1);
+          ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+          ctx.fillStyle = accent;
+          ctx.globalAlpha = 0.85;
+          ctx.fillText(
+            `TIME ${m > 0 ? `${m}:` : ''}${s.padStart(m > 0 ? 2 : 1, '0')}s`,
+            x + w * 0.5,
+            y + pad(token, 0.5) + placeSize + pad(token, 0.25),
+          );
+          ctx.globalAlpha = 1;
+        }
+      } else {
+        ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.85;
+        ctx.fillText('WINNER', x + w * 0.5, y + pad(token, 0.5) + placeSize + pad(token, 0.25));
+        ctx.globalAlpha = 1;
+      }
     }
 
     const bonusY =

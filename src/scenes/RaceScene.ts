@@ -440,6 +440,7 @@ export class RaceScene implements Scene {
       traitName,
       phase: director.countdown,
       partTiers: vehicle?.partTiers,
+      session: director.session,
     });
     this.drawCountdownBanner(ctx, w, h, token, director.countdown);
     if (director.rain) this.drawRainChip(ctx, w, h, token);
@@ -1060,7 +1061,24 @@ export class RaceScene implements Scene {
     ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
     ctx.fillStyle = token.textMuted;
     const lap = player?.lap ?? 0;
-    ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
+    if (director.session === 'sprint') {
+      // Sprint progress bar — the trip from the start line to the finish.
+      const pct = Math.round(director.sprintProgress * 100);
+      ctx.fillText(`SPRINT ${pct}%`, hudX, hudY);
+      hudY += token.fontBody + pad(token, 0.45);
+      const barW = telemetryMaxW;
+      const barH = pad(token, 0.5);
+      ctx.fillStyle = `${token.textMuted}33`;
+      ctx.fillRect(hudX, hudY, barW, barH);
+      ctx.fillStyle = accent;
+      ctx.fillRect(hudX, hudY, barW * director.sprintProgress, barH);
+    } else if (director.session === 'timeTrial') {
+      ctx.fillText(`TIME ${director.raceClock.toFixed(1)}s`, hudX, hudY);
+      hudY += token.fontBody + pad(token, 0.45);
+      ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
+    } else {
+      ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
+    }
     hudY += token.fontBody + pad(token, 0.45);
 
     if (player !== undefined) {

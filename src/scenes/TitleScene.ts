@@ -34,6 +34,8 @@ import { DISCIPLINE_ORDER } from '../career/disciplinesUi';
 import { GarageScene } from './GarageScene';
 import { OptionsScene } from './OptionsScene';
 import { QuickRaceSetupScene } from './QuickRaceSetupScene';
+import { makeTimeTrialConfig } from '../career/launchRace';
+import { launchRace } from '../career/launchRace';
 
 /** Load save if present; otherwise create an in-memory roster without persisting. */
 function ensureQuickRaceState(): GameState {
@@ -159,6 +161,25 @@ export class TitleScene implements Scene {
     };
     btnY += btnH + btnGap;
 
+    const timeTrialBtn: ButtonDef = {
+      x: btnX,
+      y: btnY,
+      w: btnW,
+      h: btnH,
+      label: 'Time Trial',
+      cta: false,
+      fontSize: btnFont,
+      onClick: () => {
+        const state = ensureQuickRaceState();
+        if (state.roster.length < 1) {
+          this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
+          return;
+        }
+        launchRace(makeTimeTrialConfig(state, 'track', 'title'), this.toasts);
+      },
+    };
+    btnY += btnH + btnGap;
+
     const continueBtn: ButtonDef = {
       x: btnX,
       y: btnY,
@@ -233,12 +254,14 @@ export class TitleScene implements Scene {
     };
 
     drawButton(ctx, quickRaceBtn, ui);
+    drawButton(ctx, timeTrialBtn, ui);
     drawButton(ctx, continueBtn, ui);
     drawButton(ctx, newGameBtn, ui);
     drawButton(ctx, optionsBtn, ui);
 
     if (!this.modal.open) {
       handleButton(quickRaceBtn, ui);
+      handleButton(timeTrialBtn, ui);
       handleButton(continueBtn, ui);
       handleButton(newGameBtn, ui);
       handleButton(optionsBtn, ui);

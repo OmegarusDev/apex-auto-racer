@@ -1,7 +1,7 @@
 /** Lateral zones + tyre temp grip. */
 import { PHYSICS } from '../../data/physics';
 import type { DisciplineId } from '../../data/disciplines';
-import { getDisciplineProfile } from '../../data/disciplineProfiles';
+import { SURFACES } from '../../data/surfaces';
 import type { ZoneModifiers } from './types';
 
 /** Match the track kerb kappa gate so zones align with painted stripes. */
@@ -46,7 +46,7 @@ export function computeZoneModifiers(
   }
 
   if (absL > halfW) {
-    const drag = getDisciplineProfile(discipline).runoffDrag;
+    const drag = (SURFACES[discipline] ?? SURFACES.track!).runoffDrag;
     const onKerb =
       Math.abs(kappa) >= KERB_KAPPA_THRESHOLD &&
       absL <= halfW + PHYSICS.kerbOuterM;

@@ -71,7 +71,7 @@ export const DISCIPLINES: DisciplineDef[] = [
     name: 'Rally',
     accent: '#5ecf8e',
     accentDim: '#2f8a58',
-    muSurface: 0.6,
+    muSurface: 0.84,
     baseStats: {
       topSpeed: 35,
       acceleration: 58,

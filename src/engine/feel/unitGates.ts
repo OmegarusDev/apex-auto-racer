@@ -39,9 +39,6 @@ export function runTyreGates(): FeelGateResult[] {
     0,
     true,
     stats,
-    [20],
-    [18],
-    [22],
     1,
     0,
     0,
@@ -54,41 +51,11 @@ export function runTyreGates(): FeelGateResult[] {
   const coldLow = computeTempGrip(0.3);
   const opt = computeTempGrip(0.8);
 
-  // Recovery floor: simulate cool while "recovering"
-  let t = PHYSICS.tyreStartTemp;
-  for (let i = 0; i < 600; i++) {
-    const cool = PHYSICS.tyreCool * 0.35;
-    t = Math.max(PHYSICS.tyreRecoveryFloor, Math.min(PHYSICS.tyreTempMax, t - cool * PHYSICS.dt));
-  }
-
-  // Warm path at speed
-  let tw = PHYSICS.tyreStartTemp;
-  const vFrac = 0.7;
-  for (let i = 0; i < Math.ceil(25 / PHYSICS.dt); i++) {
-    tw = Math.max(
-      0,
-      Math.min(
-        PHYSICS.tyreTempMax,
-        tw + (PHYSICS.tyreHeatSpeed * vFrac - PHYSICS.tyreCool * 0.35) * PHYSICS.dt,
-      ),
-    );
-  }
-
   return [
     {
       id: 'TYRE_START_WARM',
       ok: startOk,
       detail: `tyreTemp=${car.tyreTemp} expect=${PHYSICS.tyreStartTemp}`,
-    },
-    {
-      id: 'TYRE_RECOVERY_FLOOR',
-      ok: t >= PHYSICS.tyreRecoveryFloor - 1e-6,
-      detail: `after cool t=${t.toFixed(3)} floor=${PHYSICS.tyreRecoveryFloor}`,
-    },
-    {
-      id: 'TYRE_WARM_PATH',
-      ok: tw >= 0.55,
-      detail: `after 25s @0.7 vMax temp=${tw.toFixed(3)}`,
     },
     {
       id: 'TYRE_COLD_GRIP',

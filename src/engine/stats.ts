@@ -56,8 +56,11 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
   const { topSpeed, acceleration, braking, grip, downforce } = display;
 
   const vMax = 30 + 0.4 * topSpeed;
-  const aAccel = 5 + 0.1 * acceleration;
-  const aBrake = 12 + 0.18 * braking;
+  // Acceleration must sit UNDER cornering grip or the pitch transfer unloads
+  // the front and the car cannot corner while accelerating (real-car: no magnet
+  // holds the line). Starter ≈ 0.6g, elite ≈ 0.87g.
+  const aAccel = 3 + 0.06 * acceleration;
+  const aBrake = 9 + 0.15 * braking;
   const gripFactor = 0.75 + 0.005 * grip;
   const D = 0.006 * downforce;
 

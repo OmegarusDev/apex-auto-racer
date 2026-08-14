@@ -37,6 +37,8 @@ import { rebuildStandings } from './race/standings';
 import { arcGap, nodeScratch } from './race/trackMath';
 import type { RaceCarEntry } from './race/types';
 
+export type SessionKind = 'race' | 'timeTrial' | 'sprint';
+
 export interface RaceConfig {
   discipline: DisciplineId;
   trackSeed: number;
@@ -53,6 +55,13 @@ export interface RaceConfig {
   archetypeHint?: ArchetypeId;
   /** Quick Race pace-band scale; tournament / feel harnesses omit (1.0). */
   trackScale?: TrackScaleOpts;
+  /** Session structure: circuit race (default), single-car time trial, or a
+   *  point-to-point sprint that finishes at sprintFinishS (no laps). */
+  session?: SessionKind;
+  /** Sprint finish line (arc length, m) — only for session === 'sprint'. */
+  sprintFinishS?: number;
+  /** Sprint finish as a fraction of the generated loop (default 0.5). */
+  sprintFinishFrac?: number;
 }
 
 export interface PedalTraceSample {
@@ -85,6 +94,8 @@ export interface StandingEntry {
   distance: number;
   finished: boolean;
   finishTime: number;
+  /** Marshal/recovery time penalty (s) folded into finishTime. */
+  penaltySec: number;
   isPlayerControlled: boolean;
 }
 
@@ -101,6 +112,8 @@ export interface CarFinishEntry {
   teamId: number;
   position: number;
   finishTime: number;
+  /** Marshal/recovery time penalty (s) folded into finishTime. */
+  penaltySec: number;
   finished: boolean;
 }
 
@@ -129,6 +142,19 @@ export class RaceDirector {
   readonly rain: boolean;
   /** Visual-only session mood — does not touch µ / modifiers. */
   readonly night: boolean;
+  /** Session structure: circuit race, single-car time trial, or sprint. */
+  readonly session: SessionKind;
+  /** Sprint finish line arc length (m); 0 for non-sprint sessions. */
+  readonly sprintFinishS: number;
+  /** Sprint progress 0..1 for the HUD — distance past the START line toward
+   *  the finish. A car on the grid (just behind s=0, i.e. s≈L-δ) reads ~0. */
+  get sprintProgress(): number {
+    if (this.session !== 'sprint') return 0;
+    const p = this.carsView.find((c) => c.isPlayerControlled);
+    if (p === undefined) return 0;
+    const dist = p.s <= this.sprintFinishS ? p.s : p.s - this.track.length;
+    return Math.min(1, Math.max(0, dist / Math.max(1, this.sprintFinishS)));
+  }
 
   private entries: RaceCarEntry[] = [];
   private drivers: Driver[] = [];
@@ -186,6 +212,18 @@ export class RaceDirector {
       config.archetypeHint,
       config.trackScale,
     );
+    // A sprint races a single pass of the (elongated, doubled) loop: finish at
+    // sprintFinishS, which the launcher picks as a fraction of the loop.
+    this.session = config.session ?? 'race';
+    this.sprintFinishS =
+      this.session === 'sprint'
+        ? this.track.length * (config.sprintFinishFrac ?? 0.5)
+        : 0;
+    if (this.session === 'sprint') {
+      // Tell the renderer where the point-to-point ribbon ends (the loop's
+      // return half is never drawn).
+      this.track.sprintFinishS = this.sprintFinishS;
+    }
     this.globalRainStack = buildRainStack(this.rain);
     this.muSurface = getDiscipline(config.discipline).muSurface;
     if (this.rain) {
@@ -380,7 +418,6 @@ export class RaceDirector {
       config: this.config,
       track: this.track,
       rng: this.rng,
-      muSurface: this.muSurface,
       globalRainStack: this.globalRainStack,
     });
     this.drivers = field.drivers;
@@ -609,6 +646,7 @@ export class RaceDirector {
       rivals: buildRivals(idx, this.entries, this.track.length),
       draft: entry.draft,
       rain: this.rain,
+      muSurface: this.muSurface,
       raceTime: this.raceTime,
       isFinalLap: entry.car.lap >= this.config.laps - 1,
       isLeading: position === 1,
@@ -640,6 +678,26 @@ export class RaceDirector {
 
   private handleLapCrossing(entry: RaceCarEntry): void {
     const car = entry.car;
+    if (car.finished) return;
+
+    // Sprint: a single pass to the finish line — no laps, no wrap. The car
+    // launches from the grid just before s=0 and crosses sprintFinishS once.
+    if (this.session === 'sprint') {
+      const line = this.sprintFinishS;
+      const crossed =
+        car.v > 0.5 && entry.prevS <= line - 0.5 && car.s >= line - 0.5;
+      if (!crossed) return;
+      car.finished = true;
+      car.finishTime = this.raceTime;
+      car.lap = 1;
+      this.pushEvent('finish', car, entry.driver.name, 'sprint');
+      if (!this.finishWindowOpen) {
+        this.finishWindowOpen = true;
+        this.finishWindowRemaining = this.computeFinishWindow();
+      }
+      return;
+    }
+
     if (car.lap >= this.config.laps) return;
 
     const line = this.track.length;
@@ -685,11 +743,12 @@ export class RaceDirector {
    * Normal races end earlier via allDone once everyone crosses.
    */
   private computeFinishWindow(): number {
-    const line = this.track.length;
+    const line = this.session === 'sprint' ? this.sprintFinishS : this.track.length;
     let worst = 0;
     for (const entry of this.entries) {
       if (entry.car.finished) continue;
-      const toLine = (line - entry.car.s) % line;
+      const toLine =
+        this.session === 'sprint' ? line - entry.car.s : (line - entry.car.s) % line;
       const pace = Math.max(entry.car.v, BALANCE.finishWindowMinPace);
       const need = toLine / pace;
       if (need > worst) worst = need;
@@ -833,7 +892,9 @@ export class RaceDirector {
       driverName: s.driverName,
       teamId: s.teamId,
       position: idx + 1,
-      finishTime: s.finishTime,
+      // Marshal recoveries cost real time — fold the penalty into the finish.
+      finishTime: s.finishTime + s.penaltySec,
+      penaltySec: s.penaltySec,
       finished: s.finished,
     }));
 

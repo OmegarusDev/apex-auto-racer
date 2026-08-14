@@ -31,7 +31,6 @@ export const PHYSICS = {
   kerbGrip: 0.95,
   runoffGrip: 0.5,
   runoffDrag: 3,
-  runoffDragRally: 4,
   /**
    * Car-center inset from the painted barrier (outer edge at W/2+R).
    * Equals half carWidth so the body edge meets the visible wall/kerb rim —
@@ -56,20 +55,16 @@ export const PHYSICS = {
   /** Street discipline: harder wall stun (discipline mult — not a groove base retune). */
   streetWallStunMult: 1.45,
   scrapeSpeedMultPerSec: 0.55,
+  /** Rail deflection — how hard the wall steers a scraping car back on-track (m/s²). */
+  scrapePeelAccel: 4.5,
   /** Fraction of inbound lateral velocity reflected on wall contact. */
   wallRestitution: 0.18,
   /** Extra long decel (m/s²) while recovering from a wall hit. */
-  crashRecoveryDecel: 5.5,
   /** Softer recovery decel while deslotted (let cars crawl off the wall). */
-  crashRecoveryDecelDeslot: 2.2,
   /** Longitudinal scrub (m/s²) scale from wall impact severity. */
-  wallImpactScrub: 10,
   /** Minimum roll factor for deslot steer-home (stranded cars can still crawl). */
-  deslotSteerMinRoll: 0.38,
   /** Soft inward nudge (m/s²) when stuck on the wall while deslotted. */
-  deslotWallPush: 4.5,
   /** Seconds of raw (undelayed) brain output after rejoining the groove. */
-  recoveryBrainSec: 0.85,
 
   // --- Scalextric groove / deslot ---
   /** |kappa| below this is treated as a straight — no deslot at any throttle. */
@@ -79,69 +74,41 @@ export const PHYSICS = {
    * magnet = roll(v) × (1 − loadKill×longLoad) × (1 − cornerKill×cornerLoad)
    * aLat = spring×magnet×err − damp×dl; |dl| ≤ maxDlPerV×v
    */
-  grooveSpring: 18,
-  grooveDamp: 7.5,
   /** How hard accel/brake kills magnet (0–1 scale on |aLongDemand|/aGrip). */
-  grooveLoadKill: 0.72,
   /** How hard corner load (aLat/aGrip) kills magnet. */
-  grooveCornerKill: 0.55,
   /** Below this forward speed (m/s), magnet is fully off. */
-  grooveLatMinV: 1.2,
   /** Forward speed (m/s) at which roll(v) reaches full strength. */
-  grooveLatFullV: 10,
   /** Max |dl| as a fraction of forward speed (no sideways teleport). */
-  grooveMaxDlPerV: 0.38,
   /** Scales Focus/condition line noise while in groove. */
-  grooveWobbleScale: 0.32,
   /**
    * Off-slot lateral model (Frenet):
    *   a_excess = max(0, v²|κ| − a_lat_cap)  → outward accel
    *   spare grip steers back toward o(s); no fixed eject / spring shove.
    */
   /** Viscous damping on lateral velocity while deslotted (1/s). */
-  deslotLatDamp: 1.05,
   /** Gain (1/s²) converting line error into steer accel when grip remains. */
-  deslotSteerGain: 3.8,
   /** Fraction of spare (a_cap − a_req) usable to steer back to the line. */
-  deslotSteerFrac: 0.75,
   /** Long scrub (m/s²) per unit excess lateral accel while sliding. */
-  deslotScrubGain: 0.45,
   /** Cap on deslot scrub in g. */
-  deslotScrubMaxG: 1.05,
   /** Small release impulse (m/s) when the peg pops — scales with overspeed. */
-  deslotReleaseImpulse: 2.8,
   /** Minimum off-slot time before rejoin is allowed. */
-  deslotMinTime: 0.7,
   /** Must be this close (m) to the personal line to re-slot. */
-  deslotRejoinL: 1.35,
   /** Must be under this × v_deslot to re-slot. */
-  deslotRejoinVFrac: 0.78,
   /** Immunity after rejoin so cars don't chatter deslot/reslot. */
-  deslotRejoinImmunity: 1.2,
   /** Cosmetic slip cap while deslotted (not a spin path). */
-  deslotSlipMax: 0.28,
   /**
    * v_deslot = v_safe * mDriver * mCar.
    * Skill: rookies ~42% of v_safe; elites approach ~100%.
    * Stock careers must lift in corners — not a soft nanny.
    */
-  deslotSkillBase: 0.45,
-  deslotSkillSpan: 0.55,
   /** Focus widens the hold window (cleaner peg). Low Focus slips early. */
-  deslotFocusBase: 0.84,
-  deslotFocusSpan: 0.16,
   /**
    * Bravery rides closer to the slot limit (multiplies mDriver).
    * Low bravery leaves margin; high bravery risks deslot for pace.
    */
-  deslotBraveryBase: 0.87,
-  deslotBraverySpan: 0.15,
 
   // --- Spin demoted: rare wall smash / extreme abuse only ---
   /** Wall impact above this speed while deslotted can tumble. */
-  spinWallSpeed: 28,
-  spinAngle: 1.45,
-  spinDecelTime: 0.55,
   spinStun: 1.0,
 
   /**
@@ -154,15 +121,10 @@ export const PHYSICS = {
   tyreHotGrip: 0.94,
   tyreHeatSpeed: 0.045,
   tyreHeatOver: 0.12,
-  tyreHeatDrift: 0.08,
   tyreCool: 0.0025,
   /** Floor while moving / recovering — prevents ice-cold restart after a crash. */
   tyreRecoveryFloor: 0.28,
-  loadTransferTau: 0.3,
-  loadTransferScale: 10,
   /** Cosmetic slip decay while in groove (not a free-yaw model). */
-  slipDecay: 8.0,
-  coastBase: 0.5,
   coastVel: 0.02,
   /** Slipstream top-speed bonus at full draft (aligned, straight). */
   draftSpeedBonus: 0.14,
@@ -172,8 +134,6 @@ export const PHYSICS = {
   draftCornerKappa: 0.02,
   /** Determination multiplies draft harvest when mid/back of pack. */
   draftDetBonus: 0.45,
-  reactionBase: 0.1,
-  reactionFocusSpan: 0.7,
   /** Low Focus mistakes accumulate — high Focus stays clean. */
   mistakeBasePerSec: 0.055,
   mistakeBrakeSuppress: 0.28,
@@ -189,7 +149,6 @@ export const PHYSICS = {
   brakeAuthoritySpan: -0.16,
   throttleAuthorityBase: 0.08,
   throttleAuthoritySpan: 0.75,
-  horizonSec: 8,
   /** Mild launch caution — cold adhesion already lowers v_deslot. */
   aiLaunchSec: 1.6,
   /**
@@ -200,23 +159,21 @@ export const PHYSICS = {
   /** Fraction of gridHoldSec spent on pure grid L before blending to personal line. */
   gridHoldPureFrac: 0.62,
   /** Groove spring multiplier during gridHoldSec (soft pack-clear after GO). */
-  gridFollowGainMult: 0.28,
   /** Cap on |dl| (m/s) during grid hold — prevents sideways teleport. */
-  gridMaxDl: 2.2,
   /** Minimum AI throttle while clearing the grid (avoids reaction-queue stalls). */
-  aiLaunchMinThrottle: 0.68,
   detBonus: 0.12,
+  /** Yaw damping (1/s) — the tyre self-aligning moments that stop the bicycle model's yaw from oscillating/running away. */
+  yawDamping: 1.3,
   cameraPosRate: 6,
   cameraZoomRate: 3,
   zoomMin: 0.48,
   zoomMax: 0.88,
   lineNoiseBase: 0.8,
-  maxBakeRes: 2048,
   sampleDs: 2,
   racingLineIters: 400,
   racingLineGain: 0.1,
   racingLineMargin: 1.5,
-  minCornerRadius: 18,
+  minCornerRadius: 28,
   maxGenAttempts: 20,
   baseRadiusMin: 140,
   baseRadiusMax: 260,

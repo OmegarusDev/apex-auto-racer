@@ -22,11 +22,11 @@ export function rebuildStandings(
   entries: RaceCarEntry[],
   trackLength: number,
 ): StandingsRebuild {
-  // Finishers rank by finishTime; everyone else by race distance.
+  // Finishers rank by finishTime + marshal penalty; everyone else by distance.
   // (Finished cars still roll — distance sort alone inverted true results.)
   const sorted = [...entries].sort((a, b) => {
     if (a.car.finished && b.car.finished) {
-      return a.car.finishTime - b.car.finishTime;
+      return a.car.finishTime + a.car.penaltySec - (b.car.finishTime + b.car.penaltySec);
     }
     if (a.car.finished !== b.car.finished) {
       return a.car.finished ? -1 : 1;
@@ -45,6 +45,7 @@ export function rebuildStandings(
     distance: raceDistance(entry.car, trackLength),
     finished: entry.car.finished,
     finishTime: entry.car.finishTime,
+    penaltySec: entry.car.penaltySec,
     isPlayerControlled: entry.car.isPlayerControlled,
   }));
 

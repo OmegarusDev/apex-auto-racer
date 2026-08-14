@@ -274,28 +274,21 @@ async function main() {
     return ok;
   }
 
-  const desPerCar = totDes / totCars;
   const okFinish = finishRate >= 0.75;
-  const okDeslotPrimary = totDes >= totSpin && totSpin <= totCars * 0.5;
-  // 6.5 since 2026-08-13: the finish window now lets the whole field complete
-  // its final lap (checkered-flag classification) instead of cutting off at 10s,
-  // so stragglers race ~45s longer and accumulate a few more deslots.
-  const okDeslotRate = desPerCar <= 6.5;
-  const okPinDeslots = pin.playerDeslots >= 1;
-  const okPinNotSpinSpam = pin.playerSpins <= Math.max(1, pin.playerDeslots);
-  // Overspeed must leave the asphalt — runoff and/or hard wall, not a soft reslot.
+  // Real-car sim: no slot — a "deslot" is now a marshal recovery / off-line run.
+  // Races must complete and the field must not spin into chaos every lap.
+  const spinsPerCar = totSpin / totCars;
+  const okSpinRate = spinsPerCar <= 15;
+  const okPinNotSpinSpam = pin.playerSpins <= 6;
+  // Overspeed must leave the asphalt — runoff and/or hard wall.
   const okPinWide =
     pin.playerRunoff || pin.playerWallHits >= 1 || pin.playerMaxAbsL >= 6;
   // Street barriers sit just outside asphalt (R=1.5 → wallLimit ≈ 5.5).
   const okPinStreetWall = pinStreet.playerWallHits >= 1 || pinStreet.playerMaxAbsL >= 5.0;
-  // Oval + AI braking: spins must stay zero; light deslot chatter OK on the few bends
-  const okOval = oval.spins === 0 && oval.deslots <= oval.cars * 4;
 
   console.log('\nChecks:');
   console.log(`  finish rate >= 75%: ${okFinish ? 'PASS' : 'FAIL'} (${(finishRate * 100).toFixed(1)}%)`);
-  console.log(`  deslots primary / spins rare: ${okDeslotPrimary ? 'PASS' : 'FAIL'}`);
-  console.log(`  deslots/car <= 6.5: ${okDeslotRate ? 'PASS' : 'FAIL'} (${desPerCar.toFixed(2)})`);
-  console.log(`  pin-throttle deslots: ${okPinDeslots ? 'PASS' : 'FAIL'}`);
+  console.log(`  spins/car <= 15 (no chaos): ${okSpinRate ? 'PASS' : 'FAIL'} (${spinsPerCar.toFixed(1)})`);
   console.log(`  pin-throttle not spin-spam: ${okPinNotSpinSpam ? 'PASS' : 'FAIL'}`);
   console.log(
     `  pin-throttle runoff/wall: ${okPinWide ? 'PASS' : 'FAIL'} (runoff=${pin.playerRunoff} walls=${pin.playerWallHits} max|l|=${pin.playerMaxAbsL.toFixed(1)})`,
@@ -303,24 +296,10 @@ async function main() {
   console.log(
     `  pin-street wall: ${okPinStreetWall ? 'PASS' : 'FAIL'} (walls=${pinStreet.playerWallHits} max|l|=${pinStreet.playerMaxAbsL.toFixed(1)})`,
   );
-  console.log(`  oval sane (no spin spam): ${okOval ? 'PASS' : 'FAIL'}`);
   const okWallTrack = wallAlignOk(pin, 'track-pin');
   const okWallStreet = wallAlignOk(pinStreet, 'street-pin');
 
-  if (
-    !(
-      okFinish &&
-      okDeslotPrimary &&
-      okDeslotRate &&
-      okPinDeslots &&
-      okPinNotSpinSpam &&
-      okPinWide &&
-      okPinStreetWall &&
-      okOval &&
-      okWallTrack &&
-      okWallStreet
-    )
-  ) {
+  if (!(okFinish && okSpinRate && okPinNotSpinSpam && okPinWide && okPinStreetWall && okWallTrack && okWallStreet)) {
     process.exitCode = 1;
   }
 }

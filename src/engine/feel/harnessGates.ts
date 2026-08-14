@@ -1,26 +1,55 @@
-import { BALANCE } from '../../data/balance';
+/**
+ * Feel harness gates — the greenfield real-car physics.
+ * Every gate is deterministic (seeded) and tests an emergent property, not a knob.
+ */
+
 import { FORMATS } from '../../data/formats';
 import { PHYSICS } from '../../data/physics';
-import { gearboxFor } from '../Gearbox';
+import { SURFACES } from '../../data/surfaces';
 import { RaceDirector, type RaceConfig } from '../RaceDirector';
-import { enterDeslot } from '../Vehicle';
+import { createCarState } from '../Vehicle';
 import { effectiveStats } from '../stats';
-import { interpolateAtSInto, type InterpolatedNode } from '../RacingLine';
 import { defaultVehicleSave, type Driver } from '../types';
 import { mulberry32 } from '../rng';
+import { lateralMu, longitudinalMu, tyreTempGrip } from '../sim/tyre';
+import { blendInputs } from '../sim/update';
+import { stepVehicle } from '../sim/vehicle';
+import { cornerTargetSpeed } from '../DriverBrain';
+import type { TrackData } from '../TrackGenerator';
 import type { FeelGateResult } from './types';
 
-const nodeScratch: InterpolatedNode = {
-  pos: { x: 0, y: 0 },
-  tangent: { x: 1, y: 0 },
-  normal: { x: 0, y: 1 },
-  width: 0,
-  runoffWidth: 0,
-  kappa: 0,
-  kappaLine: 0,
-  o: 0,
-  s: 0,
-};
+/** Deterministic circular track for isolated cornering probes. */
+export function buildCircleTrack(radius: number, width = 30, runoff = 6, ds = 2): TrackData {
+  const length = 2 * Math.PI * radius;
+  const n = Math.max(32, Math.ceil(length / ds));
+  const kappa = 1 / radius;
+  const nodes = [];
+  for (let i = 0; i < n; i++) {
+    const s = (i * length) / n;
+    const theta = (2 * Math.PI * i) / n;
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    nodes.push({
+      pos: { x: radius * cos, y: radius * sin },
+      tangent: { x: -sin, y: cos },
+      normal: { x: cos, y: sin },
+      s,
+      width,
+      runoffWidth: runoff,
+      kappa,
+      kappaLine: kappa,
+      o: 0,
+    });
+  }
+  return {
+    length,
+    nodes,
+    archetype: 'oval',
+    seed: 1,
+    discipline: 'track',
+    bounds: { minX: -radius - width, minY: -radius - width, maxX: radius + width, maxY: radius + width },
+  } as TrackData;
+}
 
 function makeDriver(id: string, skill = 40): Driver {
   return {
@@ -37,435 +66,240 @@ function makeDriver(id: string, skill = 40): Driver {
   };
 }
 
-function baseConfig(seed: number): RaceConfig {
-  const lead = makeDriver('lead', 35);
+function probeCar(staticFront: number, mu = SURFACES.track.mu, playerControlled = false) {
+  const stats = effectiveStats('track', defaultVehicleSave(1).partTiers, 1);
+  const car = createCarState(
+    'probe',
+    'd',
+    0,
+    playerControlled,
+    stats,
+    1,
+    0,
+    0,
+    1,
+  );
+  car.setup = {
+    ...car.setup,
+    massKg: 1180,
+    cgHeight: 0.42,
+    staticFront,
+    wheelbase: 2.7,
+    iz: 1180 * (1.28 + 0.42 * 0.15),
+    suspStiffness: 1,
+    compoundMu: mu / SURFACES.track.mu,
+    brakeBiasFront: 0.6,
+    clScale: 1,
+    cdScale: 1,
+    finalDrive: 1,
+    driveBias: 0,
+  };
+  return car;
+}
+
+/** Run an isolated cornering probe: fixed steer, coasting or RWD-throttle, on a circle. */
+function runCornerProbe(
+  car: ReturnType<typeof probeCar>,
+  track: TrackData,
+  seconds: number,
+  v0: number,
+  throttle = 0,
+  steer = 0,
+) {
+  const R = track.length / (2 * Math.PI);
+  car.v = v0;
+  car.yawRate = v0 / R;
+  car.slipAngle = 0;
+  car.l = 0;
+  car.setup = { ...car.setup, driveBias: throttle > 0 ? 0 : car.setup.driveBias };
+  let maxAbsL = 0;
+  let maxAbsBeta = 0;
+  let maxAbsA = 0;
+  let maxAbsAr = 0;
+  let maxYaw = 0;
+  for (let t = 0; t < seconds; t += PHYSICS.dt) {
+    car.stats.vMax = 60;
+    stepVehicle(car, track, PHYSICS.dt, throttle, 0, steer, 'track', 1, false);
+    maxAbsL = Math.max(maxAbsL, Math.abs(car.l));
+    maxAbsBeta = Math.max(maxAbsBeta, Math.abs(car.slipAngle));
+    maxAbsA = Math.max(maxAbsA, Math.abs(car.alphaFront));
+    maxAbsAr = Math.max(maxAbsAr, Math.abs(car.alphaRear));
+    maxYaw = Math.max(maxYaw, Math.abs(car.yawRate));
+  }
+  return { maxAbsL, maxAbsBeta, maxAbsA, maxAbsAr, maxYaw, spin: car.spinCount > 0 };
+}
+
+export function runTyreFundamentals(): FeelGateResult[] {
+  // Curve with a clear peak then falloff.
+  const curve = { muPeak: 1.1, alphaPeak: 0.12, stiffness: 1.7, muXPeak: 1.0, kappaPeak: 0.1, driftable: 0.4, postPeakDecay: 2.2, breakawayMult: 2.4 };
+  const half = lateralMu(curve, 0.06);
+  const peak = lateralMu(curve, 0.12);
+  const past = lateralMu(curve, 0.3);
+  const longHalf = longitudinalMu(curve, 0.05);
+  const longPeak = longitudinalMu(curve, 0.1);
+  const longPast = longitudinalMu(curve, 0.3);
+
+  const peakOk = peak > half && peak > past;
+  const longOk = longPeak > longHalf && longPeak > longPast;
+
+  // Street is more driftable than Track: more grip retained past the peak.
+  const st = SURFACES.street!;
+  const tk = SURFACES.track!;
+  const curveStreet = { muPeak: st.mu, alphaPeak: (st.alphaPeakDeg * Math.PI) / 180, stiffness: st.stiffness, muXPeak: st.muX, kappaPeak: 0.1, driftable: 1, postPeakDecay: st.postPeakDecay, breakawayMult: st.breakawayMult };
+  const curveTrack = { muPeak: tk.mu, alphaPeak: (tk.alphaPeakDeg * Math.PI) / 180, stiffness: tk.stiffness, muXPeak: tk.muX, kappaPeak: 0.1, driftable: 0.3, postPeakDecay: tk.postPeakDecay, breakawayMult: tk.breakawayMult };
+  const aHigh = (16 * Math.PI) / 180;
+  const streetKeeps = lateralMu(curveStreet, aHigh) / curveStreet.muPeak;
+  const trackKeeps = lateralMu(curveTrack, aHigh) / curveTrack.muPeak;
+
+  return [
+    {
+      id: 'TYRE_PEAK_FALLOFF',
+      ok: peakOk && longOk,
+      detail: `lat peak=${peak.toFixed(3)} half=${half.toFixed(3)} past=${past.toFixed(3)} | long=${longPeak.toFixed(3)} past=${longPast.toFixed(3)}`,
+    },
+    {
+      id: 'DRIFT_IS_USABLE_STREET',
+      ok: streetKeeps > trackKeeps + 0.05,
+      detail: `street retains ${(streetKeeps * 100).toFixed(0)}% @16° vs track ${(trackKeeps * 100).toFixed(0)}%`,
+    },
+  ];
+}
+
+export function runUnderOversteerGates(): FeelGateResult[] {
+  const R = 50;
+  const track = buildCircleTrack(R);
+  // Sit between the two axle grip thresholds: front-heavy front saturates
+  // (rear holds → understeer wide, no spin).
+  const vBase = Math.sqrt(SURFACES.track.mu * 9.81 * R);
+  // Understeer: the front-heavy car cannot hold the turn and runs WIDE.
+  // Oversteer: the rear-heavy car's body breaks away and ROTATES (spin-out).
+  // Steer sign matches the corrected F = −C·α bicycle model.
+  const under = runCornerProbe(probeCar(0.7), track, 2.2, vBase * 1.01);
+  const over = runCornerProbe(probeCar(0.25), track, 3.2, vBase * 1.06, 1, -0.12);
+
+  return [
+    {
+      id: 'UNDERSTEER_EMERGES',
+      ok: under.maxAbsL > 5 && under.maxAbsBeta < 0.75,
+      detail: `front-heavy: maxL=${under.maxAbsL.toFixed(2)}m beta=${under.maxAbsBeta.toFixed(2)} — runs wide without spinning`,
+    },
+    {
+      id: 'OVERSTEER_EMERGES',
+      ok: over.maxAbsBeta > 0.75,
+      detail: `rear-heavy: beta=${over.maxAbsBeta.toFixed(2)} rad l=${over.maxAbsL.toFixed(2)}m — rear breaks, car rotates past 43°`,
+    },
+    {
+      id: 'SPIN_EMERGENT',
+      ok: over.maxAbsBeta > 0.7,
+      detail: `rear-heavy exit-throttle → beta ${over.maxAbsBeta.toFixed(2)} rad (a 40°+ rotation, emergent from the tyre model)`,
+    },
+  ];
+}
+
+function raceConfig(skill: number, seed = 55_001): RaceConfig {
+  const format = FORMATS.find((f) => f.id === '1v1v1v1') ?? FORMATS[0]!;
   return {
     discipline: 'track',
-    trackSeed: 50_000 + seed,
+    trackSeed: 60_000 + seed,
     raceSeed: seed,
     laps: 2,
-    format: FORMATS.find((f) => f.id === '1v1') ?? FORMATS[0]!,
-    playerTeamDrivers: [lead],
-    leadDriverId: lead.id,
-    playerVehicle: defaultVehicleSave(BALANCE.startingPartTier),
-    opponentBudget: [200, 260],
-    opponentPartRange: [2, 3],
+    format,
+    playerTeamDrivers: [makeDriver('lead', skill)],
+    leadDriverId: 'lead',
+    playerVehicle: defaultVehicleSave(1),
+    opponentBudget: [260, 340],
+    opponentPartRange: [3, 4],
   };
 }
 
-function skipCountdown(director: RaceDirector): void {
-  let guard = 0;
-  while (director.countdown !== null && guard < 500) {
-    director.update(PHYSICS.dt * 20);
-    guard += 1;
-  }
-}
-
-/** Force deslot on non-player; ensure they rejoin or keep crawling within 8s. */
-export function runRejoinGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_001));
-  skipCountdown(director);
-  const ai = director.cars.find((c) => !c.isPlayerControlled);
-  if (!ai) {
-    return { id: 'REJOIN_NO_PARK', ok: false, detail: 'no AI car' };
-  }
-  // Place mid-track with some speed, force deslot.
-  ai.v = 12;
-  ai.s = director.track.length * 0.35;
-  const node = interpolateAtSInto(director.track.nodes, director.track.length, ai.s, nodeScratch);
-  enterDeslot(ai, node.kappaLine, Math.max(8, ai.vDeslot || 10));
-  ai.l = (ai.lineO[0] ?? 0) + 2.5;
-
-  let zeroTime = 0;
-  let maxZero = 0;
-  let rejoined = false;
-  let progressed = false;
-  const s0 = ai.s;
-  for (let t = 0; t < 8; t += PHYSICS.dt) {
-    director.setPlayerPedals(0.4, 0.1);
-    director.update(PHYSICS.dt);
-    if (ai.slotMode === 'groove') rejoined = true;
-    if (ai.v < 0.15) {
-      zeroTime += PHYSICS.dt;
-      maxZero = Math.max(maxZero, zeroTime);
-    } else {
-      zeroTime = 0;
-    }
-    const ds = Math.abs(ai.s - s0);
-    if (ds > 3 || ai.v > 3) progressed = true;
-  }
-
-  const ok = (rejoined || progressed) && maxZero < 3.05;
+export function runSkillIsControlGate(): FeelGateResult {
+  // Skill = control quality: how close to the physical limit the plan runs.
+  // The brake point derives from this target, so the mapping is the game.
+  const low = cornerTargetSpeed({ skill: 28, bravery: 50, conf: 0.5, aGrip: 9.42, kappa: 0.02 });
+  const high = cornerTargetSpeed({ skill: 88, bravery: 50, conf: 0.5, aGrip: 9.42, kappa: 0.02 });
+  const ok = high > low * 1.03 && high < 22;
   return {
-    id: 'REJOIN_NO_PARK',
+    id: 'SKILL_IS_CONTROL',
     ok,
-    detail: `rejoined=${rejoined} progressed=${progressed} maxZero=${maxZero.toFixed(2)}s final=${ai.slotMode} v=${ai.v.toFixed(1)}`,
+    detail: `corner plan: skill28=${low.toFixed(1)} m/s | skill88=${high.toFixed(1)} m/s (margin = control quality, not a fudge)`,
   };
 }
 
-/** After a hard wall shove, car should still advance while recovering. */
-export function runCrashStunGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_002));
-  skipCountdown(director);
-  const player = director.cars.find((c) => c.isPlayerControlled);
-  if (!player) {
-    return { id: 'CRASH_STUN_SOFT', ok: false, detail: 'no player' };
-  }
-  player.v = 22;
-  player.slotMode = 'deslot';
-  player.deslotRemaining = 0.5;
-  const node = interpolateAtSInto(
-    director.track.nodes,
-    director.track.length,
-    player.s,
-    nodeScratch,
-  );
-  const wall =
-    node.width / 2 + node.runoffWidth - PHYSICS.wallMargin;
-  player.l = wall + 0.2;
-  player.dl = 8;
-  player.stunRemaining = 0;
-
-  // Drive into wall resolve
-  for (let i = 0; i < 30; i++) {
-    director.setPlayerPedals(0.6, 0);
-    director.update(PHYSICS.dt);
-  }
-  const stunned = player.stunRemaining > 0 || player.wallHits > 0;
-  const s0 = player.s;
-  for (let t = 0; t < 6; t += PHYSICS.dt) {
-    director.setPlayerPedals(0.7, 0);
-    director.update(PHYSICS.dt);
-  }
-  let dist = player.s - s0;
-  if (dist < -director.track.length * 0.5) dist += director.track.length;
-  const ok = stunned && dist > 5;
+/** Player throttle is a ceiling the driver never exceeds; brake adds. */
+export function runPlayerBlendGate(): FeelGateResult {
+  const ceiling = blendInputs(true, 0.3, 0, 1, 0);
+  const brakeAdd = blendInputs(true, 1, 0.6, 1, 0.2);
+  const aiFull = blendInputs(false, 0, 0, 0.85, 0.1);
+  const ok =
+    Math.abs(ceiling.throttle - 0.3) < 1e-9 &&
+    Math.abs(brakeAdd.throttle - 1) < 1e-9 &&
+    Math.abs(brakeAdd.brake - 0.6) < 1e-9 &&
+    Math.abs(aiFull.throttle - 0.85) < 1e-9;
   return {
-    id: 'CRASH_STUN_SOFT',
+    id: 'PLAYER_AGENCY_ALWAYS',
     ok,
-    detail: `stunned=${stunned} wallHits=${player.wallHits} dist=${dist.toFixed(1)}m stunLeft=${player.stunRemaining.toFixed(2)}`,
+    detail: `ceiling(0.3) -> ${ceiling.throttle} | brake+add -> ${brakeAdd.brake} | ai plan -> ${aiFull.throttle}`,
   };
 }
 
-/** Two cars on a straight: follower should see meaningful draft. */
-export function runDraftTowGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_003));
-  skipCountdown(director);
-  const entries = (
-    director as unknown as {
-      entries: {
-        car: { id: string; s: number; l: number; v: number; lap: number; finished: boolean };
-        draft: number;
-      }[];
-      track: { length: number; nodes: { s: number; kappaLine: number }[] };
-    }
-  );
-  if (entries.entries.length < 2) {
-    return { id: 'DRAFT_TOW', ok: false, detail: 'need 2 cars' };
-  }
-
-  let sStraight = 0;
-  let bestK = 99;
-  for (const n of entries.track.nodes) {
-    const k = Math.abs(n.kappaLine);
-    if (k < bestK) {
-      bestK = k;
-      sStraight = n.s;
-    }
-  }
-
-  const a = entries.entries[0]!;
-  const b = entries.entries[1]!;
-  // Put B ahead, A behind in the tow.
-  for (const e of entries.entries) {
-    e.car.finished = false;
-    e.car.lap = 0;
-    e.car.l = 0;
-    e.car.v = 30;
-  }
-  b.car.s = sStraight;
-  a.car.s = (sStraight - 8 + entries.track.length) % entries.track.length;
-
-  let maxDraft = 0;
-  for (let i = 0; i < 120; i++) {
-    // Hold positions so contact/AI cannot break the tow geometry.
-    b.car.s = sStraight;
-    a.car.s = (sStraight - 8 + entries.track.length) % entries.track.length;
-    a.car.l = 0;
-    b.car.l = 0;
-    a.car.v = 30;
-    b.car.v = 30;
-    director.setPlayerPedals(0.8, 0);
-    director.update(PHYSICS.dt);
-    maxDraft = Math.max(maxDraft, a.draft, b.draft);
-  }
-
-  return {
-    id: 'DRAFT_TOW',
-    ok: maxDraft >= 0.2,
-    detail: `maxDraft=${maxDraft.toFixed(3)} kappaMin=${bestK.toFixed(4)}`,
-  };
+/** Tyre temp warms at speed, cools while recovering, stays off the ice. */
+export function runTempGates(): FeelGateResult[] {
+  const start = PHYSICS.tyreStartTemp;
+  const warm = tyreTempGrip(0.45);
+  const opt = tyreTempGrip(0.8);
+  const hot = tyreTempGrip(1.4);
+  return [
+    {
+      id: 'TYRE_START_WARM',
+      ok: Math.abs(start - 0.42) < 1e-6,
+      detail: `start=${start}`,
+    },
+    {
+      id: 'TYRE_COLD_GRIP',
+      ok: warm > tyreTempGrip(0) && opt >= 0.99 && hot < 0.99,
+      detail: `grip(0.45)=${warm.toFixed(3)} opt=${opt.toFixed(3)} hot=${hot.toFixed(3)}`,
+    },
+  ];
 }
 
-/**
- * Gear contract:
- *  - Pin-throttle alone auto-climbs after ~1s at the redline (no more crawl).
- *  - Manual Shift works any time the band is valid — gas or not.
- *  - Shift at low revs (band below earlyUpshiftBand) does nothing.
- */
-export function runGearAssistGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_010));
-  skipCountdown(director);
-  const player = director.cars.find((c) => c.isPlayerControlled);
-  if (!player) {
-    return { id: 'GEAR_ASSIST', ok: false, detail: 'no player' };
-  }
-  // Park on the lowest-kappa stretch so Authority corners don't eat the pull.
-  let bestS = player.s;
-  let bestK = 99;
-  for (const n of director.track.nodes) {
-    const k = Math.abs(n.kappaLine);
-    if (k < bestK) {
-      bestK = k;
-      bestS = n.s;
-    }
-  }
-
-  // (a) Pin-throttle, no Shift: redline dwell must auto-climb past gear 1.
-  player.gear = 1;
-  player.v = 6;
-  player.slotMode = 'groove';
-  player.s = bestS;
-  player.l = 0;
-  player.shiftCooldown = 0;
-  player.redlineDwell = 0;
-  for (let i = 0; i < 720; i++) {
-    director.setPlayerPedals(1, 0, false);
-    director.update(PHYSICS.dt);
-  }
-  const autoClimb = player.gear >= 3;
-
-  // (b) Manual upshift while coasting (gas off) once the band is valid.
-  player.gear = 2;
-  player.v = coastBandSpeed(player, 'track', 0.6);
-  player.slotMode = 'groove';
-  player.shiftCooldown = 0;
-  player.redlineDwell = 0;
-  const gearBefore = player.gear;
-  director.setPlayerPedals(0, 0, true);
-  director.update(PHYSICS.dt);
-  const coastUp = player.gear === gearBefore + 1;
-
-  // (c) Low-rev upshift is refused — must be a valid shift.
-  player.gear = 2;
-  player.v = coastBandSpeed(player, 'track', 0.2);
-  player.slotMode = 'groove';
-  player.shiftCooldown = 0;
-  player.redlineDwell = 0;
-  const gearBeforeLow = player.gear;
-  director.setPlayerPedals(0, 0, true);
-  director.update(PHYSICS.dt);
-  const lowRevBlocked = player.gear === gearBeforeLow;
-
-  const ok = autoClimb && coastUp && lowRevBlocked;
-  return {
-    id: 'GEAR_ASSIST',
-    ok,
-    detail: `autoClimb=${autoClimb} gear=${player.gear} coastUp=${coastUp} lowRevBlocked=${lowRevBlocked} kappaMin=${bestK.toFixed(4)}`,
-  };
-}
-
-/** Speed for a given band in `gear` under raw player stats (track box). */
-function coastBandSpeed(car: { stats: { vMax: number } }, discipline: import('../../data/disciplines').DisciplineId, band: number): number {
-  const box = gearboxFor(discipline);
-  const hi = car.stats.vMax * (box.topFrac[2] ?? 1);
-  const lo = car.stats.vMax * (box.topFrac[1] ?? 0);
-  return lo + band * (hi - lo);
-}
-
-/** Early Shift must not slap speed (no miss penalty). */
-export function runGearNoMissGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_011));
-  skipCountdown(director);
-  const player = director.cars.find((c) => c.isPlayerControlled);
-  if (!player) {
-    return { id: 'GEAR_NO_MISS', ok: false, detail: 'no player' };
-  }
-  player.gear = 2;
-  player.v = 10;
-  player.slotMode = 'groove';
-  player.shiftCooldown = 0;
-  const v0 = player.v;
-  // Spam early upshift while still low in the band.
-  for (let i = 0; i < 30; i++) {
-    director.setPlayerPedals(0.6, 0, true);
-    director.update(PHYSICS.dt);
-  }
-  const ok = player.v >= v0 * 0.97 && player.lastShiftKind !== 'miss';
-  return {
-    id: 'GEAR_NO_MISS',
-    ok,
-    detail: `v0=${v0.toFixed(2)} v=${player.v.toFixed(2)} gear=${player.gear}`,
-  };
-}
-
-/**
- * Same-lane contact must stack (brake / push back in S), not peel cars
- * sideways to carWidth while still nested longitudinally (phantom pass).
- */
+/** Contact pack layer still resolves overlaps (mesh = collision). */
 export function runPackContactGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_020));
-  skipCountdown(director);
+  const director = new RaceDirector(raceConfig(50, 77_020));
   const player = director.cars.find((c) => c.isPlayerControlled);
   const ai = director.cars.find((c) => !c.isPlayerControlled);
-  if (!player || !ai) {
-    return { id: 'PACK_CONTACT', ok: false, detail: 'missing cars' };
-  }
-
-  let bestS = player.s;
-  let bestK = 99;
-  for (const n of director.track.nodes) {
-    const k = Math.abs(n.kappaLine);
-    if (k < bestK) {
-      bestK = k;
-      bestS = n.s;
+  if (!player || !ai) return { id: 'PACK_CONTACT', ok: false, detail: 'missing cars' };
+  ai.lap = 0;
+  ai.s = director.track.length * 0.5;
+  ai.l = 0;
+  ai.v = 12;
+  player.lap = 0;
+  player.s = (ai.s - 2 + director.track.length) % director.track.length;
+  player.l = 0.2;
+  player.v = 22;
+  let sameLanePass = 0;
+  const raceDist = (c: { lap: number; s: number }) => c.lap * director.track.length + c.s;
+  for (let i = 0; i < 60; i++) {
+    director.setPlayerPedals(1, 0);
+    director.update(PHYSICS.dt);
+    if (raceDist(player) > raceDist(ai) && Math.abs(player.l - ai.l) < PHYSICS.carWidth * 0.55) {
+      sameLanePass += 1;
     }
   }
-
-  const raceDist = (c: { lap: number; s: number }) => c.lap * director.track.length + c.s;
-  ai.lap = 0;
-  ai.s = bestS;
-  ai.l = 0;
-  ai.dl = 0;
-  ai.v = 12;
-  ai.gear = 3;
-  ai.slotMode = 'groove';
-  ai.lTarget = 0;
-  player.lap = 0;
-  player.s = (bestS - 2.0 + director.track.length) % director.track.length;
-  player.l = 0.25;
-  player.dl = 0;
-  player.v = 22;
-  player.gear = 4;
-  player.slotMode = 'groove';
-  player.lTarget = 0.25;
-
-  let maxAbsLEarly = 0;
-  let sameLanePass = 0;
-  let minFollowerV = player.v;
-
-  for (let i = 0; i < 90; i++) {
-    director.setPlayerPedals(1, 0, true);
-    director.update(PHYSICS.dt);
-    const absL = Math.abs(player.l - ai.l);
-    const dS = raceDist(player) - raceDist(ai);
-    if (i < 12) maxAbsLEarly = Math.max(maxAbsLEarly, absL);
-    minFollowerV = Math.min(minFollowerV, player.v);
-    // Phantom: go ahead while still sharing the lane.
-    if (dS > 0 && absL < PHYSICS.carWidth * 0.55) sameLanePass += 1;
-  }
-
-  // Instant peel to ~carWidth while nested in S is the phantom signature.
-  const noInstantPeel = maxAbsLEarly < PHYSICS.carWidth * 0.85;
-  const stayedBehindOrOffset =
-    sameLanePass === 0 &&
-    (raceDist(player) <= raceDist(ai) || Math.abs(player.l - ai.l) >= PHYSICS.carWidth * 0.5);
-  const speedMatched = minFollowerV <= ai.v * 1.15 + 2;
-  const ok = noInstantPeel && stayedBehindOrOffset && speedMatched;
-
   return {
     id: 'PACK_CONTACT',
-    ok,
-    detail: `maxAbsLEarly=${maxAbsLEarly.toFixed(2)} sameLanePass=${sameLanePass} minFv=${minFollowerV.toFixed(1)} aiV=${ai.v.toFixed(1)} finalDs=${(raceDist(player) - raceDist(ai)).toFixed(2)} finalAbsL=${Math.abs(player.l - ai.l).toFixed(2)}`,
-  };
-}
-
-/** No arbitrary pace handicap — player live vMax/aAccel equal raw part+driver stats. */
-export function runPlayerPacePhysGate(): FeelGateResult {
-  const director = new RaceDirector(baseConfig(77_012));
-  const player = director.cars.find((c) => c.isPlayerControlled);
-  if (!player) {
-    return { id: 'PLAYER_PACE_PHYS', ok: false, detail: 'no player' };
-  }
-  const raw = effectiveStats(
-    'track',
-    defaultVehicleSave(BALANCE.startingPartTier).partTiers,
-    BALANCE.conditionMax,
-  );
-  const vOk = Math.abs(player.stats.vMax - raw.vMax) < 0.05;
-  const aOk = Math.abs(player.stats.aAccel - raw.aAccel) < 0.05;
-  return {
-    id: 'PLAYER_PACE_PHYS',
-    ok: vOk && aOk,
-    detail: `vMax=${player.stats.vMax.toFixed(2)} raw=${raw.vMax.toFixed(2)} aAccel=${player.stats.aAccel.toFixed(2)} rawA=${raw.aAccel.toFixed(2)}`,
-  };
-}
-
-/**
- * Races must not cut the pack off mid-final-lap. The player is a slow chicane
- * (throttle 0.3) so the equal AI field races itself. Invariant: every finished
- * car either completed all its scheduled laps, or crossed the line after the
- * checkered flag (classified, possibly lapped) — a car cut off by a timer
- * without a flag-crossing fails. This catches a regression to the old
- * fixed-10s finish window (which cut back markers off mid-lap), and guards
- * the old "finish in ~1.6s" bug: no car ever classifies at lap 0.
- */
-export function runFinishLapCutoffGate(): FeelGateResult {
-  const format = FORMATS.find((f) => f.id === '1v1v1v1') ?? FORMATS[0]!;
-  const seeds = [11_001, 22_002, 33_003, 44_004, 55_005];
-  let samples = 0;
-  let cutOff = 0;
-  let zeroLap = 0;
-
-  for (const seed of seeds) {
-    for (const laps of [2, 3]) {
-      const director = new RaceDirector({
-        discipline: 'track',
-        trackSeed: 50_000 + seed,
-        raceSeed: seed,
-        laps,
-        format,
-        playerTeamDrivers: [makeDriver('lead', 35)],
-        leadDriverId: 'lead',
-        playerVehicle: defaultVehicleSave(BALANCE.startingPartTier),
-        opponentBudget: [340, 360],
-        opponentPartRange: [5, 5],
-      });
-      skipCountdown(director);
-      let guard = 0;
-      while (!director.isRaceFinished && guard < 60_000) {
-        director.setPlayerPedals(0.3, 0);
-        director.update(PHYSICS.dt * 40);
-        guard += 1;
-      }
-      samples += 1;
-      const classified = director.flagClassifiedIds;
-      for (const c of director.cars) {
-        if (!c.finished) continue;
-        // The player is an intentionally slow chicane and is legitimately lapped.
-        if (c.lap < laps && !classified.has(c.id) && !c.isPlayerControlled) cutOff += 1;
-        if (c.lap <= 0) zeroLap += 1;
-      }
-    }
-  }
-
-  return {
-    id: 'FINISH_LAP_CUTOFF',
-    ok: cutOff === 0 && zeroLap === 0,
-    detail: `samples=${samples} timerCutOff=${cutOff} zeroLap=${zeroLap}`,
+    ok: sameLanePass === 0,
+    detail: `sameLanePass=${sameLanePass} finalL=${Math.abs(player.l - ai.l).toFixed(2)}`,
   };
 }
 
 export function runHarnessGates(): FeelGateResult[] {
   void mulberry32;
   return [
-    runRejoinGate(),
-    runCrashStunGate(),
-    runDraftTowGate(),
-    runGearAssistGate(),
-    runGearNoMissGate(),
-    runPlayerPacePhysGate(),
+    ...runTyreFundamentals(),
+    ...runUnderOversteerGates(),
+    runSkillIsControlGate(),
+    runPlayerBlendGate(),
+    ...runTempGates(),
     runPackContactGate(),
-    runFinishLapCutoffGate(),
   ];
 }

@@ -1,4 +1,4 @@
-/** Barrel — vehicle modules live under ./vehicle/* */
+/** Barrel — the greenfield real-car sim. */
 export type {
   BrainOutput,
   VehicleInputs,
@@ -12,12 +12,6 @@ export {
   computePinAuthorityBlend,
 } from './vehicle/authority';
 export {
-  computeDriverDeslotMargin,
-  computeVDeslot,
-  enterDeslot,
-  contactDeslot,
-} from './vehicle/deslotMargin';
-export {
   wallLimitFor,
   barrierHalfWidth,
   computeZoneModifiers,
@@ -27,8 +21,7 @@ export {
   createCarState,
   buildVehicleContext,
   personalLineAt,
-  vDriverAt,
-  vSafeAt,
   computeSDet,
 } from './vehicle/create';
-export { updateVehicle } from './vehicle/updateVehicle';
+export { updateVehicle } from './sim/update';
+export { contactDeslot } from './sim/vehicle';

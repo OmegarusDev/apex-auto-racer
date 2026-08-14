@@ -5,13 +5,38 @@ import type { Driver, EffectiveStats } from '../types';
 import type { Modifier } from '../modifiers';
 import type { TrackData } from '../TrackGenerator';
 import type { CarSimState, VehicleUpdateContext } from './types';
-import { interpolateProfile } from './deslotMargin';
 import { DEFAULT_CAR_SETUP, type CarSetup } from './CarSetup';
 
 /** Determination catch-up scalar (plan 7.1). */
 export function computeSDet(determination: number, position: number, totalCars: number): number {
   if (totalCars <= 1) return 1;
   return 1 + PHYSICS.detBonus * (determination / 100) * ((position - 1) / (totalCars - 1));
+}
+
+/** Piecewise-linear profile interpolation on the track nodes. */
+export function interpolateProfile(profile: readonly number[], track: TrackData, s: number): number {
+  const n = profile.length;
+  if (n === 0) return 0;
+  let distS = s % track.length;
+  if (distS < 0) distS += track.length;
+
+  let i0 = 0;
+  if (distS > track.nodes[0]!.s) {
+    let lo = 0;
+    let hi = n - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (track.nodes[mid]!.s <= distS) lo = mid;
+      else hi = mid;
+    }
+    i0 = lo;
+  }
+  const i1 = (i0 + 1) % n;
+  const s0 = track.nodes[i0]!.s;
+  const s1 = i1 === 0 ? track.length : track.nodes[i1]!.s;
+  const ds = s1 - s0;
+  const t = ds > 1e-6 ? (distS - s0) / ds : 0;
+  return profile[i0]! * (1 - t) + profile[i1]! * t;
 }
 
 /** Personal racing-line lateral offset at arc length s. */
@@ -26,9 +51,6 @@ export function createCarState(
   teamId: number,
   isPlayerControlled: boolean,
   stats: EffectiveStats,
-  vProfile: number[],
-  vDriver: number[],
-  vSafe: number[],
   condition: number,
   gridS: number,
   gridL: number,
@@ -81,23 +103,27 @@ export function createCarState(
     redlineDwell: 0,
     easedThrottle: 0,
     easedBrake: 0,
-    vProfile,
-    vDriver,
-    vSafe,
     authority,
     vDeslot: 0,
     yawRate: 0,
     steerRad: 0,
-    magAuthority: 1,
     fzFront: 0,
     fzRear: 0,
     gearBand: 0,
     shiftWindow: 'low',
     clutchKickRemaining: 0,
-    magInterrupt: 0,
     setup,
     driftArmed: false,
     holdGear: false,
+    alphaFront: 0,
+    alphaRear: 0,
+    headingErr: 0,
+    lastLateralG: 0,
+    tyreWear: 0,
+    penaltySec: 0,
+    stuckTime: 0,
+    stuckS: 0,
+    noiseSeed: (id.charCodeAt(0) * 2654435761) >>> 0,
   };
 }
 
@@ -133,10 +159,4 @@ export function buildVehicleContext(
   };
 }
 
-export function vDriverAt(vDriver: readonly number[], track: TrackData, s: number): number {
-  return interpolateProfile(vDriver, track, s);
-}
 
-export function vSafeAt(vSafe: readonly number[], track: TrackData, s: number): number {
-  return interpolateProfile(vSafe, track, s);
-}

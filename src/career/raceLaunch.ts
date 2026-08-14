@@ -1,6 +1,7 @@
 import { BALANCE } from '../data/balance';
 import { FORMATS, formatsForRoster } from '../data/formats';
 import type { DisciplineId } from '../data/disciplines';
+import type { SessionKind } from '../engine/RaceDirector';
 import type { RaceConfig } from '../engine/RaceDirector';
 import type { Driver, GameState, VehicleSave } from '../engine/types';
 import type { QuickRacePresetId } from './quickRacePresets';
@@ -26,6 +27,10 @@ export interface RaceLaunchConfig {
   leadDriverId: string;
   mode: 'quick' | 'tournament';
   tournamentDefId?: string;
+  /** Session structure (defaults to a circuit race). */
+  session?: SessionKind;
+  /** Sprint finish fraction of the generated loop (0.2–0.75, default ~0.5). */
+  sprintFinishFrac?: number;
   again?: boolean;
   /** Where Results Back should land — Title for Quick Race, Campaign otherwise. */
   returnTo?: 'title' | 'campaign';
@@ -104,10 +109,16 @@ export function buildRaceConfig(state: GameState, launch: RaceLaunchConfig): Rac
           launch.paceBandOverride,
         )
       : undefined;
-  const trackScale =
+  const baseScale =
     launch.mode === 'quick' && paceBand !== undefined
       ? trackScaleForPaceBand(paceBand)
       : undefined;
+  // A sprint races a doubled loop point-to-point — scale the track up and
+  // stretch it into a long thin ribbon.
+  const trackScale =
+    baseScale && launch.session === 'sprint'
+      ? { ...baseScale, sprint: { lengthMult: 2.0 } }
+      : baseScale;
 
   return {
     discipline: launch.discipline,
@@ -123,6 +134,8 @@ export function buildRaceConfig(state: GameState, launch: RaceLaunchConfig): Rac
     isTournament: launch.mode === 'tournament',
     opponentDrivers,
     trackScale,
+    session: launch.session,
+    sprintFinishFrac: launch.sprintFinishFrac,
   };
 }
 

@@ -74,19 +74,14 @@ export interface CarSimState extends VehicleState {
   onKerb: boolean;
   easedThrottle: number;
   easedBrake: number;
-  vProfile: number[];
-  vDriver: number[];
-  vSafe: number[];
   authority: number;
-  /** Live v_deslot cached for HUD / AI (updated each tick). */
+  /** Live corner limit speed at s (the "peg" — how fast this car can carry the corner). */
   vDeslot: number;
-  // --- Hybrid dynamics (§1.2) ---
+  // --- Real-car dynamics ---
   /** Yaw rate ω (rad/s). */
   yawRate: number;
-  /** Mag-commanded front steer (rad) — autopilot hands, not player. */
+  /** Steering angle (rad) — the driver's hands. */
   steerRad: number;
-  /** Mag authority 0..1 (collapsed → deslot). */
-  magAuthority: number;
   /** Front axle normal load (N). */
   fzFront: number;
   /** Rear axle normal load (N). */
@@ -97,14 +92,31 @@ export interface CarSimState extends VehicleState {
   shiftWindow: ShiftWindowKind;
   /** Clutch-kick timer (s). */
   clutchKickRemaining: number;
-  /** Mag interrupt from kick / handbrake-lite (0..1). */
-  magInterrupt: number;
   /** Live garage force-path setup (mass/CG/aero/bias/compound). */
   setup: CarSetup;
   /** Street/Rally: Shift may clutch-kick when armed. */
   driftArmed: boolean;
   /** Rally/Street: prefer hold gear while sliding. */
   holdGear: boolean;
+  // --- Real-car sim (greenfield) ---
+  /** Heading relative to the path tangent (ψ − ψ_p) — the car's yaw vs the track. */
+  headingErr: number;
+  /** Front axle slip angle (rad). */
+  alphaFront: number;
+  /** Rear axle slip angle (rad). */
+  alphaRear: number;
+  /** Last-tick lateral accel (g) — for load-transfer iteration. */
+  lastLateralG: number;
+  /** Accumulated tyre wear 0..1 (grip fade). */
+  tyreWear: number;
+  /** Accumulated marshal/recovery time penalty (s) added to finish time. */
+  penaltySec: number;
+  /** Seconds the car has been physically stuck (marshal trigger). */
+  stuckTime: number;
+  /** Arc position when the stuck window began — a car must be NOT progressing. */
+  stuckS: number;
+  /** Per-car deterministic seed for surface noise. */
+  noiseSeed: number;
 }
 
 export interface ZoneModifiers {

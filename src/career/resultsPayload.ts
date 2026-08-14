@@ -6,7 +6,7 @@ import type { ObjectiveKind } from '../data/objectives';
 import { TOURNAMENTS } from '../data/tournaments';
 import type { DisciplineId } from '../data/disciplines';
 import { tournamentRaceSeed } from './tournamentSeeds';
-import type { RaceResult } from '../engine/RaceDirector';
+import type { RaceResult, SessionKind } from '../engine/RaceDirector';
 import type { GameState, TournamentStandingsEntry } from '../engine/types';
 import type { RaceLaunchConfig } from './raceLaunch';
 import { grantXp } from './xp';
@@ -174,8 +174,25 @@ function computePayout(
   tournamentBonus: number,
   playerTeamWon: boolean,
   playerCarPodiated: boolean,
+  session?: SessionKind,
 ): PayoutBreakdown {
   const rankBase = BALANCE.rankBasePayout[rank] ?? BALANCE.rankBasePayout[0]!;
+
+  // A time trial is practice, not a payday — a modest flat fee with none of the
+  // placement/objective multipliers (otherwise a single-car TT farms cash).
+  if (session === 'timeTrial') {
+    const tt = Math.round(rankBase * 0.12);
+    return {
+      base: 0,
+      placement: tt,
+      objective: 0,
+      handsOff: 0,
+      entertainment: 0,
+      tournament: 0,
+      total: tt,
+    };
+  }
+
   const placeForPayout = Math.min(playerTeamPosition, playerPosition);
   const placementIdx = Math.min(Math.max(placeForPayout - 1, 0), BALANCE.placementMult.length - 1);
   let placement = Math.round(rankBase * (BALANCE.placementMult[placementIdx] ?? 0.15));
@@ -379,6 +396,7 @@ export function buildResultsPayload(
     tournamentBonus,
     playerTeamWon,
     playerPosition <= 3,
+    launch.session,
   );
 
   const driverXp = computeDriverXp(

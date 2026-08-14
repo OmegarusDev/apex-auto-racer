@@ -26,6 +26,8 @@ export interface TrackView {
   nodes: readonly TrackNodeView[];
   length: number;
   bounds: TrackBounds;
+  /** Sprint: render only up to this arc length (point-to-point ribbon). */
+  sprintFinishS?: number;
 }
 
 export interface TrackSample {

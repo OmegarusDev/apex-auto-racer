@@ -8,7 +8,6 @@ import type { Modifier } from '../modifiers';
 import type { Rng } from '../rng';
 import { shuffleInPlace } from '../rng';
 import type { TrackData } from '../TrackGenerator';
-import { buildSpeedProfiles, buildVDriverProfile } from '../TrackGenerator';
 import type { Driver, VehicleParts } from '../types';
 import {
   computeBrakeAuthority,
@@ -28,7 +27,6 @@ export interface FieldSetupInput {
   config: RaceConfig;
   track: TrackData;
   rng: Rng;
-  muSurface: number;
   globalRainStack: Modifier[];
 }
 
@@ -40,7 +38,7 @@ export interface FieldSetupResult {
 }
 
 export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
-  const { config, track, rng, muSurface, globalRainStack } = input;
+  const { config, track, rng, globalRainStack } = input;
   const { format, playerTeamDrivers, leadDriverId, opponentBudget, opponentPartRange } = config;
   const usedNames = new Set<string>();
   for (const d of playerTeamDrivers) usedNames.add(d.name);
@@ -117,12 +115,7 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
         track.length) %
       track.length;
 
-    const rawStats = effectiveStats(config.discipline, plan.parts, plan.condition, plan.driver);
-    const { vProfile, vSafe } = buildSpeedProfiles(track, rawStats, muSurface);
-    const vDriver = buildVDriverProfile(vProfile, plan.driver.skill, plan.driver.bravery);
-    // No player pace handicap — car speed emerges from parts + driver skill
-    // + gear/brake execution, not a multiplier (see hybrid doctrine).
-    const stats = rawStats;
+    const stats = effectiveStats(config.discipline, plan.parts, plan.condition, plan.driver);
     const authority = plan.isPlayer ? computeBrakeAuthority(plan.driver.skill) : 1;
 
     const modifierStack = mergeModifierStacks(
@@ -149,15 +142,12 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
       plan.teamId,
       plan.isPlayer,
       stats,
-      vProfile,
-      vDriver,
-      vSafe,
       plan.condition,
       gridS,
       gridL,
       authority,
       lineO,
-      carSetupFromParts(plan.parts),
+      carSetupFromParts(plan.parts, config.discipline),
     );
 
     return {

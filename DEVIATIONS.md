@@ -2,6 +2,111 @@
 
 Short log of where the live build differs from the plan. The plan file remains the process source of truth.
 
+## TT/Sprint polish pass (2026-08-14)
+
+- **TT payout is a modest flat fee** (~12% of rank base) instead of full winner's
+  cash — a single-car TT could otherwise farm money.
+- **Sprint progress fix**: the HUD bar measured the wrong car (cars[0]) AND read
+  ~100% on the grid (a grid car sits at s≈L−δ, so s/finishS≈2). It now uses the
+  player car and measures distance past the START line (grid → 0%, finish → 100%).
+- **Sprint HUD**: adds a progress bar under the `SPRINT xx%` readout.
+- **TT results**: shows `TIME m:ss.s` where "WINNER" would be (a TT's result IS
+  the time); the podium already handled a 1-car field safely.
+- **Pre-race card** is session-aware: `SPRINT · name` / `TIME TRIAL · name` instead
+  of a wrong lap count.
+- **Checkered start/finish band** on the track mesh: always at s=0 (start), and at
+  `sprintFinishS` for sprints wherever it lands. The sprint ribbon extends 8 m past
+  the line as a roll-out so the banner sits fully on tarmac.
+- Confirmed tournaments never spawn sprints (the 25% roll lives only in
+  `makeQuickRaceConfig`).
+
+## Time Trial + Sprint sessions (2026-08-14)
+
+Two new session kinds beside the circuit race, plumbed through
+`RaceLaunchConfig.session` / `RaceConfig.session` (`raceLaunch.ts`, `RaceDirector.ts`):
+
+- **`timeTrial`** — a single car (new `tt` format, `teamCount: 1` → zero opponents via
+  `fieldSetup`'s `(teamCount-1)·teamSize`), a timer that starts at GO, and 1–3 laps
+  scaled to the pace band. HUD shows `TIME …s` + `Lap x/y`. New "Time Trial" button on
+  the Title screen; "Next" from the results starts a fresh TT.
+- **`sprint`** — a point-to-point race on a loop that never visibly loops. The track is
+  generated as a **doubled-length, elongated loop** (`TrackScaleOpts.sprint` →
+  `lengthMult` 2.0, `elongation` 2.0, low radial noise for long straights), and the
+  finish line lands at a random **42–58% of the loop**. The ribbon is rendered open,
+  truncated at `sprintFinishS`, and the loop's return half is never drawn — a "trip
+  from A to B", not a circuit. The minimap normalizes to the raced portion only.
+  The director finishes a car on a single crossing of `sprintFinishS` (no laps, no
+  wrap). ~25% of Quick Races roll a sprint (`rng() < 0.25` in `makeQuickRaceConfig`).
+
+Track `lengthMult` clamp is raised to 2.6 for sprints (was 1.35). `phaseShiftStartToStraight`
+still places the grid on the start straight. All 27 feel gates + build green; 36-race
+sanity: ~31% sprints, no sprint DNFs, normal circuits unaffected.
+
+Follow-ups: TT payout/economy (currently awards winner cash), TT discipline choice,
+Custom Race UI (sliders for shape/laps/sprint), dedicated Quick Race garage, driver→racer rename (deferred).
+
+## Bug-fix audit pass (2026-08-14)
+
+Audit of the whole engine (sim + driver + race flow) found and fixed:
+
+- **`deslotImmunity` never decayed** — the first hard contact permanently disabled
+  contact-deslot for the rest of the race. Now decays each tick (vehicle.ts).
+- **Marshal left a stale `headingErr`** — a recovered car's tyres read a huge body
+  slip and instantly re-stuck (recover→crawl→recover). Recovery resets `headingErr`,
+  and the heading integration is now wrapped so a full spin can't unboundedly grow it.
+- **Marshal penalties were free** — `penaltySec` was accumulated but never applied to
+  results. Now folded into `finishTime` for standings AND exposed as `penaltySec` on
+  `CarFinishEntry`/`StandingEntry`.
+- **driveBias sentinel mismatch** — the sim resolved `driveBias===0` as "pure RWD"
+  while the driver resolved it to a discipline default; and drive.ts had a stale
+  `street ? 0.12 : 0.5` fallback contradicting the new drivetrain. Both now use the
+  shared `resolveDriveBias(setup, discipline)` (street/track 0.06 RWD, rally 0.5 AWD).
+- **Grip-budget throttle was one-directional** — `Math.max(0, κ)` zeroed the corner
+  load share on every left-hand corner, so the throttle plan never limited power there.
+  Now `Math.abs(κ)` — symmetric cornering.
+- **`driveForce` ignored the live top speed** — draft/condition/modifier top-speed
+  bonuses shifted the gearbox but the drive stayed capped at the raw gear top. Now uses
+  `vMaxEff` (the intended bonuses work; slight pace-gap widening is the honest effect).
+- **`driftState` was a latch** — once set by a clutch-kick it stuck for the whole race.
+  Now cleared when the slide is gone.
+
+All validation suites green: 27/27 feel gates, intent/meta/start/slot/pack/field/smoke.
+
+## Drivetrain + emergent drift (2026-08-14) — RWD/AWD, and the car slides naturally
+
+The drivetrain is now a per-car-class property, not a discipline sentinel:
+
+- **Track** = RWD, open diff (`driveBias 0.06, diffLock 0`) — holds the limit, precise.
+- **Street** = RWD, locked-ish diff (`driveBias 0.06, diffLock 0.6`) — the drift cars: the
+  locked diff crisps the rear breakaway so the drift starts predictably. Not fully
+  locked — a full lock snapped the rear at R28 hairpins (spin-recover-spin loops).
+- **Rally** = AWD (`driveBias 0.5, diffLock 0.1`).
+- The old sentinel (`driveBias 0` → FWD street 0.12) is gone: the setup carries the
+  drivetrain, `carSetupFromParts(parts, discipline)`.
+
+The drift now EMERGES from the physics (no scripted effect):
+
+- **Driven-axle breakaway is fixed for drivetrain**: the driven axle gets the soft
+  post-peak (holdable slide). It was hard-wired to the FRONT (an FWD assumption);
+  now RWD/AWD cars drift off the REAR.
+- **Steering is pure pursuit**: the stabilizers that silently erased the body slip are
+  cut from (0.45 yaw, 0.45 lateral) to (0.15, 0.18). The wheels point where the Racer
+  aims the nose; the drift lives in the body slip. The small residual lateral damper
+  catches momentum plows at hairpins without erasing the drift.
+- **Low-speed kinematic glue dropped 4 → 1.2 m/s** — below ~1.2 m/s the velocity
+  follows the forces, so the body can slide at any cornering speed.
+- **Drift throttle taper**: the driver feathers the pedal as the slide grows (instead
+  of panic-cutting), so the drift settles and holds.
+- **Street breakaway pulled in (3.2 → 2.2·alphaPeak)** — the street's grip held to 48°
+  slip, so a big slide couldn't shed momentum until the collapse → spins. Now the grip
+  drops past 30°, the driver catches the smaller slides, and the big ones collapse
+  controllably. (The 8-seed street went from 6/8 with 2.1 spins to 8/8 with 0.5.)
+
+Measured drift (sustained body slip in corners, latG>0.3): Track 6°, Street 7°, Rally 8°.
+Street max 41° (a big caught fishtail — the drift car's signature), Track 16° (precise).
+Baseline: Track 8/8 P3.1 (0.1 spins), Street 8/8 P2.6 (0.5 spins), Rally 8/8 P3.1 (0 spins).
+27/27 gates green, build green.
+
 ## Process / tooling
 
 - Built as a Cursor subagent (no `move_agent_to_root`); work tree is `~/cursorthings/ONGOING/apex-auto-racer` with a separate gitdir pointer.
@@ -116,6 +221,221 @@ Live failure mode is still groove/deslot (Scalextric peg), not free-yaw underste
 | Focus | Wider hold; fewer mistakes; cleaner wall recovery; **Mag damp** + smoother baked line |
 | Determination | Catch-up accel; stronger draft; shorter wake before pull-out |
 | Slipstreamer / Hothead / Ice Cold / Showboat / Grinder / Loose Cannon | As in traits data (draft ×1.65, brake aggression, late-race calm, lead mistakes, XP, per-race jitter) |
+
+## Brake-force bug + finish/launch/gear fixes (2026-08-14)
+
+- **Brakes were always zero** — `clampFx` used `Math.max(0, muLong)·Fz` as the
+  cap, but `muLong` is *negative* for a braking demand (negative slip), so the
+  cap was 0 and the car could never slow down. This single bug caused every
+  corner crash, the "painfully slow" crawling (post-crash downshifts), and the
+  premature finishes (lapped and cut off). Fixed to `Math.abs(muLong)`. This is
+  the big one — with braking working, cars brake 21→9 m/s into hairpins.
+- **Finish window** — a lapped starter car was cut off mid-lap by the 45 s cap;
+  with the braking fix the starter car completes its laps.
+- **Marshal** — only truly-stuck cars get picked up (sustained slide needs
+  v<6 / |β|>0.8 for 1.2 s; stalled needs v<2 off-line) so recoverable slides
+  aren't punished.
+- **Gears** — verified working (1→2→3); the earlier "can't upshift" was the
+  downshift-after-crash cascade, now mostly gone.
+
+## General improvement pass (2026-08-14) — "it works, just not as intended"
+
+The game drove but didn't behave how it was meant to. Three structural fixes:
+
+- **Disciplines now generate their OWN circuits.** The oval archetype was being
+  picked ~75% of the time for EVERY discipline (the RNG-heavy weights), so a
+  "street race" was just the same wide oval with a different surface. Weights
+  are now 9:0:1 per discipline (Track→GP 33m, Street→27m tight, Rally→open
+  rally-loop 30m + 9m run-off). Each discipline now feels like its own place:
+  Track open+fast, Street tight+walled, Rally loose+open.
+- **The wall-grind is dead.** A car pinned against a wall scraped along at
+  v~0.5 FOREVER (the peel pushed `dl`, but `dl` is recomputed from the heading
+  every tick so the push was erased). The scrape now rotates the velocity
+  heading away from the wall, so a pinned car arcs back on-track. Also fixed
+  the marshal's wall-limit: it used node[0]'s width instead of the car's
+  current node, so "wedged" never fired on narrower street sections.
+- **Marshal recoveries now work properly.** A recovered car was left in 2nd
+  gear at idle revs (band 0 = zero torque) and could never drive away — it
+  bounced recover→crawl→recover until lapped. The recovery now resets the
+  transmission to 1st. And the "long-stopped" marshal only fires when the car
+  is truly NOT progressing (s not advancing), not when it's just crawling
+  through a tight corner.
+
+Plus the driving feel:
+
+- **The whip**: corner commitment raised (margin 0.78–0.95) so the car carries
+  real speed (latG 0.80 vs 0.56 before) — the car carves corners near the
+  limit instead of pootling around them.
+- **The de-slot pop**: sharper tyre breakaway (postPeakDecay up, breakawayMult
+  down) — the grip holds then releases dramatically; the driver's broadened
+  slide recovery (yaw OR lateral) catches the pops.
+- **Both-axle throttle budget**: the grip budget checked only the front axle;
+  a powerful AWD/RWD car's exits broke the rear loose. Now both axles must hold
+  their drive share → the AI's faster cars stay on the loose surface.
+- **Brake cutoff at target**: the brake formula kept 0.25 residual braking at
+  vTarget, overslowing into corners (brake→crawl→re-accelerate wobble that
+  killed average speed and caused stalls). The brake now cuts off within 5% of
+  the corner target. This single change fixed the last DNFs everywhere.
+- **Rally grip raised to 0.84** so the loose character comes from the dynamics
+  (bumpy noise, poor brakes, open run-off) rather than a base grip below the
+  cars' power — the AI can now hang instead of spinning itself into last.
+
+Balance (8-seed baseline, starter car vs parts-3/4 AI, 2 laps):
+- Track: 7–8/8 complete, ~0.4 walls, ~0.3 spins, P3.0–3.5 — the starter is
+  naturally last (power game), clean races.
+- Street: 8/8 complete, ~0.4 walls, 0 spins, P2.8 — the starter is naturally
+  mid/last (walls punish), races are tight.
+- Rally: 8/8 complete, ~0 walls, ~0.1 spins, P1 — the starter CAN win the
+  loose surface (control rewards — coherent, but the "easy" discipline).
+
+27/27 gates green, build green.
+
+## Feel-tuning pass (2026-08-14) — car feel dialled in
+
+Physics testing across 8 seeds × 3 disciplines (starter car vs parts-3/4 AI):
+
+- **Track** — dialled in: 8/8 complete, ~0.1 spins/race, ~1 wall, ~3 s marshal,
+  competitive (P2–P4, a few seconds/lap off the AI). latG 0.72–0.82 (cornering
+  near the limit). Track is the power game — the low-power starter is naturally
+  last, on brief.
+- **Rally** — drivable after: loose-surface tuning (µ 0.6→0.72 so power < grip,
+  gentler braking-loss 0.12, softer breakaway for catchable slides, surface
+  noise 0.035), a rally-specific exit-throttle cap, and a **broadened slide
+  recovery** that now catches LATERAL slides (body slip growing with little yaw
+  — the rally case) not just yaw oversteer. Result: ~2.5 spins/race, competitive.
+- **Street** — the drift/wall character is real but still the scrappy one
+  (walls+penalties on some tracks); its close walls vs driftable compound need
+  more work (Phase 9 target).
+- **Track generation**: `minCornerRadius` 18→28 — the R=18 go-kart hairpins
+  were physically unmakeable by the real-car model (constant wall-washouts).
+  Circuits are now real-radius.
+- **Stuck-car fix**: a car nearly-stopped for 3 s is marshal-recovered (a spun
+  car at β≈0.46, v≈0 sat forever — the marshal's slide/off-line thresholds
+  missed it).
+- Discipline margins: Rally 0.9×, Street 0.95× of the Track corner commitment.
+
+Feel summary: all three disciplines complete races and feel distinct (Track
+precision / Street walls / Rally loose). Track is the hard one for the starter
+car; Street/Rally reward control. 27/27 gates green.
+
+## Driving-system overhaul (2026-08-14) — the game was broken, now it drives
+
+The rewrite shipped with a broken driving model (cars couldn't get off the line,
+spun "in place", and the player's car barely moved). Full bug pass:
+
+1. **Broken `gripUsage`** — it divided by the *current* force (≈0 on straights),
+   so the driver's throttle was capped to 0.45 constantly → cars crawled.
+   Now: demand ÷ available grip.
+2. **Yaw spun "in place"** — `slipAngle` was used as the velocity-path angle
+   *and* the body slip (tyre slip), so a huge yaw rate didn't rotate the
+   velocity → the car spun like a top while traveling straight. Added a
+   `headingErr` state (heading−path) and made the tyre slip angles use the real
+   body slip (`θ − headingErr`).
+3. **Lateral force sign was inverted** (`F = +C·α` instead of `−C·α`) — the
+   body slip AMPLIFIED instead of restoring, causing the spin/wide spiral.
+   Fixed to the standard `F = −C·α` bicycle model (and inverted the pursuit +
+   recovery steering to match).
+4. **Under-damped yaw** — no tyre aligning moments, so yaw oscillated/ran away.
+   Added `PHYSICS.yawDamping`.
+5. **Traffic brake fired for cars BEHIND** (any `arcGap ≤ 2.6`, including
+   negative) → every car braked at the grid → launch stalls. Now only rivals
+   ahead matter.
+6. **Brake-and-floor at once** — throttle was `1 − brake`, so the car
+   net-accelerated into corners. Corner braking now lifts the throttle fully.
+7. **Too-late braking** — the braking lookahead was ~39 m at speed, so the car
+   floored it until the corner was near. Braking now scans ~110 m+ ahead.
+8. **Over-steering at speed** — the pursuit demanded up to 34° of lock at 11 m/s
+   (physically impossible → front slide → spin). Steering is now capped by the
+   grip-limited angle `atan(1.1·g·L/v²)`.
+9. **Unrealistic acceleration** — the starter car's `aAccel` was ~1g, equal to
+   its grip, so the pitch transfer unloaded the front and it understeered
+   everywhere. `aAccel` mapping lowered to ~0.6g starter / 0.87g elite, CG
+   height 0.42→0.36.
+10. **Tight-corner safety** — hairpins (κ>0.02) get an extra 0.9× margin, and
+    the front-axle grip budget limits throttle so the pitch doesn't unload the
+    front mid-corner.
+
+Result: cars launch, drive, brake, and complete races; the starter car finishes
+last (on brief). 27/27 gates green. Remaining tuning (Phase 9): the starter
+car still brushes walls on the tightest hairpins — wall-hit frequency and
+hairpin line quality are the balance pass targets.
+
+## Cleanup pass (2026-08-14) — one truth, no magnet-era scaffolding
+
+### Integrity audit findings (things the refactor silently lost, now restored)
+
+A general sweep found two real mechanics were lost in the rewrite and are now
+**wired back** (both applied to locals per-tick — never mutated into the car's
+raw stats, which would compound exponentially):
+
+- **Slipstream** — `draftSpeedBonus`/`draftAccelBonus` had zero consumers; a
+  drafted car got no speed/accel lift. Restored in `sim/update`: `vMaxEff` and
+  `aAccelEff` scale by `computeDraft`'s per-tick value. Fixing this also caught
+  a latent compounding bug (the earlier write-back of mods into `car.stats`
+  would have made drafted cars fly off).
+- **Live condition** — wall/contact damage no longer affected performance after
+  the rewrite. Restored: `conditionLiveMods` feeds `condTop`/`condGrip` into
+  the locals. Also fixed a double-µ in the peg-meter `vDeslot` readout.
+
+### Stripped (dead slot-era scaffolding, ~47 constants + a module)
+
+- Removed 47 unused `PHYSICS` keys (all the groove/deslot/spin/magnet-era knobs
+  with zero consumers) — verified by a usage scan; kept every knob still
+  referenced (e.g. `grooveKappaMin`, `spinStun`, `mistakeBasePerSec`) and wired
+  `streetWallStunMult` + `tyreRecoveryFloor` back as data instead of magic numbers.
+- Deleted `data/disciplineProfiles.ts` (only live value was `runoffDrag`, now on
+  `data/surfaces.ts` per discipline).
+- `draftDetBonus`/`draftCornerKappa` remain in `race/draft.ts` (still used).
+
+After the greenfield rewrite the codebase was caught between the old slot
+identity and the new real-car physics. Cleaned so the Frenet ribbon is the
+single source and nothing lies about the physics:
+
+- **Garage readout fixed**: `predictVDeslot` no longer adds the deleted magnet —
+  the "Corner peg" now predicts the real tyre limit (the grip the driver plans
+  against). The Tuning readout finally matches the track.
+- **Dead car state stripped**: removed `vProfile`/`vDriver`/`vSafe`,
+  `magAuthority`, `magInterrupt`, and the unwired `motorTemp`/`brakeTemp` from
+  `CarSimState`. fieldSetup no longer computes per-race speed profiles;
+  `buildVDriverProfile` and `vDriverAt`/`vSafeAt` deleted.
+- **`dynamics.ts` reduced to its real constants** (the magnet-era force
+  functions and `HYBRID_MAG_*` are gone; the sim's loads live in
+  `src/engine/sim/loads.ts`). Dead `predictCornerGrip` removed.
+- `magInterrupt` handling dropped from the transmission clutch-kick.
+- Net since the rewrite began: **~3,800 lines removed**, 27/27 gates green,
+  tsc + build clean. `vProfile`/`estimateLapTime` stay only as a standalone
+  Quick Race duration estimate (`quickRaceConfig`), not on the car.
+
+## Greenfield sim rewrite (2026-08-14) — real cars, driver model, three sports
+
+The Scalextric groove/deslot/magnet machinery is **deleted** and the vehicle +
+driver layer rebuilt from scratch per `PROGRESSION_PLAN.md`:
+
+- **Real-car physics (`src/engine/sim/*`)**: two-axle real-plane (body slip β,
+  yaw rate ω) on the Frenet ribbon, per-axle tyre curves with a grip **peak and
+  post-peak falloff** (+ breakaway collapse), load transfer (pitch/roll),
+  aero CL/CD, drivetrain torque curve, low-speed kinematic regime, diegetic
+  **marshal recovery** for physically-stuck cars. Understeer (front slides →
+  runs wide), oversteer (rear slides → rotates), and spin-out emerge from the
+  tyre model + load transfer — nothing is rolled.
+- **Driver model (`src/engine/driver/model.ts`)**: the RPG is control quality,
+  not a speed multiplier. Perception (lookahead + skill-scaled error), corner
+  plan (target from the real tyre limit × skill margin), pure-pursuit steering
+  with neuromuscular rate limit, grip-budget throttle management, reaction-gated
+  slide recovery. Player throttle is a **ceiling**, brake **adds**, shift/kick
+  on top — "assisted but not automated."
+- **Three sports, one core**: `data/surfaces.ts` — Track (high µ, late falloff,
+  steep breakaway = precise), Street (later peak, gentle falloff = driftable,
+  usable post-peak), Rally (µ falls under braking, surface noise).
+- **Feel gates re-gated** (27/27 green): `TYRE_PEAK_FALLOFF`,
+  `UNDERSTEER_EMERGES`, `OVERSTEER_EMERGES`, `SPIN_EMERGENT`, `SKILL_IS_CONTROL`,
+  `PLAYER_AGENCY_ALWAYS`, `REJOIN_NATURAL`, `MARSHAL_ONLY_WHEN_STUCK`,
+  `DISCIPLINE_IDENTITY`, `RALLY_LOOSE_UNDER_BRAKE`, `DRIFT_IS_USABLE_STREET`,
+  plus kept PACK_CONTACT / FINISH_LAP_CUTOFF / suites. The slot-era suites were
+  re-gated to real-car sanity (finish rate, bounded spins).
+- **Known follow-up (Phase 9 of the plan)**: full-field stability — cars are
+  twitchy (avg ~12 spins/race, slow grid launches in a few seeds) and need the
+  dedicated balance/soak pass once the chassis + components (Phase 6-7) land.
 
 ## General bugfix pass (2026-08-13)
 

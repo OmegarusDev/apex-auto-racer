@@ -164,7 +164,7 @@ export class TuningScene implements Scene {
     }
     y += previewH + pad(token, 1);
 
-    const setup = carSetupFromParts(vehicle.partTiers);
+    const setup = carSetupFromParts(vehicle.partTiers, this.discipline);
     const stats = effectiveStats(this.discipline, vehicle.partTiers, vehicle.condition);
     const mu = getDiscipline(this.discipline).muSurface;
     const readout = tuningSpeedReadout(setup, mu, stats.aAccel, stats.D, 0.08);

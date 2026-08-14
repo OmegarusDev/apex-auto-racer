@@ -20,7 +20,7 @@ export const ARCHETYPES: ArchetypeDef[] = [
     elongation: 1.0,
     width: 33,
     runoff: 6,
-    weights: { track: 5, street: 1, rally: 0 },
+    weights: { track: 9, street: 0, rally: 0 },
   },
   {
     id: 'street',
@@ -28,9 +28,9 @@ export const ARCHETYPES: ArchetypeDef[] = [
     radialNoise: 0.45,
     elongation: 1.0,
     width: 27,
-    /** Thin barrier strip so the hard wall sits outside asphalt paint. */
-    runoff: 1.5,
-    weights: { track: 1, street: 5, rally: 1 },
+    /** A little runoff so the drift character has room before the wall bites. */
+    runoff: 4,
+    weights: { track: 0, street: 9, rally: 0 },
   },
   {
     id: 'oval',
@@ -39,7 +39,7 @@ export const ARCHETYPES: ArchetypeDef[] = [
     elongation: 1.8,
     width: 36,
     runoff: 3,
-    weights: { track: 2, street: 1, rally: 0 },
+    weights: { track: 1, street: 0, rally: 0 },
   },
   {
     id: 'rallyLoop',
@@ -47,8 +47,9 @@ export const ARCHETYPES: ArchetypeDef[] = [
     radialNoise: 0.5,
     elongation: 1.1,
     width: 30,
-    runoff: 4,
-    weights: { track: 0, street: 1, rally: 5 },
+    /** Open run-off: the loose slides run wide into grass, not walls. */
+    runoff: 9,
+    weights: { track: 0, street: 0, rally: 9 },
   },
 ];
 

@@ -138,6 +138,11 @@ export function carSetupFromParts(parts: VehicleParts, discipline?: DisciplineId
   const iz = massKg * (2.1 + cgHeight * 0.3);
 
   const drivetrain = discipline !== undefined ? drivetrainForDiscipline(discipline) : { driveBias: 0, diffLock: 0 };
+  // The differential part is an LSD upgrade — it tightens the diff lock beyond
+  // the drivetrain base (street drift cars get a firmer lock; rally/track gain
+  // a limited-slip from zero).
+  const differentialTier = parts.differential ?? 0;
+  const diffLock = Math.min(1, drivetrain.diffLock + differentialTier * 0.12);
 
   return {
     massKg,
@@ -152,7 +157,7 @@ export function carSetupFromParts(parts: VehicleParts, discipline?: DisciplineId
     iz,
     wheelbase: 2.7,
     driveBias: drivetrain.driveBias,
-    diffLock: drivetrain.diffLock,
+    diffLock,
   };
 }
 

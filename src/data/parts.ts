@@ -5,7 +5,10 @@ export type PartCategory =
   | 'tyres'
   | 'brakes'
   | 'suspension'
-  | 'spoiler';
+  | 'spoiler'
+  | 'clutch'
+  | 'gearbox'
+  | 'differential';
 
 export interface PartDef {
   id: PartCategory;
@@ -62,6 +65,24 @@ export const PARTS: PartDef[] = [
     name: 'Spoiler',
     baseCost: 500,
     perTier: { downforce: 5, topSpeed: -1 },
+  },
+  {
+    id: 'clutch',
+    name: 'Clutch',
+    baseCost: 320,
+    perTier: { acceleration: 1 },
+  },
+  {
+    id: 'gearbox',
+    name: 'Gearbox',
+    baseCost: 520,
+    perTier: { topSpeed: 2 },
+  },
+  {
+    id: 'differential',
+    name: 'Differential',
+    baseCost: 460,
+    perTier: { grip: 1 },
   },
 ];
 

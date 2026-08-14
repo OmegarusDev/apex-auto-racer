@@ -54,6 +54,12 @@ export interface EffectiveStats {
   lineNoise: number;
   condGrip: number;
   condTop: number;
+  /** Seconds to complete a shift (lower = faster). Clutch + gearbox. */
+  shiftTime: number;
+  /** Launch accel multiplier (<1 bogs a low clutch on the grid). */
+  launchMul: number;
+  /** Street clutch-kick impulse scale (≥1). */
+  kickMul: number;
 }
 
 export type SlotMode = 'groove' | 'deslot';
@@ -226,6 +232,9 @@ export function emptyVehicleParts(startTier: number): VehicleParts {
     brakes: startTier,
     suspension: startTier,
     spoiler: startTier,
+    clutch: startTier,
+    gearbox: startTier,
+    differential: startTier,
   };
 }
 

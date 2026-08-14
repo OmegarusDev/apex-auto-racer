@@ -18,8 +18,9 @@ import {
   SAVE_VERSION,
   DEFAULT_VOLUMES,
   DEFAULT_RACE_ZOOM,
-  defaultVehicleSave,
+  emptyVehicleParts,
 } from './types';
+import type { VehicleParts } from './types';
 import { makeDriverId, syncDriverIdCounter, syncDriverIdsFrom } from './DriverGenerator';
 
 const STORAGE_KEY = 'apex-save-v1';
@@ -208,12 +209,34 @@ export function refillObjectives(state: GameState): void {
   state.objectives.cycleSeed = randInt(rng, 1, 0x7fffffff);
 }
 
+/** Distinctive starter builds per discipline (insta-match). The drift car gets
+ *  the differential LSD; the rally car leans on tyres + suspension + an LSD;
+ *  the track car is a balanced RWD GT. */
+export function starterPartTiers(discipline: DisciplineId): VehicleParts {
+  const z = emptyVehicleParts(0);
+  if (discipline === 'street') {
+    z.engine = 1;
+    z.intake = 1;
+    z.tyres = 1;
+    z.brakes = 1;
+    z.differential = 1;
+  } else if (discipline === 'rally') {
+    z.tyres = 1;
+    z.suspension = 1;
+    z.differential = 1;
+  } else {
+    z.engine = 1;
+    z.tyres = 1;
+    z.brakes = 1;
+  }
+  return z;
+}
+
 function createDisciplineVehicles() {
-  const tier = BALANCE.startingPartTier;
   return {
-    track: defaultVehicleSave(tier),
-    street: defaultVehicleSave(tier),
-    rally: defaultVehicleSave(tier),
+    track: { partTiers: starterPartTiers('track'), condition: 1 },
+    street: { partTiers: starterPartTiers('street'), condition: 1 },
+    rally: { partTiers: starterPartTiers('rally'), condition: 1 },
   } as GameState['vehicles'];
 }
 

@@ -75,9 +75,11 @@ export function generateOpponentParts(
       parts[part.id] = lo;
       continue;
     }
-    // Strong drivers sit near the top of the band; weak still upgraded vs player T1.
-    const center = lo + span * (0.35 + 0.6 * strength01);
-    const jitter = (rng() - 0.5) * span * 0.7;
+    // The car tracks its driver tightly — a strong driver lands near the top
+    // of the band, a weak one near the bottom (no genius-in-a-shitbox), with
+    // small variance for a human read. Low-jitter keeps it coherent.
+    const center = lo + span * (0.3 + 0.65 * strength01);
+    const jitter = (rng() - 0.5) * span * 0.2;
     parts[part.id] = Math.max(lo, Math.min(hi, Math.round(center + jitter)));
   }
   return parts;

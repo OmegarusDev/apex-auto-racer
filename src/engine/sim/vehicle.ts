@@ -111,6 +111,13 @@ function applyBarrier(
         car.condition - BALANCE.wallCrashConditionLoss * severity,
       );
     }
+    // A genuine crash STOPS the car (momentum gone — that's the penalty) and
+    // the marshal re-slots it within about a second. Without this a crashed car
+    // ground along the wall for 10+ seconds before getting going again.
+    if (severity > 0.45) {
+      car.v = Math.min(car.v, 2.0);
+      car.stuckTime = Math.max(car.stuckTime, 0.9);
+    }
     // Hard barrier while sliding hard → resolve the spin (car is stopped).
     if (Math.abs(car.slipAngle) > SLIDE_BETA) {
       car.spinRemaining = 0;

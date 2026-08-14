@@ -52,7 +52,7 @@ function sumPartIncrements(partTiers: VehicleParts): DisplayStats {
   return totals;
 }
 
-function toPhysicsParams(display: DisplayStats, suspTier: number, condition: number): EffectiveStats {
+function toPhysicsParams(display: DisplayStats, suspTier: number, condition: number, partTiers: VehicleParts): EffectiveStats {
   const { topSpeed, acceleration, braking, grip, downforce } = display;
 
   const vMax = 30 + 0.4 * topSpeed;
@@ -73,6 +73,14 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
 
   lineNoise *= 2 - normalized;
 
+  // Transmission metaprogression — a better clutch shifts faster and launches
+  // clean; a better gearbox shifts faster too. All control, never a fudge.
+  const clutchTier = partTiers.clutch ?? 0;
+  const gearboxTier = partTiers.gearbox ?? 0;
+  const shiftTime = Math.max(0.1, 0.24 - 0.018 * (clutchTier + gearboxTier));
+  const launchMul = Math.min(1.0, 0.82 + 0.045 * clutchTier);
+  const kickMul = 1.0 + 0.15 * clutchTier;
+
   return {
     topSpeed,
     acceleration,
@@ -87,6 +95,9 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
     lineNoise,
     condGrip,
     condTop,
+    shiftTime,
+    launchMul,
+    kickMul,
   };
 }
 
@@ -119,6 +130,7 @@ export function effectiveStats(
     { topSpeed, acceleration, braking, grip, downforce },
     suspTier,
     condition,
+    partTiers,
   );
 }
 

@@ -322,8 +322,8 @@ export function tickDriverBrain(
   const driveCaution =
     disc === 'rally' ? Math.max(0, (car.stats.aAccel / G - aGrip / G) * 0.6) : 0;
   const margin = Math.max(
-    0.78,
-    Math.min(0.95, 0.78 + 0.1 * skill01 + 0.05 * bravery01 + state.conf * 0.02),
+    0.74,
+    Math.min(0.95, 0.74 + 0.16 * skill01 + 0.04 * bravery01 + state.conf * 0.03),
   ) * discMargin - driveCaution;
   // Tight-corner safety: hairpins (κ ≳ 0.02) get an extra margin — off the
   // racing line the car must follow the track's own (tighter) radius.
@@ -347,8 +347,13 @@ export function tickDriverBrain(
     // loose into the walls. Gentle, spreading stops instead.
     if (disc === 'street') desiredBrake *= 0.85;
   }
-  // Bravery / skill nudge: skilled+brave brake later (the plan sits closer to the limit).
-  const brakeLatency = 0.94 - 0.05 * skill01 + 0.08 * bravery01;
+  // Bravery / confidence / skill nudge on momentum:
+  //  - skilled drivers carry speed (brake at the last moment, hard)
+  //  - BRAVE drivers trust the corner — gentler brake, keep momentum (risky)
+  //  - TIMID drivers brake decisively early and hard — lose momentum but round
+  //    the corner without shooting into the barrier
+  //  - high CONFIDENCE (form) edges the same driver later; low confidence safer
+  const brakeLatency = 1.02 - 0.1 * skill01 - 0.08 * bravery01 - 0.08 * state.conf;
   desiredBrake *= brakeLatency;
 
   if (raceTime < state.suppressBrakeUntil) desiredBrake = Math.min(desiredBrake, 0.1);

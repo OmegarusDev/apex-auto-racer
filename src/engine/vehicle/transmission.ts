@@ -64,9 +64,7 @@ export function stepTransmission(
     car.gear -= 1;
     car.shiftCooldown = PHYSICS.shiftCooldown * 0.55;
     car.lastShiftKind = 'down';
-  }
-
-  const canUp =
+  }  const canUp =
     car.gear < box.gearCount &&
     car.shiftCooldown <= 0 &&
     car.spinRemaining <= 0 &&
@@ -83,7 +81,12 @@ export function stepTransmission(
   const up = (kind: 'up' | 'down'): void => {
     if (kind === 'up') car.gear += 1;
     else car.gear -= 1;
-    car.shiftCooldown = kind === 'up' ? PHYSICS.shiftCooldown : PHYSICS.shiftCooldown * 0.55;
+    // A better clutch/gearbox shifts faster (less time off-power).
+    const shiftTime = car.stats?.shiftTime ?? 0.24;
+    car.shiftCooldown =
+      kind === 'up'
+        ? PHYSICS.shiftCooldown * (shiftTime / 0.24)
+        : PHYSICS.shiftCooldown * 0.55;
     car.lastShiftKind = kind;
     car.redlineDwell = 0;
   };
@@ -112,7 +115,8 @@ export function stepTransmission(
     car.clutchKickRemaining = 0.28;
     if (!car.driftState) {
       car.driftState = true;
-      car.slipAngle += Math.sign(car.slipAngle || car.dl || 1) * 0.18;
+      const kick = 0.18 * (car.stats?.kickMul ?? 1);
+      car.slipAngle += Math.sign(car.slipAngle || car.dl || 1) * kick;
     }
   }
   if (car.clutchKickRemaining > 0) {

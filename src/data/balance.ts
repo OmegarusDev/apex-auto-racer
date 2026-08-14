@@ -78,14 +78,15 @@ export const BALANCE = {
     [88, 99],
     [92, 99],
   ] as [number, number][],
-  /** Part tier band per rank — standouts can sit at the top of the band. */
+  /** Part tier band per rank — spread spans the metaprogression so one map
+   *  shows a variety of car tiers; the driver↔car link keeps them coherent. */
   opponentPartTiers: [
-    [4, 5],
-    [4, 5],
-    [4, 5],
-    [4, 5],
-    [5, 5],
-    [5, 5],
+    [1, 4],
+    [1, 4],
+    [2, 5],
+    [2, 5],
+    [3, 5],
+    [3, 5],
   ] as [number, number][],
   freeAgentStatBase: [26, 55] as [number, number],
   freeAgentStatPerRank: 8,

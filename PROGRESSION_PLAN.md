@@ -485,3 +485,42 @@ Phase 1: **tyre curve + two-axle real-plane + drivetrain/aero, with the
 `SPIN_EMERGENT` / `UNDERSTEER_EMERGES` / `OVERSTEER_EMERGES` gates as a
 headless single-car probe**, standing up `src/engine/sim/*`. Say "Phase 1"
 and I'll start there.
+
+---
+
+## 15. Addendum — driving-depth rework (2026-08-14)
+
+Amendments agreed while tuning the feel; the spec at `docs/DRIVING_SPEC.md` is
+the build contract.
+
+### Three-tier line model
+1. **Center Slot truth** — the mother κ-line (unchanged).
+2. **Car ideal line** — per-setup optimal line (brake/turn-in/apex/exit) from
+   the car's grip envelope, aBrake, power-to-grip and drivetrain/diff. A grippy
+   car takes a geometric line; a powerful car a late-apex exit line.
+3. **Racer's line** — the personal `lineO`, approaching the car ideal by skill,
+   shaped by personality and wobbled by focus/form.
+
+### Parts (metaprogression)
+Added **Clutch** (shift speed, launch quality, street kick), **Gearbox** (shift
+speed + AI band), **Differential** (LSD — adjustable diffLock). Brakes confirmed
+wired; they feed the ideal-line brake point.
+
+### Momentum & confidence (§6 driver)
+- Skill = carrying speed: skilled drivers brake at the last moment, hard, and
+  get on the power early.
+- **Bravery**: brave drivers trust the corner (gentler/later brake — keep
+  momentum, risk a barrier); timid drivers brake decisively early and hard —
+  lose momentum but round the corner. Measured: brave 16.4 vs timid 15.8 m/s
+  cornering (~1.2 s/lap), both safe on the test track.
+- **Confidence** (in-race form) edges the same driver later/softer when up.
+
+### Crash / momentum economy
+A genuine wall crash STOPS the car (all momentum gone — the penalty) and the
+marshal re-slots it within ~0.3 s. Momentum management is the player skill: the
+AI at higher levels keeps its speed better and so wins.
+
+### Starter cars
+Three distinctive starter builds for insta-match: Track (balanced RWD GT,
+engine/tyres/brakes), Street (RWD + LSD drift car, engine/intake/tyres/brakes/
+differential), Rally (AWD, tyres/suspension/differential).

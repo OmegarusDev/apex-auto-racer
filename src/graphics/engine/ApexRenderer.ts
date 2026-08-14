@@ -64,6 +64,7 @@ export class ApexRenderer {
   private trackMesh: GpuMesh | null = null;
   private carMesh: GpuMesh | null = null;
   private minimap: Array<{ nx: number; ny: number }> = [];
+  private minimapExtent: { minX: number; maxX: number; minY: number; maxY: number } = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
   private night = false;
   private rain = false;
   private readonly fx: FxParticle[] = [];
@@ -133,6 +134,10 @@ export class ApexRenderer {
     return this.minimap;
   }
 
+  getMinimapExtent(): { minX: number; maxX: number; minY: number; maxY: number } {
+    return this.minimapExtent;
+  }
+
   resize(cssW: number, cssH: number, dpr: number): void {
     const w = Math.max(1, Math.floor(cssW * dpr));
     const h = Math.max(1, Math.floor(cssH * dpr));
@@ -159,6 +164,7 @@ export class ApexRenderer {
     const track = buildTrackGeometry(opts.track, opts.palette);
     this.trackMesh = createMesh(gl, track.vertices, track.indices);
     this.minimap = track.minimap;
+    this.minimapExtent = track.minimapExtent;
 
     const car = buildCarGeometry();
     this.carMesh = createMesh(gl, car.vertices, car.indices);

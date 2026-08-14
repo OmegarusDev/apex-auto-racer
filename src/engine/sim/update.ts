@@ -90,7 +90,13 @@ export function updateVehicle(
     (mods.vMax ?? car.stats.vMax) *
     live.condTop *
     (1 + PHYSICS.draftSpeedBonus * ctx.draft);
-  const aAccelEff = (mods.aAccel ?? car.stats.aAccel) * (1 + PHYSICS.draftAccelBonus * ctx.draft);
+  const aAccelEff =
+    (mods.aAccel ?? car.stats.aAccel) *
+    (1 + PHYSICS.draftAccelBonus * ctx.draft) *
+    // Clutch launch quality: a low-clutch car bogs off the line, a good one
+    // launches clean. Only bite at launch speed (a clutch isn't slipping at
+    // 100 km/h).
+    (car.v < 8 ? (car.stats.launchMul ?? 1) : 1);
   const aBrakeEff = mods.aBrake ?? car.stats.aBrake;
 
   // Gearbox / powerband (kept from the old model — it's the real gearbox).

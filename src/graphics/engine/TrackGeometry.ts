@@ -71,6 +71,9 @@ export interface BuiltTrackMesh {
   indices: Uint16Array | Uint32Array;
   /** Normalized polyline for minimap (nx, ny in 0..1). */
   minimap: Array<{ nx: number; ny: number }>;
+  /** World extent the minimap is normalized to (the SAMPLED ribbon — for a
+   *  sprint this is the raced portion only, not the full mother loop). */
+  minimapExtent: { minX: number; maxX: number; minY: number; maxY: number };
 }
 
 function sampleClosed(
@@ -418,5 +421,10 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     ny: 1 - (-s.z - mmMinY) / spanY,
   }));
 
-  return { vertices, indices, minimap };
+  return {
+    vertices,
+    indices,
+    minimap,
+    minimapExtent: { minX: mmMinX, maxX: mmMaxX, minY: mmMinY, maxY: mmMaxY },
+  };
 }

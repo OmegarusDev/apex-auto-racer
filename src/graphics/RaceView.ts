@@ -31,6 +31,7 @@ export class RaceView {
   private useEngine = false;
 
   private minimapPoints: MinimapPoint[] = [];
+  private minimapExtent: { minX: number; maxX: number; minY: number; maxY: number } = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
   private track: TrackView | null = null;
   private palette: TrackPalette | null = null;
 
@@ -65,6 +66,7 @@ export class RaceView {
         rain: opts.rain,
       });
       this.minimapPoints = this.engine.getMinimapPoints();
+      this.minimapExtent = this.engine.getMinimapExtent();
       this.useEngine = true;
     } catch (err) {
       // WebGL-only: do not fall back to a Canvas2D track. Keep the race
@@ -197,9 +199,11 @@ export class RaceView {
     const iw = rect.w - pad * 2;
     const ih = rect.h - pad * 2;
 
-    const b = this.track.bounds;
-    const spanX = Math.max(b.maxX - b.minX, 1);
-    const spanY = Math.max(b.maxY - b.minY, 1);
+    // The minimap is tied to what is DRAWN — the sampled extent (the raced
+    // sprint ribbon), not the full mother loop.
+    const me = this.minimapExtent;
+    const spanX = Math.max(me.maxX - me.minX, 1);
+    const spanY = Math.max(me.maxY - me.minY, 1);
     const aspect = spanX / spanY;
     let drawW = iw;
     let drawH = ih;
@@ -220,7 +224,10 @@ export class RaceView {
       const p = this.minimapPoints[i]!;
       ctx.lineTo(ix + ox + p.nx * drawW, iy + oy + p.ny * drawH);
     }
-    ctx.closePath();
+    // A circuit closes its loop; a sprint is a line (start → finish) and must
+    // NOT close — closing draws a fake "return" chord that looks like the loop.
+    const isSprint = this.track.sprintFinishS !== undefined;
+    if (!isSprint) ctx.closePath();
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fill();
     ctx.strokeStyle = this.palette?.accentDim ?? '#a88410';
@@ -229,8 +236,8 @@ export class RaceView {
 
     for (let i = 0; i < cars.length; i++) {
       const car = cars[i]!;
-      const nx = (car.worldX - b.minX) / spanX;
-      const ny = 1 - (car.worldY - b.minY) / spanY;
+      const nx = (car.worldX - me.minX) / spanX;
+      const ny = 1 - (car.worldY - me.minY) / spanY;
       const dotR = i === playerIndex ? 4 : 3;
       ctx.fillStyle = i === playerIndex ? (this.palette?.accent ?? '#f0c41a') : '#9a9f96';
       ctx.beginPath();

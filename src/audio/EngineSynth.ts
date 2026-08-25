@@ -116,6 +116,9 @@ export class EngineSynth {
     this.mid2.start(t);
     this.intake.start(t);
 
+    // Ensure wind gain is 0 before starting noise (context may have been suspended)
+    this.windGain.gain.value = 0;
+
     const windBuf = makeNoiseBuffer(this.buses.ctx, 1.5, false, 0x51aced01);
     const wind = this.buses.ctx.createBufferSource();
     wind.buffer = windBuf;

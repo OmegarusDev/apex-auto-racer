@@ -92,3 +92,71 @@ export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Ui
   }
   return mb.build();
 }
+
+/**
+ * Floating arrow marker above the player car — a downward-pointing arrow
+ * that hovers above the car for easy identification. Uses the same MAT_GENERIC
+ * material; rendered with additive blending for a glowing effect.
+ */
+export function buildPlayerArrowGeometry(): { vertices: Float32Array; indices: Uint16Array | Uint32Array } {
+  const mb = new MeshBuilder();
+  // Arrow dimensions: positioned above the car (y ~ 1.5), pointing down (-Y)
+  // Arrow shaft: vertical cylinder
+  // Arrow head: cone at the bottom
+  const shaftHeight = 0.8;
+  const shaftRadius = 0.18;
+  const headHeight = 0.4;
+  const headRadius = 0.35;
+  const shaftSegs = 8;
+  const headSegs = 8;
+  const yBase = 1.5; // Height above ground where arrow starts
+
+  // Shaft (vertical tube)
+  for (let i = 0; i < shaftSegs; i++) {
+    const a0 = (i / shaftSegs) * Math.PI * 2;
+    const a1 = ((i + 1) / shaftSegs) * Math.PI * 2;
+    const c0 = Math.cos(a0) * shaftRadius;
+    const s0 = Math.sin(a0) * shaftRadius;
+    const c1 = Math.cos(a1) * shaftRadius;
+    const s1 = Math.sin(a1) * shaftRadius;
+    const y0 = yBase;
+    const y1 = yBase + shaftHeight;
+    const i0 = mb.vertex(c0, y0, s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i1 = mb.vertex(c1, y0, s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i2 = mb.vertex(c1, y1, s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i3 = mb.vertex(c0, y1, s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    mb.quad(i0, i1, i2, i3);
+  }
+
+  // Arrow head (cone at top of shaft)
+  const tipY = yBase + shaftHeight + headHeight;
+  const tipIdx = mb.vertex(0, tipY, 0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+  const baseY = yBase + shaftHeight;
+  for (let i = 0; i < headSegs; i++) {
+    const a0 = (i / headSegs) * Math.PI * 2;
+    const a1 = ((i + 1) / headSegs) * Math.PI * 2;
+    const c0 = Math.cos(a0) * headRadius;
+    const s0 = Math.sin(a0) * headRadius;
+    const c1 = Math.cos(a1) * headRadius;
+    const s1 = Math.sin(a1) * headRadius;
+    const b0 = mb.vertex(c0, baseY, s0, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
+    const b1 = mb.vertex(c1, baseY, s1, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
+    mb.tri(b0, b1, tipIdx);
+  }
+
+  // Base cap of arrow head (flat circle at base of cone)
+  for (let i = 0; i < headSegs; i++) {
+    const a0 = (i / headSegs) * Math.PI * 2;
+    const a1 = ((i + 1) / headSegs) * Math.PI * 2;
+    const c0 = Math.cos(a0) * headRadius;
+    const s0 = Math.sin(a0) * headRadius;
+    const c1 = Math.cos(a1) * headRadius;
+    const s1 = Math.sin(a1) * headRadius;
+    const b0 = mb.vertex(c0, baseY, s0, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
+    const b1 = mb.vertex(c1, baseY, s1, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
+    const centerIdx = mb.vertex(0, baseY, 0, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
+    mb.tri(b0, b1, centerIdx);
+  }
+
+  return mb.build();
+}

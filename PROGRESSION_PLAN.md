@@ -563,3 +563,41 @@ schemes** so the grid reads like a real race:
 - Gates (when the phase ships): `FREEFHAND_PAINTS_PANEL`, `PAINT_PER_VEHICLE`,
   `RIVAL_SCHEMES_SEEDED`, `PAINT_NEVER_TOUCHES_SIM`, `PLAYER_STILL_FINDABLE`.
 
+---
+
+## 17. Addendum — discipline geometry styles (roadmap, "soon")
+
+Today every discipline generates the same **radial-noise ellipse**
+(`TrackGenerator.generateWaypoints`: `rx·cos θ, ry·sin θ` + jitter); the
+archetypes differ only in width / runoff / noise / waypoint count, not in
+fundamental shape. The three sports should *look* as different as they drive.
+This becomes its own tracked slice (a proper "corner grammar" generator,
+aligning with Phase 8 of the plan) — not part of the current sprint/cleanup
+pass.
+
+### Per-discipline generators
+
+| Discipline | Geometry | Fantasy |
+|---|---|---|
+| **Track** | GP-style racetrack: sweepers, esses, chicanes, high-speed kinks; smooth and wide | carrying huge speed through a sweeper |
+| **Street** | City-grid: straight runs + right-angle corners (block-like). **Some seeds** roll a tiny, tight, elliptical car-park-style drift loop | drift-line execution between walls |
+| **Rally** | Hard winding stage: tighter radius, more corners, higher noise, less smoothing; rough and varied | hanging on through a rough stage |
+
+### Notes
+
+- Replace the single radial generator with a **per-discipline shape grammar**:
+  - **Track** — long straights joined by smoothed sweepers/esses (low corner
+    count, high radius, wide).
+  - **Street** — a grid/Manhattan path (axis-aligned runs + 90° turns), plus a
+    low-probability `carPark` archetype (tiny tight ellipse).
+  - **Rally** — many short segments with hard bends and surface transitions;
+    deliberately the least smooth.
+- Geometry touches `PHYSICS.minCornerRadius` (feel-frozen) and `ARCHETYPES`
+  weights, so it ships with its own named gates (e.g. `DISCIPLINE_GEOMETRY`
+  signatures: corner count, straight:corner ratio, min radius, right-angle
+  presence for Street, car-park-seed roll) and must stay green on the existing
+  27 gates. Track must not regress (current Track archetypes are the baseline).
+- Sprint geometry is orthogonal — sprints stay point-to-point, now rendered with
+  the fake-road continuation (see DEVIATIONS).
+
+

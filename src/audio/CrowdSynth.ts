@@ -44,6 +44,9 @@ export class CrowdSynth {
   start(): void {
     if (this.started) return;
     const t = this.buses.ctx.currentTime;
+    // Ensure bed gain is 0 before starting noise (context may have been suspended)
+    this.bedGain.gain.value = 0;
+
     const buf = makeNoiseBuffer(this.buses.ctx, 2, true, 0xc0ffee11);
     const src = this.buses.ctx.createBufferSource();
     src.buffer = buf;
@@ -61,7 +64,7 @@ export class CrowdSynth {
     this.start();
     this.hype = clamp(hype, 0, 1);
     const t = this.buses.ctx.currentTime;
-    const bed = (0.02 + this.hype * 0.1) * DISC_BED[this.discipline];
+    const bed = (0.004 + this.hype * 0.1) * DISC_BED[this.discipline];
     this.bedGain.gain.setTargetAtTime(bed, t, 0.2);
     this.bedFilter.frequency.setTargetAtTime(480 + this.hype * 420, t, 0.25);
   }

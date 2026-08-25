@@ -154,30 +154,23 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-/** Max |κ| over the lookahead window (sampled on track nodes). */
-function kappaAhead(track: TrackData, s: number, dist: number): { kappa: number; distance: number } {
-  let best = 0;
-  let bestDist = dist;
+/** Find closest node index for arc position s. */
+function findNodeIndexAtS(track: TrackData, s: number): number {
   const n = track.nodes.length;
-  let idx = 0;
-  for (let i = 0; i < n; i++) {
-    if (track.nodes[i]!.s <= s) idx = i;
+  if (n === 0) return 0;
+  let distS = s % track.length;
+  if (distS < 0) distS += track.length;
+  if (distS <= track.nodes[0]!.s) return 0;
+  const last = track.nodes[n - 1]!;
+  if (distS >= last.s) return n - 1;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (track.nodes[mid]!.s <= distS) lo = mid;
+    else hi = mid;
   }
-  let travelled = 0;
-  for (let step = 0; step < n && travelled < dist; step++) {
-    const node = track.nodes[idx]!;
-    const k = Math.abs(node.kappaLine);
-    if (k > best) {
-      best = k;
-      bestDist = travelled;
-    }
-    const next = track.nodes[(idx + 1) % n]!;
-    let ds = next.s - node.s;
-    if (ds <= 0) ds += track.length;
-    travelled += ds;
-    idx = (idx + 1) % n;
-  }
-  return { kappa: best, distance: bestDist };
+  return lo;
 }
 
 /** The driver's estimate of the car's lateral grip accel — MUST match the sim's
@@ -302,18 +295,16 @@ export function tickDriverBrain(
     };
   }
 
-  // --- Perception ---
-  const lookahead = Math.max(12, Math.min(80, v * (0.9 + 0.9 * skill01) + 8));
-  const ahead = kappaAhead(track, car.s, lookahead);
-  // Long-range corner detection (also feeds the braking decision).
-  const brakeAhead = kappaAhead(track, car.s, Math.max(110, v * 4));
-  const brakeKappa = Math.max(ahead.kappa, brakeAhead.kappa);
-  const kappaPeak = ahead.kappa;
+  // --- Perception using ideal line data (O(1) lookup) ---
+  const nodeIdx = findNodeIndexAtS(track, car.s);
+  const idealVTarget = car.idealVLine?.[nodeIdx] ?? (car.stats.vMax * 0.95);
+  const brakeZoneDist = car.brakeZoneStart?.[nodeIdx] ?? -1;
+  const turnInIdx = car.turnInPoint?.[nodeIdx] ?? -1;
+  // const apexIdx = car.apexNode?.[nodeIdx] ?? -1; // unused for now
 
-  // Target speed from the real limit, with skill-scaled perception error.
-  const percepErr = (1 - skill01) * 0.15;
-  const vLimit = kappaPeak > 1e-3 ? Math.sqrt(aGrip / kappaPeak) : car.stats.vMax * 0.98;
-  const vEst = vLimit * (1 + (rng() - 0.5) * percepErr);
+  // Target speed from ideal line with skill-scaled perception error.
+  const percepErr = (1 - skill01) * 0.12; // slightly reduced from 0.15
+  const vEst = idealVTarget * (1 + (rng() - 0.5) * percepErr);
   // Discipline-aware commitment: Rally's loose surface and Street's close
   // walls demand a more cautious margin than Track's open circuit.
   const discMargin = disc === 'rally' ? 0.86 : disc === 'street' ? 0.90 : 0.94;
@@ -325,27 +316,35 @@ export function tickDriverBrain(
     0.74,
     Math.min(0.95, 0.74 + 0.16 * skill01 + 0.04 * bravery01 + state.conf * 0.03),
   ) * discMargin - driveCaution;
-  // Tight-corner safety: hairpins (κ ≳ 0.02) get an extra margin — off the
-  // racing line the car must follow the track's own (tighter) radius.
-  const tightSafety = brakeKappa > 0.02 ? 0.9 : 1;
-  const vTarget = Math.min(vEst * margin * tightSafety, vLimit);
+  const vTarget = Math.min(vEst * margin, idealVTarget);
 
-  // --- Braking ---
+  // --- Braking using ideal line brake zones ---
   let desiredBrake = 0;
-  // Brake as soon as the car is over the corner target — hard enough to be back
-  // at vTarget by the corner. Rally brakes gentler: its surface µ drops under
-  // braking load, so a hard brake just breaks the tyres loose.
-  let braking = brakeKappa > 0.01 && v > vTarget;
+  // Brake when approaching a brake zone and over target speed.
+  const inBrakeZone = brakeZoneDist > 0;
+  const approachingTurnIn = turnInIdx >= 0;
+  let braking = (inBrakeZone || approachingTurnIn) && v > vTarget;
   if (braking) {
     const overFrac = (v - vTarget) / Math.max(vTarget, 1);
-    // Cut the brake off near the target — residual brake at vTarget was
-    // overslowing into corners (brake→crawl→re-accelerate wobble). Above that
-    // the full strength curve brakes hard on the approach.
-    desiredBrake = overFrac < 0.05 ? 0 : Math.max(0, Math.min(1, 0.25 + overFrac * 1.1));
+    // Scale brake harder for larger speed overshoots.  A car going 2× target
+    // must brake at full force; a car just above target eases off.
+    desiredBrake = overFrac < 0.02 ? 0 : Math.max(0, Math.min(1, 0.35 + overFrac * 0.9));
     if (disc === 'rally') desiredBrake *= 0.75;
     // Street's driftable compound can't take a hard brake — the rear breaks
     // loose into the walls. Gentle, spreading stops instead.
     if (disc === 'street') desiredBrake *= 0.85;
+  }
+  // Emergency curvature brake: if there's high curvature ahead and the car
+  // is way over the speed it should be, brake regardless of zone detection.
+  // This catches corners the zone engine missed (e.g. very tight bends after
+  // a long straight).
+  if (!braking && Math.abs(node.kappaLine) > 0.015 && v > 8) {
+    const cornerV = Math.sqrt(aGrip / Math.max(Math.abs(node.kappaLine), 1e-3)) * 0.8;
+    if (v > cornerV * 1.3) {
+      const excess = (v - cornerV) / Math.max(cornerV, 1);
+      desiredBrake = Math.max(desiredBrake, Math.min(1, excess * 0.7));
+      braking = true;
+    }
   }
   // Bravery / confidence / skill nudge on momentum:
   //  - skilled drivers carry speed (brake at the last moment, hard)
@@ -365,11 +364,11 @@ export function tickDriverBrain(
   const traffic = trafficBrake(car, ctx.rivals, car.stats.aBrake);
   // During launch the pack is packed tight — scale traffic braking way down so
   // the grid can clear instead of locking itself against the field.
-  const launching = raceTime < PHYSICS.gridHoldSec;
+  const launching = raceTime < PHYSICS.aiLaunchSec;
   desiredBrake = Math.max(desiredBrake, launching ? traffic * 0.15 : traffic);
   // Contact-block braking only after the grid clears — during launch it just
   // pins the pack against each other (start stalls).
-  if (ctx.contactBlocked && car.v < 14 && raceTime > PHYSICS.gridHoldSec) {
+  if (ctx.contactBlocked && car.v < 14 && raceTime > PHYSICS.aiLaunchSec) {
     desiredBrake = Math.max(desiredBrake, 0.4);
   }
 
@@ -377,20 +376,21 @@ export function tickDriverBrain(
   const shaken = state.shaken;
 
   const baseLine = personalLineAt(car, track, car.s) + (raceTime < state.mistakeLUntil ? state.mistakeLShift : 0);
-  // Grid hold: hold the starting column through launch, then ease to the line —
-  // steering hard from the grid column at speed is what caused launch spins.
+  // Grid anchor: hold starting column for first 50m, then ease to personal line.
+  // Distance-based (not time-based) so it works at any launch speed.
   let lineT: number;
-  if (raceTime < PHYSICS.gridHoldSec * 1.2) {
-    const t = Math.min(1, raceTime / (PHYSICS.gridHoldSec * 1.2));
-    const eased = t * t * (3 - 2 * t);
-    lineT = car.gridL * (1 - eased) + baseLine * eased;
+  const anchorDist = 50;
+  const dsFromGrid = car.s - car.gridS;
+  const dsNormalized = dsFromGrid < 0 ? dsFromGrid + track.length : dsFromGrid;
+  if (dsNormalized < anchorDist) {
+    const w = 1 - dsNormalized / anchorDist;
+    const blend = w * w * (3 - 2 * w); // smoothstep
+    lineT = car.gridL * blend + baseLine * (1 - blend);
   } else {
     lineT = baseLine;
   }
-  // While shaken the line morphs toward the driver's own lane (their grid
-  // column) — a wider, less aggressive drawing of the corner that keeps lane
-  // separation instead of dragging both lanes into the center of the track.
-  lineT = lineT * (1 - 0.7 * shaken) + car.gridL * 0.7 * shaken;
+  // While shaken the line morphs toward centerline (safer), not grid column.
+  lineT = lineT * (1 - 0.7 * shaken);
   lineT = Math.max(-lineClamp, Math.min(lineClamp, lineT));
 
   // --- Throttle plan (grip-budget management) ---
@@ -434,6 +434,14 @@ export function tickDriverBrain(
     // turned tight circuits into spin-recover-spin loops.
     else desiredThrottle = Math.min(desiredThrottle, throttleByGrip);
 
+    // Exit throttle from idealVLine slope: if next node speed > current, we're in accel zone.
+    const nextIdx = (nodeIdx + 1) % track.nodes.length;
+    const idealVNext = car.idealVLine?.[nextIdx] ?? idealVTarget;
+    const inAccelZone = idealVNext > idealVTarget + 1.5; // speeding up by >1.5 m/s
+    if (inAccelZone && !braking) {
+      desiredThrottle = Math.max(desiredThrottle, throttleByGrip);
+    }
+
     // Drift throttle: the driver FEATHERS the pedal to hold the slide — power
     // keeps the rear loose, but too much spins it. Taper as the slide grows so
     // the drift settles instead of breaking away (or panic-cutting).
@@ -448,46 +456,51 @@ export function tickDriverBrain(
     // Never stall: a car crawling commits full power (no grid stutters).
     if (car.v < 3) desiredThrottle = 1;
   }
-  // Pure pursuit: aim at the racing line a lookahead ahead of the car, so the
-  // recovery arcs in smoothly instead of yanking across the track.
-  const lookS = (car.s + lookahead * 0.6) % track.length;
+
+  // Pure pursuit lookahead — scales with speed and skill so faster / better
+  // drivers look further ahead on straights but the car still reacts to sharp
+  // corners.  CRITICAL: lookahead must be SHORTER than the upcoming corner, or
+  // the car sees the EXIT (opposite side of the track) and steers the WRONG
+  // WAY.  Low speed = tight corners = very short lookahead.
+  const lookahead = Math.max(6, Math.min(60, v * (0.5 + 0.5 * skill01) + 5));
+  const lookS = (car.s + lookahead) % track.length;
   const lineTAhead = Math.max(
     -lineClamp,
     Math.min(lineClamp, personalLineAt(car, track, lookS)),
   );
   const errLat = lineTAhead - (car.l + lookahead * Math.sin(car.slipAngle));
-  // Kinematic pursuit: requested curvature = 2·err/λ² → steer angle for that arc.
-  const lam = Math.max(lookahead, 14);
-  const steerPursuit = Math.atan(
-    (2 * errLat * (car.setup?.wheelbase ?? 2.7)) / (lam * lam),
-  );
-  // The wheels point where the Racer aims the nose (pure pursuit) plus a hint
-  // of countersteer (the Racer reads its own slide) — and a SMALL lateral
-  // damper that catches a momentum plow in a hairpin without erasing the drift
-  // (the drift lives in the body slip, not the lateral velocity).
-  const steerYaw = -0.15 * car.slipAngle;
-  const steerDamp = -0.18 * (car.dl / Math.max(v, 6));
-  let steer = Math.max(-0.6, Math.min(0.6, steerPursuit + steerYaw + steerDamp));
-  // Grip-limited steering: at speed the tyres can only turn the car so hard
-  // (max yaw ≈ grip/v). Demanding more just slides the front — a spin. This
-  // is why full lock at 11 m/s spun the cars.
-  const steerCap = Math.atan(
-    (1.5 * G * (car.setup?.wheelbase ?? 2.7)) / Math.max(v * v, 18),
-  );
-  steer = Math.max(-steerCap, Math.min(steerCap, steer));
-  // Threshold braking: while braking hard, keep the wheel almost straight —
-  // braking and big steering together overload the front axle (understeer-wide).
-  // The driver brakes in a line, then turns in once the speed is down.
-  if (desiredBrake > 0.2) steer *= 1 - 0.55 * Math.min(1, desiredBrake - 0.2);
+  const wb = car.setup?.wheelbase ?? 2.7;
+
+  // Lateral-error pursuit (position controller).
+  const steerLat = Math.atan((2 * errLat * wb) / (lookahead * lookahead));
+
+  // Heading-error pursuit (direction controller) — the angle between the
+  // car's velocity and the line to the target point.  Directly encodes how
+  // much the car needs to rotate, so it works at any speed.
+  const dx = lookahead;
+  const dy = lineTAhead - car.l;
+  const steerHeading = Math.atan2(dy, Math.max(dx, 1));
+
+  // Blend: LOW speed uses heading (responsiveness in tight corners),
+  // high speed uses lateral-error (smooth high-speed path following).
+  const headingW = Math.max(0.3, Math.min(0.9, 1.2 - v / 35));
+  const steerPursuit = steerLat * (1 - headingW) + steerHeading * headingW;
+  // Countersteer: the Racer reads its own slide and counters — scaled down
+  // at low speed so tight cornering isn't fighting the damping.
+  const steerYaw = v > 8 ? -0.15 * car.slipAngle : -0.06 * car.slipAngle;
+  const steerDamp = v > 6 ? -0.12 * (car.dl / v) : 0;
+  let steer = Math.max(-0.7, Math.min(0.7, steerPursuit + steerYaw + steerDamp));
 
   // Skill: rate limit (neuromuscular) + tracking noise.
-  const rate = 2.6 + 1.9 * skill01;
+  // Low speed demands sharper turn-in — boost the rate for tight corners.
+  const speedBoost = v < 15 ? 1.5 : 1;
+  const rate = (2.6 + 1.9 * skill01) * speedBoost;
   steer = Math.max(
     state.prevSteer - rate * PHYSICS.dt * 4,
     Math.min(state.prevSteer + rate * PHYSICS.dt * 4, steer),
   );
   steer += (rng() - 0.5) * 0.06 * (1 - skill01);
-  steer = Math.max(-0.6, Math.min(0.6, steer));
+  steer = Math.max(-0.7, Math.min(0.7, steer));
   state.prevSteer = steer;
 
   // --- Slide recovery (countersteer) ---
@@ -513,7 +526,7 @@ export function tickDriverBrain(
           ? Math.sign(car.slipAngle || 1)
           : Math.sign(car.yawRate || 1);
       const catchQuality = 0.45 + 0.7 * skill01;
-      steer = Math.max(-0.6, Math.min(0.6, steer - slideSign * catchQuality));
+      steer = Math.max(-0.7, Math.min(0.7, steer - slideSign * catchQuality));
       desiredThrottle = Math.min(desiredThrottle, 0.25);
     }
   }

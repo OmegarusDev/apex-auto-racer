@@ -11,11 +11,11 @@ import type { CarSimState } from '../engine/Vehicle';
 import { computePinAuthorityBlend } from '../engine/Vehicle';
 import { pad, type ThemeTokens } from '../ui/theme';
 
-export function pegRatio(car: CarSimState): number {
+function pegRatio(car: CarSimState): number {
   return car.v / Math.max(car.vDeslot, 1);
 }
 
-export function playerGearBand(car: CarSimState, discipline: DisciplineId): number {
+function playerGearBand(car: CarSimState, discipline: DisciplineId): number {
   const box = gearboxFor(discipline);
   return gearBandFrac(car.v, car.stats.vMax, car.gear, box);
 }

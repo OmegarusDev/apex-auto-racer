@@ -146,12 +146,13 @@ export class RaceDirector {
   readonly session: SessionKind;
   /** Sprint finish line arc length (m); 0 for non-sprint sessions. */
   readonly sprintFinishS: number;
-  /** Sprint progress 0..1 for the HUD — distance past the START line toward
-   *  the finish. A car on the grid (just behind s=0, i.e. s≈L-δ) reads ~0. */
+  /** Sprint progress 0..1 for the HUD — distance from the START line (s=0) toward
+   *  the finish (sprintFinishS). A car on the grid (s=gridPoleGap) reads ~0. */
   get sprintProgress(): number {
     if (this.session !== 'sprint') return 0;
     const p = this.carsView.find((c) => c.isPlayerControlled);
     if (p === undefined) return 0;
+    if (p.finished) return 1;
     const dist = p.s <= this.sprintFinishS ? p.s : p.s - this.track.length;
     return Math.min(1, Math.max(0, dist / Math.max(1, this.sprintFinishS)));
   }
@@ -419,6 +420,7 @@ export class RaceDirector {
       track: this.track,
       rng: this.rng,
       globalRainStack: this.globalRainStack,
+      muSurface: this.muSurface,
     });
     this.drivers = field.drivers;
     this.entries = field.entries;
@@ -533,12 +535,15 @@ export class RaceDirector {
         // After the flag, classified cars cruise (cool-down) instead of racing
         // — keeps the pack moving on screen without stacking deslots while the
         // stragglers still on track race to the line for their classification.
-        const cruise = this.finishWindowOpen ? 0.3 : 1;
+        // Sprint finished cars brake to a stop; circuit cars cruise.
+        const isSprintFinished = this.session === 'sprint' && entry.car.finished;
+        const cruise = isSprintFinished ? 0 : this.finishWindowOpen ? 0.3 : 1;
+        const brake = isSprintFinished ? 0.5 : 0;
         updateVehicle(
           entry.car,
           this.track,
           dt,
-          { throttle: entry.brainOut.desiredThrottle * cruise, brake: 0 },
+          { throttle: entry.brainOut.desiredThrottle * cruise, brake },
           entry.brainOut,
           ctx,
         );
@@ -690,6 +695,9 @@ export class RaceDirector {
       car.finished = true;
       car.finishTime = this.raceTime;
       car.lap = 1;
+      // Coast to a stop — don't freeze on the line (causes pileups).
+      car.throttle = 0;
+      car.brake = 0.5;
       this.pushEvent('finish', car, entry.driver.name, 'sprint');
       if (!this.finishWindowOpen) {
         this.finishWindowOpen = true;
@@ -748,7 +756,9 @@ export class RaceDirector {
     for (const entry of this.entries) {
       if (entry.car.finished) continue;
       const toLine =
-        this.session === 'sprint' ? line - entry.car.s : (line - entry.car.s) % line;
+        this.session === 'sprint'
+          ? Math.max(0, line - entry.car.s)
+          : (line - entry.car.s) % line;
       const pace = Math.max(entry.car.v, BALANCE.finishWindowMinPace);
       const need = toLine / pace;
       if (need > worst) worst = need;

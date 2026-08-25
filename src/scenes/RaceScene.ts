@@ -58,6 +58,7 @@ import {
   type ModalDef,
   type SliderDef,
 } from '../ui/components';
+import { toOrdinal } from '../utils/helpers';
 import { accentForDiscipline, createTheme, type ThemeTokens } from '../ui/theme';
 import { gearboxFor } from '../engine/Gearbox';
 import { DEFAULT_RACE_ZOOM } from '../engine/types';
@@ -129,6 +130,8 @@ export class RaceScene implements Scene {
   private shiftCueArmed = false;
   private ghostCarId: string | null = null;
   private ghostTrace: GhostTrace | null = null;
+  /** Toggle for showing racing lines (ideal + personal + actual). */
+  private showRacingLines = false;
   private lastDt = 1 / 60;
   private animTime = 0;
   private prevCarWallHits = new Map<string, number>();
@@ -385,7 +388,7 @@ export class RaceScene implements Scene {
     const token = createTheme(w, h);
     const accent = disciplineAccent(this.launch.discipline);
     const cam = this.view.writeCamera(this.camOut);
-    const cars = this.buildCarFrame(director, accent);
+    const cars = this.buildCarFrame(director);
     const playerIdx = cars.findIndex((c) => c.isPlayer);
 
     let ghost: RaceFrameView['ghost'] = null;
@@ -422,7 +425,7 @@ export class RaceScene implements Scene {
       discipline: this.launch.discipline,
       raceZoom,
     };
-    this.view.draw(ctx, frame);
+    this.view.draw(ctx, { ...frame, showRacingLines: this.showRacingLines });
 
     // Pedal deck under HUD so pause/minimap stay readable.
     const playerCar = director.cars.find((c) => c.isPlayerControlled);
@@ -478,8 +481,8 @@ export class RaceScene implements Scene {
     }
   }
 
-  private buildCarFrame(director: RaceDirector, playerAccent: string): CarFrameDto[] {
-    return buildCarFrameDto(this.view, director, playerAccent, this.frameCars);
+private buildCarFrame(director: RaceDirector): CarFrameDto[] {
+    return buildCarFrameDto(this.view, director, this.frameCars);
   }
 
   private openPause(): void {
@@ -651,7 +654,6 @@ export class RaceScene implements Scene {
     setupCountdownCamera(
       this.view,
       this.director,
-      this.launch.discipline,
       this.frameCars,
       this.g.canvas.clientWidth,
       this.g.canvas.clientHeight,
@@ -663,7 +665,6 @@ export class RaceScene implements Scene {
     updateRaceCamera(
       this.view,
       director,
-      this.launch.discipline,
       this.frameCars,
       this.g.canvas.clientWidth,
       this.g.canvas.clientHeight,
@@ -1033,6 +1034,16 @@ export class RaceScene implements Scene {
       onClick: () => this.openPause(),
     };
 
+    // Racing lines toggle button (below pause button)
+    const linesBtn: ButtonDef = {
+      x: chrome.pause.x,
+      y: chrome.pause.y + chrome.pause.h + pad(token, 0.5),
+      w: chrome.pause.w,
+      h: chrome.pause.h,
+      label: this.showRacingLines ? 'Hide Lines' : 'Show Lines',
+      onClick: () => { this.showRacingLines = !this.showRacingLines; },
+    };
+
     ctx.save();
     // Position plate — big timing-board numeral
     ctx.font = `400 ${Math.max(token.fontDisplay * 1.15, token.fontTitle * 1.4)}px ${token.fontDisplayFamily}`;
@@ -1050,9 +1061,9 @@ export class RaceScene implements Scene {
     if (director.countdown === null) {
       if (standing !== undefined) {
       ctx.fillStyle = accent;
-      ctx.fillText(`P${standing.position}`, hudX, hudY);
+      ctx.fillText(`${toOrdinal(standing.position)}`, hudX, hudY);
       // Hairline under position
-      const pw = ctx.measureText(`P${standing.position}`).width;
+      const pw = ctx.measureText(`${toOrdinal(standing.position)}`).width;
       ctx.fillStyle = `${accent}88`;
       ctx.fillRect(hudX, hudY + token.fontDisplay * 1.05, Math.min(pw, pad(token, 6)), 3);
       hudY += token.fontDisplay * 1.15 + pad(token, 0.35);
@@ -1178,6 +1189,8 @@ export class RaceScene implements Scene {
       };
       drawButton(ctx, pauseBtn, pauseUi);
       handleButton(pauseBtn, pauseUi);
+      drawButton(ctx, linesBtn, pauseUi);
+      handleButton(linesBtn, pauseUi);
       this.drawZoomSlider(ctx, chrome, pauseUi, accent);
     }
 
@@ -1412,7 +1425,7 @@ export class RaceScene implements Scene {
     if (standing !== undefined) {
       ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
       ctx.fillStyle = accent;
-      ctx.fillText(`P${standing.position}`, w * 0.5, h * 0.42 + token.fontDisplay);
+      ctx.fillText(`${toOrdinal(standing.position)}`, w * 0.5, h * 0.42 + token.fontDisplay);
     }
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
     ctx.fillStyle = token.textDim;

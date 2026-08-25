@@ -29,39 +29,15 @@ function setupWorldCanvas(canvas: HTMLCanvasElement, w: number, h: number, dpr: 
   void dpr;
 }
 
-function hideSplash(): void {
-  const splash = document.querySelector<HTMLElement>('#splash');
-  if (splash === null) return;
-  splash.dataset.apexBoot = 'done';
-  splash.style.opacity = '0';
-  window.setTimeout(() => splash.remove(), 400);
-}
-
 /** Never leave a dead splash: show the real error on the splash plate. */
 function showBootError(err: unknown): void {
-  const splash = document.querySelector<HTMLElement>('#splash');
   const message = err instanceof Error ? err.message : String(err);
   console.error('[apex] boot failed:', err);
-  if (splash === null) {
-    window.alert(`Apex failed to start:\n${message}`);
+  if (window.__apexBoot) {
+    window.__apexBoot.error(message);
     return;
   }
-  splash.dataset.apexBoot = 'error';
-  splash.style.pointerEvents = 'auto';
-  splash.style.opacity = '1';
-  splash.innerHTML = '';
-  const mark = document.createElement('span');
-  mark.className = 'mark';
-  mark.textContent = 'APEX';
-  const sub = document.createElement('span');
-  sub.className = 'sub';
-  sub.textContent = 'BOOT FAILED';
-  const detail = document.createElement('pre');
-  detail.style.cssText =
-    'max-width:min(92vw,42rem);margin:1.25rem 1rem 0;padding:0;white-space:pre-wrap;word-break:break-word;' +
-    'font:500 12px/1.45 "IBM Plex Sans","Segoe UI",sans-serif;letter-spacing:0.02em;color:#f2efe6;opacity:0.85;text-align:center';
-  detail.textContent = message;
-  splash.append(mark, sub, detail);
+  window.alert(`Apex failed to start:\n${message}`);
 }
 
 function runDevBootChecks(): void {
@@ -152,19 +128,22 @@ function main(): void {
 // from "main is running".
 document.querySelector('#splash')?.setAttribute('data-apex-boot', 'loading');
 
+// Type for the boot API exposed by index.html's inline script.
+declare global {
+  interface Window {
+    __apexBoot?: {
+      progress: (p: number) => void;
+      ready: () => void;
+      error: (msg: string) => void;
+    };
+  }
+}
+
 try {
   main();
-  // Gate the splash→title handoff on the brand font being ready. The HTML
-  // splash uses display=block (text invisible until the font loads), and the
-  // canvas title would otherwise draw with a FALLBACK font first, then pop to
-  // Bebas Neue mid-title — the "font changes, then changes again" jank. One
-  // clean reveal: splash (Bebas) → title (Bebas), no fallback flash.
-  const fontsReady =
-    typeof document !== 'undefined' && 'fonts' in document
-      ? (document as Document & { fonts: { ready: Promise<unknown> } }).fonts.ready
-      : Promise.resolve();
-  const fontTimeout = new Promise<void>((res) => window.setTimeout(res, 2500));
-  Promise.race([fontsReady, fontTimeout]).then(() => hideSplash());
+  // Fonts are self-hosted; the splash bar is driven by index.html. Signal ready
+  // once the game + first frame are scheduled — the splash eases out.
+  window.__apexBoot?.ready();
 } catch (err) {
   showBootError(err);
 }

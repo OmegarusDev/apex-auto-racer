@@ -139,10 +139,3 @@ export function rpmFromBand(band: number, throttle: number): number {
   const base = idle + (max - min) * Math.max(0, Math.min(1, band));
   return base * (0.85 + 0.15 * Math.max(0, Math.min(1, throttle)));
 }
-
-/** Normalized rev meter 0..1 for SHIFT HUD (idle→redline). */
-export function revMeterNorm(rpm: number): number {
-  const lo = PHYSICS.rpmIdle;
-  const hi = PHYSICS.rpmMax;
-  return Math.max(0, Math.min(1, (rpm - lo) / Math.max(1, hi - lo)));
-}

@@ -23,28 +23,27 @@ import { sampleTrack } from '../TrackSampler';
  * the cars cross. Always drawn at the start (s=0) and again at the sprint
  * finish, wherever that lands on the loop.
  */
+const FINISH_ARCH_HEIGHT = 4.5;
+const FINISH_ARCH_WIDTH_EXTRA = 3.0;
+const FINISH_BANNER_HEIGHT = 1.2;
+
 function buildLineBand(
   mb: MeshBuilder,
   track: TrackView,
   s: number,
+  isSprintFinish = false,
 ): void {
-  const halfLen = 1.5;
-  const alongSteps = 2;
   const center = sampleTrack(track, s);
-  const acrossCells = Math.max(3, Math.min(12, Math.round(center.width / 2)));
-  const light: readonly [number, number, number] = [0.93, 0.93, 0.88];
-  const dark: readonly [number, number, number] = [0.13, 0.13, 0.14];
-  const yLift = 0.05;
 
-  for (let i = 0; i < alongSteps; i++) {
-    const a0 = sampleTrack(track, s - halfLen + (2 * halfLen * i) / alongSteps);
-    const a1 = sampleTrack(track, s - halfLen + (2 * halfLen * (i + 1)) / alongSteps);
-    const w0 = a0.width / 2;
-    const w1 = a1.width / 2;
-    for (let j = 0; j < acrossCells; j++) {
-      const c = (i + j) % 2 === 0 ? light : dark;
-      const t0 = -1 + (2 * j) / acrossCells;
-      const t1 = -1 + (2 * (j + 1)) / acrossCells;
+  // Checkered line on the track surface (simplified - just 2 segments across)
+  for (let i = 0; i < 2; i++) {
+    const a0 = sampleTrack(track, s - 1.5 + (3 * i) / 2);
+    const a1 = sampleTrack(track, s - 1.5 + (3 * (i + 1)) / 2);
+    for (let j = 0; j < 12; j++) {
+      const t0 = -1 + (2 * j) / 12;
+      const t1 = -1 + (2 * (j + 1)) / 12;
+      const w0 = (center.width / 2) * (1 - Math.abs(-1 + (2 * i) / 2) * 0.1);
+      const w1 = (center.width / 2) * (1 - Math.abs(-1 + (2 * (i + 1)) / 2) * 0.1);
       const ax = a0.pos.x + a0.normal.x * t0 * w0;
       const ay = a0.pos.y + a0.normal.y * t0 * w0;
       const bx = a0.pos.x + a0.normal.x * t1 * w0;
@@ -54,10 +53,105 @@ function buildLineBand(
       const dx = a1.pos.x + a1.normal.x * t0 * w1;
       const dy = a1.pos.y + a1.normal.y * t0 * w1;
       mb.addFace(
-        ax, yLift, -ay,
-        bx, yLift, -by,
-        cx, yLift, -cy,
-        dx, yLift, -dy,
+        ax, 0.05, -ay,
+        bx, 0.05, -by,
+        cx, 0.05, -cy,
+        dx, 0.05, -dy,
+        0, 1, 0,
+        0.93, 0.93, 0.88,
+        MAT_GENERIC,
+      );
+    }
+  }
+
+  if (isSprintFinish) {
+    const archWidth = center.width / 2 + FINISH_ARCH_WIDTH_EXTRA;
+    
+    // Arch posts (vertical supports)
+    const postWidth = 0.4;
+    const postDepth = 0.6;
+    for (const side of [-1, 1] as const) {
+      const px = center.pos.x + side * center.normal.x * archWidth;
+      
+      // Post base
+      mb.addFace(
+        px - postWidth/2, 0, -center.normal.y * archWidth - postDepth/2,
+        px + postWidth/2, 0, -center.normal.y * archWidth - postDepth/2,
+        px + postWidth/2, FINISH_ARCH_HEIGHT, -center.normal.y * archWidth - postDepth/2,
+        px - postWidth/2, FINISH_ARCH_HEIGHT, -center.normal.y * archWidth - postDepth/2,
+        side * center.normal.x, 0, side * center.normal.y,
+        0.18, 0.18, 0.2,
+        MAT_CONCRETE,
+      );
+      // Post top cap
+      mb.addFace(
+        px - postWidth/2, FINISH_ARCH_HEIGHT, -center.normal.y * archWidth - postDepth/2,
+        px + postWidth/2, FINISH_ARCH_HEIGHT, -center.normal.y * archWidth - postDepth/2,
+        px + postWidth/2, FINISH_ARCH_HEIGHT, -center.normal.y * archWidth + postDepth/2,
+        px - postWidth/2, FINISH_ARCH_HEIGHT, -center.normal.y * archWidth + postDepth/2,
+        0, 1, 0,
+        0.12, 0.12, 0.14,
+        MAT_CONCRETE,
+      );
+    }
+    
+    // Arch crossbeam
+    const beamY = FINISH_ARCH_HEIGHT;
+    const beamHeight = 0.5;
+    const beamDepth = 1.0;
+    
+    mb.addFace(
+      center.pos.x - center.normal.x * archWidth, beamY, -center.normal.y * archWidth - beamDepth/2,
+      center.pos.x + center.normal.x * archWidth, beamY, -center.normal.y * archWidth - beamDepth/2,
+      center.pos.x + center.normal.x * archWidth, beamY + beamHeight, -center.normal.y * archWidth - beamDepth/2,
+      center.pos.x - center.normal.x * archWidth, beamY + beamHeight, -center.normal.y * archWidth - beamDepth/2,
+      -center.normal.x, 0, -center.normal.y,
+      0.15, 0.15, 0.18,
+      MAT_CONCRETE,
+    );
+    
+    // Finish banner on the arch
+    const bannerY = FINISH_ARCH_HEIGHT + 0.3;
+    const bannerHeight = FINISH_BANNER_HEIGHT;
+    const bannerDepth = 0.15;
+    for (let j = 0; j < 12; j++) {
+      const c = j % 2 === 0 ? [0.93, 0.93, 0.88] : [0.13, 0.13, 0.14];
+      const t0 = -1 + (2 * j) / 12;
+      const t1 = -1 + (2 * (j + 1)) / 12;
+      const bannerWidth = center.width + 4;
+      const bx0 = center.pos.x + center.normal.x * t0 * bannerWidth/2;
+      const bz0 = -center.pos.y + center.normal.y * t0 * bannerWidth/2;
+      const bx1 = center.pos.x + center.normal.x * t1 * bannerWidth/2;
+      const bz1 = -center.pos.y + center.normal.y * t1 * bannerWidth/2;
+      
+      mb.addFace(
+        bx0, bannerY, -bz0 + bannerDepth/2,
+        bx1, bannerY, -bz1 + bannerDepth/2,
+        bx1, bannerY + bannerHeight, -bz1 + bannerDepth/2,
+        bx0, bannerY + bannerHeight, -bz0 + bannerDepth/2,
+        0, 1, 0,
+        c[0], c[1], c[2],
+        MAT_GENERIC,
+      );
+    }
+    
+    // "FINISH" text placeholder - vertical stripes on banner
+    const textY = FINISH_ARCH_HEIGHT + 0.5;
+    for (let k = 0; k < 6; k++) {
+      const t0 = -1 + (2 * k) / 6;
+      const t1 = -1 + (2 * (k + 1)) / 6;
+      const c = k % 2 === 0 ? [0.13, 0.13, 0.14] : [0.93, 0.93, 0.88];
+      const bannerWidth = center.width + 4;
+      const bx0 = center.pos.x + center.normal.x * t0 * bannerWidth/2;
+      const bz0 = -center.pos.y + center.normal.y * t0 * bannerWidth/2;
+      const bx1 = center.pos.x + center.normal.x * t1 * bannerWidth/2;
+      const bz1 = -center.pos.y + center.normal.y * t1 * bannerWidth/2;
+      
+      mb.addFace(
+        bx0, textY, -bz0 + bannerDepth/2,
+        bx1, textY, -bz1 + bannerDepth/2,
+        bx1, textY + 0.4, -bz1 + bannerDepth/2,
+        bx0, textY + 0.4, -bz0 + bannerDepth/2,
         0, 1, 0,
         c[0], c[1], c[2],
         MAT_GENERIC,
@@ -71,7 +165,8 @@ export interface BuiltTrackMesh {
   indices: Uint16Array | Uint32Array;
   /** Normalized polyline for minimap (nx, ny in 0..1). */
   minimap: Array<{ nx: number; ny: number }>;
-  /** World extent the minimap is normalized to (the full closed loop). */
+  /** World extent the minimap is normalized to (the RACED ribbon only — the
+   *  full loop for circuits, the point-to-point trip for sprints). */
   minimapExtent: { minX: number; maxX: number; minY: number; maxY: number };
 }
 
@@ -87,26 +182,32 @@ interface RibbonSample {
   kappa: number;
 }
 
-function sampleClosed(
+/**
+ * Sample the ribbon between two arc positions (open polyline, inclusive of both
+ * ends). A circuit samples 0 → length (which closes on itself because s=0 ≡
+ * s=length); a sprint samples only the raced portion and stays OPEN — a sprint
+ * is point-to-point, never a loop.
+ */
+function sampleTrackRibbon(
   track: TrackView,
+  fromS: number,
+  toS: number,
   segments: number,
 ): RibbonSample[] {
   const nodes = track.nodes;
   const n = nodes.length;
-  // Always sample the full closed mother loop — even a sprint races on the
-  // whole loop (the finish banner sits at sprintFinishS on it). The loop is
-  // validated non-self-intersecting, so the ribbon never crosses itself.
   const length = track.length;
   const out: RibbonSample[] = [];
+  const span = toS - fromS;
 
-  for (let i = 0; i < segments; i++) {
-    const sQuery = (i / segments) * length;
+  for (let i = 0; i <= segments; i++) {
+    const sQuery = fromS + (i / segments) * span;
     let lo = 0;
     while (lo < n - 1 && nodes[lo + 1]!.s <= sQuery) lo++;
     const a = nodes[lo]!;
     const b = nodes[(lo + 1) % n]!;
-    const span = lo === n - 1 ? Math.max(1e-6, length - a.s) : Math.max(1e-6, b.s - a.s);
-    const t = Math.max(0, Math.min(1, (sQuery - a.s) / span));
+    const segSpan = lo === n - 1 ? Math.max(1e-6, length - a.s) : Math.max(1e-6, b.s - a.s);
+    const t = Math.max(0, Math.min(1, (sQuery - a.s) / segSpan));
     const x = a.pos.x + (b.pos.x - a.pos.x) * t;
     const y = a.pos.y + (b.pos.y - a.pos.y) * t;
     const tx = a.tangent.x + (b.tangent.x - a.tangent.x) * t;
@@ -130,7 +231,6 @@ function sampleClosed(
       kappa,
     });
   }
-  out.push(out[0]!);
   return out;
 }
 
@@ -237,18 +337,27 @@ function scatterScenery(
     placed++;
   }
 }
-export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): BuiltTrackMesh {
-  void _palette;
-  const mb = new MeshBuilder();
-  const samples = sampleClosed(track, Math.max(120, track.nodes.length * 2));
+// Brighter mesh bases (shader fuzz owns detail; these help fallback tinting).
+const TARMAC_BASE = [0.4, 0.4, 0.42] as const;
+const DIRT_BASE = [0.7, 0.58, 0.38] as const;
+const GRASS_BASE = [0.35, 0.62, 0.28] as const;
+const GROOVE_BASE = [0.25, 0.25, 0.26] as const;
 
-  // Brighter mesh bases (shader fuzz owns detail; these help fallback tinting).
-  const tarmacBase = [0.4, 0.4, 0.42] as const;
-  const dirtBase = [0.7, 0.58, 0.38] as const;
-  const grassBase = [0.35, 0.62, 0.28] as const;
-  const grooveBase = [0.25, 0.25, 0.26] as const;
-  const concreteBase = [0.65, 0.64, 0.6] as const;
+const GROOVE_HALF = 0.55;
+const GRASS_EXTRA = 18;
 
+/** Roll-out past a sprint's finish line so its banner sits fully on tarmac. */
+const SPRINT_ROLLOUT = 8;
+/** Fake-road stub length (m) and sample spacing — long enough to vanish in fog. */
+const STUB_LENGTH = 240;
+const STUB_STEP = 6;
+
+/**
+ * Extrude the full road cross-section (grass verge → dirt runoff → tarmac →
+ * recessed groove) along an OPEN ribbon of samples. Circuits pass a closed
+ * ribbon (first == last); sprints pass an open one, plus fake-road stubs.
+ */
+function buildRoadBands(mb: MeshBuilder, samples: readonly RibbonSample[]): void {
   const leftAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const rightAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const leftGroove: Array<{ x: number; y: number; z: number }> = [];
@@ -259,9 +368,6 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
   const rightDirtOuter: Array<{ x: number; y: number; z: number }> = [];
   const leftGrassOuter: Array<{ x: number; y: number; z: number }> = [];
   const rightGrassOuter: Array<{ x: number; y: number; z: number }> = [];
-
-  const grooveHalf = 0.55;
-  const grassExtra = 18;
 
   for (const s of samples) {
     const dirtW = Math.max(s.runoff * 1.15, 3.2);
@@ -276,14 +382,14 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
       z: s.z - s.nz * s.halfW,
     });
     leftGroove.push({
-      x: s.x + s.nx * grooveHalf,
+      x: s.x + s.nx * GROOVE_HALF,
       y: -0.045,
-      z: s.z + s.nz * grooveHalf,
+      z: s.z + s.nz * GROOVE_HALF,
     });
     rightGroove.push({
-      x: s.x - s.nx * grooveHalf,
+      x: s.x - s.nx * GROOVE_HALF,
       y: -0.045,
-      z: s.z - s.nz * grooveHalf,
+      z: s.z - s.nz * GROOVE_HALF,
     });
     leftDirtInner.push({
       x: s.x + s.nx * s.halfW,
@@ -306,14 +412,14 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
       z: s.z - s.nz * (s.halfW + dirtW),
     });
     leftGrassOuter.push({
-      x: s.x + s.nx * (s.halfW + dirtW + grassExtra),
+      x: s.x + s.nx * (s.halfW + dirtW + GRASS_EXTRA),
       y: -0.04,
-      z: s.z + s.nz * (s.halfW + dirtW + grassExtra),
+      z: s.z + s.nz * (s.halfW + dirtW + GRASS_EXTRA),
     });
     rightGrassOuter.push({
-      x: s.x - s.nx * (s.halfW + dirtW + grassExtra),
+      x: s.x - s.nx * (s.halfW + dirtW + GRASS_EXTRA),
       y: -0.04,
-      z: s.z - s.nz * (s.halfW + dirtW + grassExtra),
+      z: s.z - s.nz * (s.halfW + dirtW + GRASS_EXTRA),
     });
   }
 
@@ -322,18 +428,18 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     leftGrassOuter,
     leftDirtOuter,
     0,
-    grassBase[0],
-    grassBase[1],
-    grassBase[2],
+    GRASS_BASE[0],
+    GRASS_BASE[1],
+    GRASS_BASE[2],
     MAT_GRASS,
   );
   mb.ribbon(
     rightDirtOuter,
     rightGrassOuter,
     0,
-    grassBase[0],
-    grassBase[1],
-    grassBase[2],
+    GRASS_BASE[0],
+    GRASS_BASE[1],
+    GRASS_BASE[2],
     MAT_GRASS,
   );
 
@@ -342,18 +448,18 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     leftDirtOuter,
     leftDirtInner,
     0,
-    dirtBase[0],
-    dirtBase[1],
-    dirtBase[2],
+    DIRT_BASE[0],
+    DIRT_BASE[1],
+    DIRT_BASE[2],
     MAT_DIRT,
   );
   mb.ribbon(
     rightDirtInner,
     rightDirtOuter,
     0,
-    dirtBase[0],
-    dirtBase[1],
-    dirtBase[2],
+    DIRT_BASE[0],
+    DIRT_BASE[1],
+    DIRT_BASE[2],
     MAT_DIRT,
   );
 
@@ -362,18 +468,18 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     leftAsphalt,
     leftGroove,
     0,
-    tarmacBase[0],
-    tarmacBase[1],
-    tarmacBase[2],
+    TARMAC_BASE[0],
+    TARMAC_BASE[1],
+    TARMAC_BASE[2],
     MAT_TARMAC,
   );
   mb.ribbon(
     rightGroove,
     rightAsphalt,
     0,
-    tarmacBase[0],
-    tarmacBase[1],
-    tarmacBase[2],
+    TARMAC_BASE[0],
+    TARMAC_BASE[1],
+    TARMAC_BASE[2],
     MAT_TARMAC,
   );
 
@@ -382,16 +488,89 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     leftGroove,
     rightGroove,
     0,
-    grooveBase[0],
-    grooveBase[1],
-    grooveBase[2],
+    GROOVE_BASE[0],
+    GROOVE_BASE[1],
+    GROOVE_BASE[2],
     MAT_GROOVE,
   );
+}
 
-  // Red/white rumble strips on corners + muted concrete barriers
-  for (let i = 0; i < samples.length - 1; i++) {
-    const s0 = samples[i]!;
-    const s1 = samples[i + 1]!;
+/**
+ * A synthetic, gently winding road continuation for a sprint's start (dir -1,
+ * running backward out of the start line) or finish (dir +1, running forward
+ * from the finish). Presentation only — it never enters physics, the minimap,
+ * kerbs, barriers, or line bands. It is deliberately NOT the mother loop's
+ * geometry: a sprint is point-to-point, and this only makes the raced section
+ * look like a stretch of a longer road that runs off into the fog.
+ */
+function buildRoadStub(
+  anchor: RibbonSample,
+  dir: 1 | -1,
+  track: TrackView,
+): RibbonSample[] {
+  const steps = Math.max(20, Math.round(STUB_LENGTH / STUB_STEP));
+  const seed =
+    ((Math.round(track.bounds.minX * 13.7 + track.bounds.minY * 29.3) >>> 0) ^ 0x5a17c9e3) >>> 0;
+  const rng = scatterRng(seed);
+  const out: RibbonSample[] = [];
+  let x = anchor.x;
+  let z = anchor.z;
+  // Forward tangent heading in engine XZ. The road normal is the tangent
+  // rotated -90°: (sin φ, -cos φ) — matching the track sampler's convention, so
+  // the stub's edges line up with the raced ribbon at the junction.
+  let phi = Math.atan2(anchor.tz, anchor.tx);
+  let bend = 0;
+  const { halfW, runoff } = anchor;
+
+  for (let i = 0; i <= steps; i++) {
+    out.push({
+      x,
+      z,
+      tx: Math.cos(phi),
+      tz: Math.sin(phi),
+      nx: Math.sin(phi),
+      nz: -Math.cos(phi),
+      halfW,
+      runoff,
+      kappa: 0,
+    });
+    x += dir * Math.cos(phi) * STUB_STEP;
+    z += dir * Math.sin(phi) * STUB_STEP;
+    // Gentle, mean-reverting wander — the road drifts naturally but never
+    // doubles back on itself.
+    bend = (bend + (rng() - 0.5) * 0.012) * 0.97;
+    phi += bend;
+  }
+  return out;
+}
+
+export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): BuiltTrackMesh {
+  void _palette;
+  const mb = new MeshBuilder();
+
+  const isSprint = track.sprintFinishS !== undefined;
+  const segCount = Math.max(120, track.nodes.length * 2);
+  // Raced ribbon: the full loop for circuits, or the point-to-point trip
+  // (open) for sprints.
+  const racedEnd = isSprint ? track.sprintFinishS! + SPRINT_ROLLOUT : track.length;
+  const raced = sampleTrackRibbon(track, 0, racedEnd, segCount);
+
+  // Fake-road stubs so the sprint reads as part of a longer road, not a road
+  // that stops dead at the start/finish banners.
+  const stubBefore = isSprint ? buildRoadStub(raced[0]!, -1, track) : null;
+  const stubAfter = isSprint ? buildRoadStub(raced[raced.length - 1]!, 1, track) : null;
+
+  if (stubBefore) buildRoadBands(mb, stubBefore);
+  buildRoadBands(mb, raced);
+  if (stubAfter) buildRoadBands(mb, stubAfter);
+
+  const concreteBase = [0.65, 0.64, 0.6] as const;
+
+  // Red/white rumble strips on corners + muted concrete barriers — raced ribbon
+  // only (fake stubs carry no kerbs or walls).
+  for (let i = 0; i < raced.length - 1; i++) {
+    const s0 = raced[i]!;
+    const s1 = raced[i + 1]!;
     if (s0.kappa >= KERB_KAPPA || s1.kappa >= KERB_KAPPA) {
       const kerbW = 0.65;
       for (const side of [1, -1] as const) {
@@ -482,31 +661,33 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
     0,
     1,
     0,
-    grassBase[0],
-    grassBase[1],
-    grassBase[2],
+    GRASS_BASE[0],
+    GRASS_BASE[1],
+    GRASS_BASE[2],
     MAT_GRASS,
   );
 
-  // Diorama dressing — toy trees/bushes around the grass, clear of the ribbon.
-  scatterScenery(mb, track, samples);
+  // Diorama dressing — toy trees/bushes around the grass, clear of the ribbon
+  // AND the fake-road stubs.
+  const clearance = stubBefore ? [...raced, ...stubBefore, ...(stubAfter ?? [])] : raced;
+  scatterScenery(mb, track, clearance);
 
   // Start line (s=0) always; a sprint also banners its finish wherever it
   // lands on the loop. Circuits share one line (start == finish).
-  buildLineBand(mb, track, 0);
-  if (track.sprintFinishS !== undefined) {
-    buildLineBand(mb, track, track.sprintFinishS);
+  buildLineBand(mb, track, 0, false);
+  if (isSprint) {
+    buildLineBand(mb, track, track.sprintFinishS!, true);
   }
 
   const { vertices, indices } = mb.build();
 
-  // Normalize the minimap to the sampled extent — the full closed loop for
-  // both circuits and sprints, so the map shows the same loop the ribbon shows.
+  // Minimap normalizes to the RACED ribbon only — the loop for circuits, the
+  // point-to-point trip for sprints (fake stubs are never drawn on the map).
   let mmMinX = Infinity;
   let mmMaxX = -Infinity;
   let mmMinY = Infinity;
   let mmMaxY = -Infinity;
-  for (const s of samples) {
+  for (const s of raced) {
     mmMinX = Math.min(mmMinX, s.x);
     mmMaxX = Math.max(mmMaxX, s.x);
     mmMinY = Math.min(mmMinY, -s.z);
@@ -514,7 +695,8 @@ export function buildTrackGeometry(track: TrackView, _palette: TrackPalette): Bu
   }
   const spanX = Math.max(mmMaxX - mmMinX, 1);
   const spanY = Math.max(mmMaxY - mmMinY, 1);
-  const minimap = samples.slice(0, -1).map((s) => ({
+  const mmSamples = isSprint ? raced : raced.slice(0, -1);
+  const minimap = mmSamples.map((s) => ({
     nx: (s.x - mmMinX) / spanX,
     ny: 1 - (-s.z - mmMinY) / spanY,
   }));

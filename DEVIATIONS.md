@@ -2,6 +2,54 @@
 
 Short log of where the live build differs from the plan. The plan file remains the process source of truth.
 
+## Self-hosted fonts + loading-bar splash (2026-08-22)
+
+The splash had a font flash (fallback → Bebas Neue) and a static gold rule under
+the wordmark. Fixed by removing the Google Fonts CDN entirely:
+
+- **Fonts are now self-hosted** in `public/fonts/` (Bebas Neue 400 + IBM Plex
+  Sans 400/500/600/700, latin woff2) with `@font-face` + `font-display: block` in
+  `index.html`. No network fetch, no FOUC, works offline. `BRAND_DISPLAY_FONT` /
+  `BRAND_BODY_FONT` in `src/ui/brand.ts` remain the canonical stacks; the static
+  splash mirrors them.
+- **The gold rule is now a loading bar** — the splash wordmark sits over a thin
+  gold `.loader` that fills during boot, driven by `index.html`'s inline boot
+  script. `main.ts` signals completion via `window.__apexBoot.ready()`; the old
+  `document.fonts.ready` gating in `main.ts` was deleted (no longer needed).
+- Splash lifecycle (loading bar, error plate, hang detection) now lives in one
+  place: `index.html`'s inline boot script. `main.ts` only calls `.ready()` /
+  `.error()`.
+
+## Sprint fake-road continuation + dead-code sweep (2026-08-14)
+
+The prior "full-loop sprint" change (sprints rendering the whole mother loop with
+a finish banner halfway round) was a misunderstanding — a sprint is point-to-point
+by definition, never a circuit. Reverted, and the original complaint (the sprint
+ribbon floating in empty space, ending dead at both the start and finish banners)
+is now addressed properly:
+
+- **Point-to-point ribbon restored** — `TrackGeometry.sampleTrackRibbon` samples
+  only `[0, sprintFinishS + 8m]` and leaves the ribbon OPEN; the minimap normalizes
+  to the raced portion only and `RaceView` no longer closes the sprint path.
+- **Fake-road stubs** — the sprint now reads as a stretch of a longer road, not a
+  road that stops at the banners. `buildRoadStub` extrudes a gently winding road
+  continuation backward out of the start line and forward from the finish (~240 m
+  each), reusing the same tarmac/dirt/grass cross-section. Stubs are presentation
+  only: they never enter physics, the minimap, kerbs, barriers, or line bands, and
+  the scene fog fades their far ends. They are deliberately NOT the mother loop's
+  geometry (that would make the sprint look like a circuit again).
+
+Dead-code sweep (orphaned modules/exports, no consumers):
+
+- Deleted `src/engine/line/carLine.ts` (the P2 car-ideal-line engine was never
+  wired into the Racer — see DRIVING_SPEC §11 "P2 DONE (vLine only)").
+- Deleted `revMeterNorm` (superseded by the shift-pad-as-rev-bar change).
+- Deleted `kappaStats` (unused track-gen export).
+- Un-exported `pegRatio` / `playerGearBand` (internal helpers only).
+- Removed the empty `src/graphics/fx/` directory.
+
+All 27 feel gates + tsc + build green after the change.
+
 ## TT/Sprint polish pass (2026-08-14)
 
 - **TT payout is a modest flat fee** (~12% of rank base) instead of full winner's

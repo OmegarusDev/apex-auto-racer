@@ -171,7 +171,7 @@ export class OptionsScene implements Scene {
 
     const view = shell.contentRect;
     const rowH = sliderRowH(token);
-    const trackH = Math.max(6, pad(token, 0.7));
+    const trackH = pad(token, 0.75);
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const sectionGap = pad(token, 2);
     const contentH =
@@ -190,6 +190,10 @@ export class OptionsScene implements Scene {
 
     this.scroller.begin(ctx, view);
     let y = 0;
+
+    // ════════════════════════════════════════════
+    // AUDIO SETTINGS
+    // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Audio', lui);
     y += pad(token, 1);
 
@@ -217,18 +221,25 @@ export class OptionsScene implements Scene {
     }
 
     y += sectionGap;
+
+    // ═══════════════════════════════════════════
+    // SAVE DATA — DESTRUCTIVE ACTIONS
+    // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Save Data', lui);
     y += pad(token, 1);
     const resetBtn: ButtonDef = {
-      x: 0,
+      x: pad(token, 1.5),
       y,
-      w: view.w,
-      h: btnH,
-      label: 'Reset Save',
+      w: view.w - pad(token, 3),
+      h: Math.max(btnH, pad(token, 6)),
+      label: '⚠  Reset Save Data',
+      cta: false,
+      fontSize: token.fontDisplay,
       onClick: () => this.openResetConfirm(),
     };
     drawButton(ctx, resetBtn, lui);
     if (!this.modal.open) handleButton(resetBtn, lui);
+
     this.scroller.end(ctx);
 
     handleHeader(header, ui);

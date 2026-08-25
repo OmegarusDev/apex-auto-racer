@@ -210,17 +210,6 @@ function minCornerRadius(nodes: readonly RacingLineNode[]): number {
   return minR;
 }
 
-export function kappaStats(nodes: readonly RacingLineNode[]): { maxAbsKappa: number; minR: number } {
-  let maxAbsKappa = 0;
-  let minR = Infinity;
-  for (const node of nodes) {
-    const ak = Math.abs(node.kappa);
-    maxAbsKappa = Math.max(maxAbsKappa, ak);
-    if (ak > 1e-6) minR = Math.min(minR, 1 / ak);
-  }
-  return { maxAbsKappa, minR: Number.isFinite(minR) ? minR : Infinity };
-}
-
 export function classifyTrackFail(track: TrackData): TrackFailReason {
   if (hasSelfIntersection(track.nodes)) return { kind: 'selfIntersection' };
   const minR = minCornerRadius(track.nodes);

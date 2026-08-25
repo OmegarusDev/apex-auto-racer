@@ -82,7 +82,8 @@ export function stepTransmission(
     if (kind === 'up') car.gear += 1;
     else car.gear -= 1;
     // A better clutch/gearbox shifts faster (less time off-power).
-    const shiftTime = car.stats?.shiftTime ?? 0.24;
+    // A more skilled driver shifts faster (less clutch slip time).
+    const shiftTime = (car.stats?.shiftTime ?? 0.24) * (1 - 0.4 * skill01);
     car.shiftCooldown =
       kind === 'up'
         ? PHYSICS.shiftCooldown * (shiftTime / 0.24)
@@ -93,8 +94,10 @@ export function stepTransmission(
 
   if (canUp) {
     if (isPlayer) {
-      // Manual Shift any time the band will accept it — gas or not.
-      const manual = wantUpshift && band >= box.earlyUpshiftBand;
+      // Manual Shift any time the player presses the button — gas or not.
+      // The AI driver may decide to shift back down immediately if it
+      // disagrees with the gear choice (runs first in the step).
+      const manual = wantUpshift;
       // Pin-throttle safety net: ~1s at the redline shifts for you.
       const auto = car.redlineDwell >= PHYSICS.redlineAutoShiftSec;
       if (manual || auto) up('up');

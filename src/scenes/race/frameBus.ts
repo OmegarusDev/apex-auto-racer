@@ -7,15 +7,16 @@ import type { RaceView } from '../../graphics/RaceView';
 
 const carPoseScratch = { x: 0, y: 0, heading: 0, tx: 0, ty: 0 };
 
-function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts): string {
+function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts, isPlayerTeam = false): string {
   const hue = teamCount <= 0 ? 200 : Math.round((teamId * 360) / teamCount) % 360;
   let tierSum = 0;
   for (const k of Object.keys(parts) as (keyof VehicleParts)[]) {
     tierSum += parts[k] ?? 1;
   }
   const avg = tierSum / 7;
-  const light = 48 + Math.min(12, avg * 2);
-  const sat = 62 + Math.min(12, (avg - 1) * 3);
+  // Player's team gets more vibrant colors (higher saturation, slightly lighter)
+  const light = 48 + Math.min(12, avg * 2) + (isPlayerTeam ? 5 : 0);
+  const sat = 62 + Math.min(12, (avg - 1) * 3) + (isPlayerTeam ? 10 : 0);
   return hslToHex(hue, sat, light);
 }
 
@@ -23,7 +24,6 @@ function rivalPaint(teamId: number, teamCount: number, parts: VehicleParts): str
 export function buildCarFrame(
   view: RaceView,
   director: RaceDirector,
-  playerAccent: string,
   frameCars: CarFrameDto[],
 ): CarFrameDto[] {
   const track = view.getTrack();
@@ -44,11 +44,10 @@ export function buildCarFrame(
 
     const parts = director.partTiersFor(car.id);
 
+    const isPlayerTeam = car.teamId === 0;
     const color = car.isPlayerControlled
-
-      ? playerAccent
-
-      : rivalPaint(car.teamId, teamCount, parts);
+      ? rivalPaint(car.teamId, teamCount, parts, true)
+      : rivalPaint(car.teamId, teamCount, parts, isPlayerTeam);
 
     out.push({
 
@@ -91,6 +90,16 @@ export function buildCarFrame(
       tangentY: carPoseScratch.ty,
 
       lineNoise: car.stats.lineNoise,
+
+      // Debug racing lines (copied once per frame, only used when showRacingLines=true)
+      idealLineO: car.idealLineO,
+      lineO: car.lineO,
+      brakeZoneStart: car.brakeZoneStart,
+      apexNode: car.apexNode,
+      trackOutNode: car.trackOutNode,
+      turnInPoint: car.turnInPoint,
+      finished: car.finished,
+      stunRemaining: car.stunRemaining,
 
     });
 

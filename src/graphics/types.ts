@@ -70,6 +70,22 @@ export interface CarFrameDto {
   tangentX: number;
   tangentY: number;
   lineNoise: number;
+  /** Debug: ideal line (car-specific physics-optimal). */
+  idealLineO?: number[];
+  /** Debug: personal line (driver style + ideal). */
+  lineO?: number[];
+  /** Debug: brake zone start distances. */
+  brakeZoneStart?: number[];
+  /** Debug: apex node indices. */
+  apexNode?: number[];
+  /** Debug: track-out node indices. */
+  trackOutNode?: number[];
+  /** Debug: turn-in node indices. */
+  turnInPoint?: number[];
+  /** Whether car has finished the race. */
+  finished?: boolean;
+  /** Remaining stun time. */
+  stunRemaining?: number;
 }
 
 export interface GhostFrameDto {
@@ -103,6 +119,8 @@ export interface RaceFrameView {
   discipline: DisciplineId;
   /** 0 = pulled back, 1 = close-in (from GameOptions.raceZoom). */
   raceZoom: number;
+  /** Show racing lines (ideal + personal + actual) for debugging. */
+  showRacingLines?: boolean;
 }
 
 export interface RaceViewPrepareOpts {

@@ -149,6 +149,11 @@ export class GarageScene implements Scene {
     // Extra inset so radar labels never clip the content edge.
     const radarInset = pad(token, 2.5) + token.fontCaption;
 
+    // ════════════════════════════════════════════
+    // PRIMARY CTA — ENTER CAMPAIGN (large, prominent, top)
+    // ════════════════════════════════════════════
+    const campaignBtnH = Math.max(btnH * 1.3, pad(token, 8));
+    
     // Measure content height
     let contentH = pad(token, 0.5) + navSize + pad(token, 1);
     if (portrait) {
@@ -161,8 +166,12 @@ export class GarageScene implements Scene {
       pad(token, 1) +
       token.fontCaption +
       pad(token, 0.75) +
-      btnH * 1.15 +
-      btnGap +
+      // Primary CTA (Campaign)
+      campaignBtnH + pad(token, 1.5) +
+      token.fontCaption +
+      pad(token, 0.75) +
+      // Garage actions row
+      btnH + btnGap +
       pad(token, 0.35) +
       token.fontCaption +
       pad(token, 0.75) +
@@ -271,6 +280,55 @@ export class GarageScene implements Scene {
       y += blockH + pad(token, 1);
     }
 
+    // ═══════════════════════════════════════════
+    // PRIMARY CTA — ENTER CAMPAIGN (large, prominent)
+    // ════════════════════════════════════════════
+    const campaignBtn: ButtonDef = {
+      x: pad(token, 1.5),
+      y,
+      w: view.w - pad(token, 3),
+      h: campaignBtnH,
+      label: '▶  Enter Campaign',
+      cta: true,
+      fontSize: token.fontDisplay,
+      onClick: () => g.scenes.push(new CampaignScene(discipline)),
+    };
+    drawButton(ctx, campaignBtn, { ...ui, accent });
+    handleButton(campaignBtn, lui);
+    y += campaignBtnH + pad(token, 1.5);
+
+    // ════════════════════════════════════════════
+    // GARAGE ACTIONS ROW (Tuning / Team)
+    // ════════════════════════════════════════════
+    y += drawSectionTitle(ctx, 0, y, 'Garage', lui);
+    y += pad(token, 0.35);
+    const rowW = (view.w - btnGap) * 0.5;
+    const tuningBtn: ButtonDef = {
+      x: pad(token, 1.5),
+      y,
+      w: rowW,
+      h: btnH,
+      label: 'Tuning',
+      onClick: () => g.scenes.push(new TuningScene(discipline)),
+    };
+    const teamBtn: ButtonDef = {
+      x: pad(token, 1.5) + rowW + btnGap,
+      y,
+      w: rowW,
+      h: btnH,
+      label: 'Team',
+      onClick: () => g.scenes.push(new TeamManagementScene()),
+    };
+
+    drawButton(ctx, tuningBtn, lui);
+    drawButton(ctx, teamBtn, lui);
+    if (!swipeHandled) {
+      handleButton(tuningBtn, lui);
+      handleButton(teamBtn, lui);
+    }
+    y += btnH + btnGap + pad(token, 0.25);
+
+    // Condition bar
     drawStatBar(
       ctx,
       {
@@ -284,47 +342,6 @@ export class GarageScene implements Scene {
       lui,
     );
     y += statBarHeight(token) + pad(token, 1);
-    y += drawSectionTitle(ctx, 0, y, 'Race', lui);
-    y += pad(token, 0.35);
-
-    const campaignBtn: ButtonDef = {
-      x: 0,
-      y,
-      w: view.w,
-      h: btnH * 1.15,
-      label: 'Enter Campaign',
-      primary: true,
-      onClick: () => g.scenes.push(new CampaignScene(discipline)),
-    };
-    y += campaignBtn.h + btnGap + pad(token, 0.25);
-    y += drawSectionTitle(ctx, 0, y, 'Garage', lui);
-    y += pad(token, 0.35);
-    const rowW = (view.w - btnGap) * 0.5;
-    const tuningBtn: ButtonDef = {
-      x: 0,
-      y,
-      w: rowW,
-      h: btnH,
-      label: 'Tuning',
-      onClick: () => g.scenes.push(new TuningScene(discipline)),
-    };
-    const teamBtn: ButtonDef = {
-      x: rowW + btnGap,
-      y,
-      w: rowW,
-      h: btnH,
-      label: 'Team',
-      onClick: () => g.scenes.push(new TeamManagementScene()),
-    };
-
-    drawButton(ctx, campaignBtn, lui);
-    drawButton(ctx, tuningBtn, lui);
-    drawButton(ctx, teamBtn, lui);
-    if (!swipeHandled) {
-      handleButton(campaignBtn, lui);
-      handleButton(tuningBtn, lui);
-      handleButton(teamBtn, lui);
-    }
     this.scroller.end(ctx);
 
     handleHeader(header, ui);

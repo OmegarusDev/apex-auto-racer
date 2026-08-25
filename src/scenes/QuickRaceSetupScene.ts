@@ -11,8 +11,6 @@ import {
   handleHeader,
   drawRow,
   drawSectionTitle,
-  drawFooterActions,
-  handleFooterActions,
   layoutShell,
   ContentScroller,
   pad,
@@ -114,7 +112,7 @@ export class QuickRaceSetupScene implements Scene {
     const { ui, token } = buildUi(w, h, 0, accent);
     drawBackground(ctx, w, h, token, accent);
 
-    const shell = layoutShell(w, h, token, { footer: true });
+    const shell = layoutShell(w, h, token, { footer: false });
     const header = {
       x: shell.headerRect.x,
       y: shell.headerRect.y,
@@ -128,26 +126,24 @@ export class QuickRaceSetupScene implements Scene {
 
     const view = shell.contentRect;
     const presets = listQuickRacePresets();
-    const discH = ensureMinTouch(pad(token, 4.5), token);
-    // Preset rows stack label + blurb + stats; tall enough that the three
-    // lines never collide at mobile scale (was bottom-pinning stats into the
-    // blurb line on phones).
+    const discH = ensureMinTouch(pad(token, 5.5), token);
     const rowH = ensureMinTouch(
-      pad(token, 1) + token.fontBody + 3 + token.fontCaption + 3 + token.fontCaption + pad(token, 1),
+      pad(token, 1.5) + token.fontBody + pad(token, 0.5) + token.fontCaption + pad(token, 0.5) + token.fontCaption + pad(token, 1.5),
       token,
     );
+
+    // Calculate content height for scroller
     const contentH =
-      pad(token, 0.5) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      discH +
-      pad(token, 0.75) +
-      token.fontCaption +
-      pad(token, 1.5) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      presets.length * rowH +
-      pad(token, 1);
+      pad(token, 1) +
+      // Primary CTA card
+      ensureMinTouch(pad(token, 6), token) + pad(token, 1.5) +
+      // Discipline selector
+      token.fontCaption + pad(token, 0.75) + discH + pad(token, 1) +
+      // Discipline blurb
+      token.fontCaption + pad(token, 1.5) +
+      // Preset selector
+      token.fontCaption + pad(token, 0.75) + presets.length * rowH +
+      pad(token, 2);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
@@ -155,6 +151,28 @@ export class QuickRaceSetupScene implements Scene {
 
     this.scroller.begin(ctx, view);
     let y = 0;
+
+    // ════════════════════════════════════════════
+    // PRIMARY CTA - START RACE (top, prominent)
+    // ════════════════════════════════════════════
+    const ctaH = ensureMinTouch(pad(token, 6), token);
+    const ctaBtn: ButtonDef = {
+      x: pad(token, 1.5),
+      y,
+      w: view.w - pad(token, 3),
+      h: ctaH,
+      label: '▶  Start Race',
+      cta: true,
+      fontSize: token.fontDisplay,
+      onClick: () => this.startRace(),
+    };
+    drawButton(ctx, ctaBtn, { ...lui, accent });
+    handleButton(ctaBtn, lui);
+    y += ctaH + pad(token, 1.5);
+
+    // ════════════════════════════════════════════
+    // DISCIPLINE SELECTOR (compact row)
+    // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Discipline', lui);
 
     const gap = pad(token, 1);
@@ -170,15 +188,14 @@ export class QuickRaceSetupScene implements Scene {
         h: discH,
         label: disciplineLabel(id),
         primary: selected,
-        onClick: () => {
-          this.discipline = id;
-        },
+        onClick: () => { this.discipline = id; },
       };
       drawButton(ctx, btn, { ...lui, accent: disciplineAccent(id) });
       handleButton(btn, lui);
     }
     y += discH + pad(token, 0.75);
 
+    // Discipline blurb
     ctx.save();
     ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
     ctx.fillStyle = token.textMuted;
@@ -192,20 +209,21 @@ export class QuickRaceSetupScene implements Scene {
     ctx.restore();
     y += token.fontCaption + pad(token, 1.5);
 
-    y += drawSectionTitle(ctx, 0, y, 'Car & driver', lui);
+    // ════════════════════════════════════════════
+    // PRESET SELECTOR (Car & Driver)
+    // ════════════════════════════════════════════
+    y += drawSectionTitle(ctx, 0, y, 'Car & Driver', lui);
 
     for (const preset of presets) {
       const selected = preset.id === this.presetId;
       const hovered = hitRect(lui.pointerX, lui.pointerY, 0, y, view.w, rowH);
       drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui, { hovered: hovered || selected });
 
-      // Stacked lines (label / blurb / stats) — explicit positions so a short
-      // mobile row can never overlap them (stats used to be bottom-pinned).
-      const padX = pad(token, 1);
-      const labelY = y + pad(token, 1);
-      const blurbY = labelY + token.fontBody + 3;
-      const statsY = blurbY + token.fontCaption + 3;
-      const textMax = view.w - pad(token, 2);
+      const padX = pad(token, 1.5);
+      const labelY = y + pad(token, 1.5);
+      const blurbY = labelY + token.fontBody + pad(token, 0.5);
+      const statsY = blurbY + token.fontCaption + pad(token, 0.5);
+      const textMax = view.w - pad(token, 3);
 
       ctx.save();
       ctx.font = `700 ${token.fontBody}px ${token.fontDisplayFamily}`;
@@ -223,7 +241,7 @@ export class QuickRaceSetupScene implements Scene {
       }
       if (selected) {
         ctx.fillStyle = accent;
-        ctx.fillRect(0, y + pad(token, 0.5), Math.max(3, pad(token, 0.35)), rowH - pad(token));
+        ctx.fillRect(pad(token, 0.75), y + pad(token, 0.75), 4, rowH - pad(token, 1.5));
       }
       ctx.restore();
 
@@ -232,23 +250,8 @@ export class QuickRaceSetupScene implements Scene {
       }
       y += rowH;
     }
-    this.scroller.end(ctx);
 
-    if (shell.footerRect !== null) {
-      const footerBtns: ButtonDef[] = [
-        {
-          x: 0,
-          y: 0,
-          w: 0,
-          h: 0,
-          label: 'Start Race',
-          cta: true,
-          onClick: () => this.startRace(),
-        },
-      ];
-      drawFooterActions(ctx, shell.footerRect, footerBtns, ui);
-      handleFooterActions(footerBtns, ui);
-    }
+    this.scroller.end(ctx);
 
     handleHeader(header, ui);
     this.toasts.draw(ctx, ui);

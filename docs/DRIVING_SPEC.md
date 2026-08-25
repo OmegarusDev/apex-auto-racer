@@ -109,39 +109,37 @@ the LSD: street gets a firmer drift-lock, rally/track gain an LSD.
 
 ---
 
-## 4. Car-ideal-line engine (P2) — `engine/line/carLine.ts`
+## 4. Car-ideal-line engine (P2) — `engine/vehicle/IdealLine.ts`
 
-Pure function: `carLine(track, stats, setup): { lineO: number[]; vLine: number[] }`
-(lineO = lateral offset per node, matching the existing `lineO` convention; + is
-toward the node's normal, so apex side = −sign(κ)·|off|).
+Pure function: `computeIdealLine(track, setup, stats, muSurface): IdealLineResult`
+Computes a physics-optimal racing line for a specific car setup. Each car gets
+its own ideal line based on its grip, power, braking, and drivetrain.
 
 ### 4.1 Corner segmentation
-- Compute `|κ(s)|`; threshold `κ ≥ 0.012` (≈ R>82) marks corner regions.
+- Compute `|κ(s)|`; threshold `κ ≥ cornerKappaThreshold` (0.012) marks corners.
 - Merge adjacent regions; each corner: entry straight start (first node with
-  |κ| < 0.004 before), peak node (max |κ|), exit straight end (first |κ| < 0.004
-  after).
+  |κ| < straightKappa (0.004) before), peak node (max |κ|), exit straight end
+  (first |κ| < straightKappa after).
 
 ### 4.2 Grip-limited corner speed
 Iterate aero: `v_c = √(a_grip(v_c)/κ)` with `a_grip = muSurface·compoundMu·g`
 plus one downforce pass (reuse `predictVDeslot`'s load-sensitivity pattern,
 `CarSetup.ts:124`). Cap by `vMax·0.97`.
 
-### 4.3 Exit-line vs geometric-line (the core tradeoff)
-`powerRatio = aAccel / a_grip`. The exit-optimising apex offset:
+### 4.3 Apex optimization (the core tradeoff)
+`powerRatio = aAccel / a_grip`. The exit-optimising apex fraction:
 
 ```
 apexFrac = clamp(0.55 + 0.45·powerRatio, 0.5, 0.95)   // 0.5 = geometric, 0.95 = late
 ```
 - Low `powerRatio` (grippy) → early/geometric apex (carry corner speed).
 - High `powerRatio` (powerful) → late apex (straight exit to deploy power).
+- RWD diffLock ≥ 0.5 adds `+0.06·diffLock` to apexFrac (drift car trades
+  corner speed for exit rotation).
 
-Apex lateral offset = `−sign(κ) · apexFrac · halfWidth`. RWD diffLock ≥ 0.5
-(street) adds `+0.06·diffLock` to apexFrac (the drift car trades corner speed
-for exit rotation).
-
-### 4.4 Brake point
+### 4.4 Brake point extraction
 `d_brake = (v_entry² − v_c²) / (2·aBrake)`. `v_entry` = min(vMax·0.97,
-exit speed of the previous corner). Brake point node = entry start − d_brake
+exit speed of the previous corner). Brake point = entry start − d_brake
 in arc length. **This is where the brakes part shows**: better brakes → later
 point → faster entry.
 
@@ -150,27 +148,58 @@ point → faster entry.
 - Ramp to apex over the entry region (smoothstep).
 - Ramp back to `−sign(κ)·(0.85·halfWidth)` over the exit (track-out).
 - Straights: keep the previous line (natural drift to the edge), clamped to
-  `±0.85·halfWidth`.
-- `vLine(s)` = min of (v_c at the peak, entry/exit caps) — the speed envelope.
+  `±outsideBias·halfWidth`.
+- `idealVLine(s)` = min of (v_c at the peak, entry/exit caps) — the speed envelope.
+
+### 4.6 Output arrays (stored on CarSimState)
+- `idealLineO` — the car's ideal lateral offset per node
+- `idealVLine` — speed envelope at each node (O(1) lookup)
+- `brakeZoneStart` — arc length where braking begins (O(1) lookup)
+- `turnInPoint` — arc length where turn-in begins (O(1) lookup)
+- `apexNode` — index of the apex node
+- `trackOutNode` — index of the track-out node
+
+### 4.7 Personal line from ideal (driver style blend)
+```typescript
+personalLineO = idealLineO * (1 - driverStyleWeight) + driverStyle * driverStyleWeight
+```
+Where `driverStyleWeight = 0.3` (30% driver, 70% car physics). Driver style
+adjustments:
+- **Skill** → apex cut: up to `maxSkillApexCut` (2.5m) toward inside
+- **Bravery** → wide carry: up to `maxBraveryWideCarry` (2.5m) toward outside
+- **Focus** → smoothing passes: 2–6 passes to reduce line noise
+
+The personal line is built from the car's ideal line, NOT from forced
+grid-column lanes. This means different car setups produce genuinely different
+racing lines.
 
 ---
 
 ## 5. The Racer (P3) — `driver/model.ts`
 
-### 5.1 The Racer's line (per race, replaces `buildPersonalRacingLine` intent)
+### 5.1 The Racer's line (per race, replaces grid-column lanes)
 ```
-personalLineO = lerp(centerSlot, carIdeal, skillWeight) + personalityBias + formWobble
-skillWeight   = 0.15 + 0.8·skill01          // rookie ≈ slot truth; elite ≈ ideal
-personalityBias = bravery01·0.4·lateApexBias  // bold: later apex, wider exit; cautious: −
-formWobble      = focus01-scaled low-freq noise (P4)
+personalLineO = lerp(carIdeal, driverStyle, driverStyleWeight)
 ```
-The executed line is the personal lineO, NOT the slot truth. The lineO is
-computed per race (seeded) so two races differ slightly (P4).
+The driver blends toward the car's ideal line using:
+- **Skill** → apex cut: ±2.5m toward/away from apex
+- **Bravery** → wide carry: ±2.5m on corner exit
+- **Focus** → line smoothing: 2–6 passes
 
-### 5.2 The hook (execution — replaces the loose pursuit)
-Steering = **curvature feedforward + proportional + derivative**:
+The personal line is built from the car's ideal line (computed by `IdealLine.ts`),
+NOT from forced grid-column lanes. This means different car setups produce
+genuinely different racing lines.
 
-```
+### 5.2 The hook (execution — O(1) perception)
+Steering uses O(1) lookups from the car's ideal line arrays:
+
+```typescript
+// O(1) perception — no more O(n) kappaAhead search
+const braking = car.s >= (car.brakeZoneStart ?? 0);
+const turnIn = car.s >= (car.turnInPoint ?? 0);
+const approachingApex = car.apexNode !== undefined && car.s < car.nodes[car.apexNode].s;
+
+// Steering = curvature feedforward + proportional + derivative
 κLine   = curvature of the personal lineO at the lookahead
 steerFF = atan(wb · (v·κLine))                          // follows the line's bend
 steerP  = Kp · errLatTerm,   errLatTerm = lineAhead − (l + lookahead·sin(β))
@@ -179,6 +208,14 @@ steer   = clamp(steerFF + Kp·errLatTerm + steerD, ±steerCap)
 Kp      = 1.2 + 2.0·skill01                             // skilled = tight hook
 Kd      = 0.35
 ```
+
+**Key improvement**: The driver now uses O(1) lookups for:
+- `idealVLine` — speed target at current position
+- `brakeZoneStart` — when to begin braking
+- `turnInPoint` — when to begin turning
+
+This replaces the old O(n) `kappaAhead` search that sampled discrete nodes
+and often missed the true peak curvature.
 Target: a skill-1.0 driver holds the personal line within **≤0.6 m avg**, a
 skill-0.3 driver within ~3.5 m (natural, non-oscillatory — the feedforward
 prevents the weave; the low Kp lets rookies run wide under momentum). This
@@ -292,15 +329,15 @@ amendment). Each phase compiles and passes the existing gates before the next.
   launchMul); opponent matching widened ([1,4]→[3,5] per rank) with tight
   driver↔car correlation (jitter 0.2); three distinctive starter builds
   (`SaveManager.starterPartTiers`). Gates green.
-- **P2 DONE (vLine only)** — `engine/line/carLine.ts` builds a per-setup lineO
-  (edge-to-edge sweep) + vLine envelope (corner speed + brake ramp via aBrake).
-  The lateral shape is deliberately near-identical across setups (correct
-  physics); the per-setup difference lives in the SPEED envelope (mean |Δv|
-  ≈ 7 m/s between tier-1 and tier-4). NOT YET wired into the Racer.
+- **P2 DONE** — car-ideal-line engine (`engine/vehicle/IdealLine.ts`) computes
+  physics-optimal line per car setup. Personal line built from ideal + driver
+  style (30% driver, 70% car physics). O(1) perception replaces O(n) search.
+  Racing lines debug toggle shows ideal (white dashed), personal (team color),
+  brake zones (red), and apex markers (yellow).
 - **P3 PARTIAL** — momentum/confidence braking done (§5.3): brave carries speed
   (16.4 vs 15.8 m/s cornering; 1.2 s/lap), timid brakes early/hard and is safe,
-  confidence edges the margin. The hook (§5.2), personal-line approach to the
-  car ideal (§5.1), shift-assist precision, and skill-scaled drift-hold remain.
+  confidence edges the margin. O(1) perception with ideal line arrays done.
+  Shift-assist precision and skill-scaled drift-hold remain.
 - **P4 NOT DONE** — form roll + corner-correlated noise (spec §6) pending.
 - Session extras: sprint minimap tied to the sampled (drawn) ribbon (not the
   mother loop) — `minimapExtent` + no closePath for sprints; wall-crash now

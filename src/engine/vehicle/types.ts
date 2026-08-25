@@ -54,6 +54,8 @@ export interface CarSimState extends VehicleState {
   lTarget: number;
   /** Starting-grid lateral column — held briefly after GO so pack doesn't collapse. */
   gridL: number;
+  /** Starting-grid arc position (for distance-based grid anchor). */
+  gridS: number;
   /**
    * Personal racing-line offsets (m from centerline), one sample per track node.
    * Centerline (l=0) is for bounds/graphics; cars magnetize to this profile.
@@ -117,6 +119,19 @@ export interface CarSimState extends VehicleState {
   stuckS: number;
   /** Per-car deterministic seed for surface noise. */
   noiseSeed: number;
+
+  /** Car-specific ideal line (computed once per race). */
+  idealLineO: number[];
+  /** Target speed envelope per node (m/s). */
+  idealVLine: number[];
+  /** Distance before corner to begin braking (m). */
+  brakeZoneStart: number[];
+  /** Node index for turn-in per corner. */
+  turnInPoint: number[];
+  /** Node index for apex per corner. */
+  apexNode: number[];
+  /** Node index for track-out per corner. */
+  trackOutNode: number[];
 }
 
 export interface ZoneModifiers {

@@ -1,5 +1,6 @@
 import { PHYSICS } from '../data/physics';
 import type { Vec2 } from './types';
+import type { TrackData } from './TrackGenerator';
 
 export interface SplineSample {
   pos: Vec2;
@@ -411,6 +412,75 @@ export function buildPersonalRacingLine(
     const node = nodes[i]!;
     let ds = Math.abs(node.s - gridS);
     ds = Math.min(ds, trackLength - ds);
+    if (ds >= anchorDist) continue;
+    const w = 1 - ds / anchorDist;
+    const blend = w * w * (3 - 2 * w);
+    const half = Math.max(0.5, node.width / 2 - PHYSICS.racingLineMargin);
+    out[i] = Math.max(-half, Math.min(half, out[i]! * (1 - blend) + gridL * blend));
+  }
+
+  return out;
+}
+
+/**
+ * Build personal racing line from car ideal line + driver style.
+ * Replaces the old grid-column-based lane system.
+ *
+ * personalLine = idealLine * (1 - styleWeight) + styleOffset * styleWeight
+ * where styleOffset encodes skill (apex cut), bravery (wide carry), focus (smooth).
+ * Grid anchor blends gridL -> personalLine over anchorDist (50m).
+ */
+export function buildPersonalLineFromIdeal(
+  idealLineO: readonly number[],
+  driver: { skill: number; bravery: number; focus: number },
+  track: TrackData,
+  gridS: number,
+  gridL: number,
+): number[] {
+  const nodes = track.nodes;
+  const n = nodes.length;
+  if (n === 0) return [];
+
+  const skill01 = Math.max(0, Math.min(1, driver.skill / 100));
+  const bravery01 = Math.max(0, Math.min(1, driver.bravery / 100));
+  const focus01 = Math.max(0, Math.min(1, driver.focus / 100));
+  const styleWeight = 0.3; // 30% driver, 70% car physics
+  const maxApexCut = 2.5;  // m toward inside (skill)
+  const maxWideCarry = 2.5; // m toward outside (bravery)
+
+  const out = new Array<number>(n);
+
+  for (let i = 0; i < n; i++) {
+    // Driver style offset (±3m arcade max)
+    const apexCut = -maxApexCut * skill01;     // cuts tighter toward inside
+    const wideCarry = maxWideCarry * bravery01; // carries wider toward outside
+    const styleOffset = apexCut + wideCarry;
+
+    let line = idealLineO[i]! * (1 - styleWeight) + styleOffset * styleWeight;
+
+    // Clamp to track bounds
+    const half = Math.max(0.5, nodes[i]!.width / 2 - PHYSICS.racingLineMargin);
+    out[i] = Math.max(-half, Math.min(half, line));
+  }
+
+  // Focus: smoothing passes (2-6)
+  const smoothPasses = 2 + Math.round(4 * focus01);
+  const smoothed = out.slice();
+  for (let pass = 0; pass < smoothPasses; pass++) {
+    for (let i = 0; i < n; i++) {
+      const im = wrapIndex(i - 1, n);
+      const ip = wrapIndex(i + 1, n);
+      smoothed[i] = out[i]! * 0.5 + (out[im]! + out[ip]!) * 0.25;
+    }
+    for (let i = 0; i < n; i++) out[i] = smoothed[i]!;
+  }
+
+  // Grid anchor: blend gridL -> personalLine over anchorDist (50m)
+  const anchorDist = 50;
+  for (let i = 0; i < n; i++) {
+    const node = nodes[i]!;
+    let ds = Math.abs(node.s - gridS);
+    ds = Math.min(ds, track.length - ds);
     if (ds >= anchorDist) continue;
     const w = 1 - ds / anchorDist;
     const blend = w * w * (3 - 2 * w);

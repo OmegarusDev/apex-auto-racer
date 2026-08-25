@@ -2,7 +2,7 @@ import { PHYSICS } from '../../data/physics';
 import { createBrainState, idleBrainOutput } from '../DriverBrain';
 import { driverStrength01, generateFieldDrivers, syncDriverIdsFrom } from '../DriverGenerator';
 import type { RaceConfig, GhostTrace } from '../RaceDirector';
-import { buildPersonalRacingLine } from '../RacingLine';
+import { buildPersonalLineFromIdeal } from '../RacingLine';
 import { effectiveStats } from '../stats';
 import type { Modifier } from '../modifiers';
 import type { Rng } from '../rng';
@@ -15,6 +15,7 @@ import {
   type CarSimState,
 } from '../Vehicle';
 import { carSetupFromParts } from '../vehicle/CarSetup';
+import { computeIdealLine } from '../vehicle/IdealLine';
 import {
   applyLooseCannon,
   buildTraitStack,
@@ -28,6 +29,7 @@ export interface FieldSetupInput {
   track: TrackData;
   rng: Rng;
   globalRainStack: Modifier[];
+  muSurface: number;
 }
 
 export interface FieldSetupResult {
@@ -105,15 +107,22 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
     const row = Math.floor(i / 2);
     const col = i % 2;
     const gridL = col === 0 ? -PHYSICS.gridColOffset : PHYSICS.gridColOffset;
-    // Grid sits fully behind the start/finish line (s=0 is the line): front
-    // row is gridPoleGap back, each row stacks behind it. Placing row 0 on the
-    // line gave back rows a ~lap head start (they crossed s=0 after a few m).
-    const gridS =
-      (track.length -
-        PHYSICS.gridPoleGap -
-        row * PHYSICS.gridRowSpacing +
-        track.length) %
-      track.length;
+    // Grid position: for sprints, start ON the track just after s=0 (start line).
+    // For circuits, use full loop with grid behind the start/finish line.
+    const isSprint = config.session === 'sprint';
+    let gridS: number;
+    if (isSprint) {
+      // Sprint: grid ON the track (after start line), rows stack forward
+      gridS = PHYSICS.gridPoleGap + row * PHYSICS.gridRowSpacing;
+    } else {
+      // Circuit: grid fully behind the start/finish line
+      gridS =
+        (track.length -
+          PHYSICS.gridPoleGap -
+          row * PHYSICS.gridRowSpacing +
+          track.length) %
+        track.length;
+    }
 
     const stats = effectiveStats(config.discipline, plan.parts, plan.condition, plan.driver);
     const authority = plan.isPlayer ? computeBrakeAuthority(plan.driver.skill) : 1;
@@ -123,17 +132,18 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
       buildTraitStack(plan.driver),
     );
 
-    const laneSign = col === 0 ? -1 : 1;
-    const lineO = buildPersonalRacingLine(
-      track.nodes,
-      track.length,
-      plan.driver.skill,
-      plan.driver.bravery,
-      stats.gripFactor * stats.condGrip,
-      laneSign,
+    // muSurface is passed in from RaceDirector (already includes rain factor)
+    // Build car-specific ideal line (physics-optimal per setup)
+    const setup = carSetupFromParts(plan.parts, config.discipline);
+    const idealLine = computeIdealLine(track, setup, stats, input.muSurface);
+
+    // Build personal line from ideal line + driver style (replaces grid-column lanes)
+    const lineO = buildPersonalLineFromIdeal(
+      idealLine.idealLineO,
+      { skill: plan.driver.skill, bravery: plan.driver.bravery, focus: plan.driver.focus },
+      track,
       gridS,
       gridL,
-      plan.driver.focus,
     );
 
     const car = createCarState(
@@ -147,8 +157,16 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
       gridL,
       authority,
       lineO,
-      carSetupFromParts(plan.parts, config.discipline),
+      setup,
     );
+
+    // Store ideal line on car for driver brain
+    car.idealLineO = idealLine.idealLineO;
+    car.idealVLine = idealLine.idealVLine;
+    car.brakeZoneStart = idealLine.brakeZoneStart;
+    car.turnInPoint = idealLine.turnInPoint;
+    car.apexNode = idealLine.apexNode;
+    car.trackOutNode = idealLine.trackOutNode;
 
     return {
       car,

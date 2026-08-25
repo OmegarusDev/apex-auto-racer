@@ -262,19 +262,14 @@ export class ResultsScene implements Scene {
       h += this.payload.standings.length * pad(token, 4) + pad(token, 1.5);
     }
     h += this.payoutBlockH(token);
-    h += pad(token, 1);
-    h += token.fontCaption + pad(token, 0.75);
-    h += pad(token, 1);
+    h += token.fontCaption + pad(token, 1.25);
     h += this.xpBlockH(ui, state);
     h += pad(token, 2);
     return h;
   }
 
   private podiumH(token: UiContext['token']): number {
-    // Height must accommodate: position text + optional winner text + bonus line + name + bar heights.
-    // Non-winner: placeSize(~34) + pad(1) + nameH(~15) + pad(0.75) + barH(80) + pad(1) ≈ 131 at scale 1.
-    // Winner adds winnerText(~13) + pad(0.5) ≈ 145 at scale 1.
-    return pad(token, 19);
+    return pad(token, 16);
   }
 
   private payoutBlockH(token: UiContext['token']): number {
@@ -373,9 +368,8 @@ export class ResultsScene implements Scene {
         y = this.drawStandings(ctx, 0, y, view.w, lui);
       }
       y = this.drawPayout(ctx, 0, y, view.w, lui);
-      y += pad(token, 1);
       y += drawSectionTitle(ctx, 0, y, 'Invest', lui);
-      y += pad(token, 1);
+      y += pad(token, 0.5);
       y = this.drawXpSection(ctx, 0, y, view.w, lui, state, true);
       this.scroller.end(ctx);
 
@@ -545,7 +539,7 @@ export class ResultsScene implements Scene {
       y +
       pad(token, 0.5) +
       placeSize +
-      (won ? token.fontCaption + pad(token, 0.75) : pad(token, 0.75));
+      (won ? token.fontCaption + pad(token, 0.5) : pad(token, 0.5));
     if (this.payload.handsOffBonus > 0) {
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = token.success;
@@ -567,8 +561,8 @@ export class ResultsScene implements Scene {
       if (finisher === undefined) continue;
       const px = x + i * podiumW + podiumW * 0.5;
       const isFirst = positions[i] === 0;
-      const barH = pad(token, 4 + (isFirst ? 6 : positions[i] === 1 ? 3 : 1));
-      const barW = podiumW * (isFirst ? 0.6 : 0.5);
+      const barH = pad(token, 3.5 + (isFirst ? 4.5 : positions[i] === 1 ? 2 : 0));
+      const barW = podiumW * (isFirst ? 0.62 : 0.52);
       ctx.fillStyle = finisher.isPlayer ? accent : isFirst ? `${accent}55` : token.bgElevated;
       ctx.fillRect(px - barW * 0.5, y + h - pad(token) - barH, barW, barH);
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
@@ -581,7 +575,7 @@ export class ResultsScene implements Scene {
       ctx.fillText(
         finisher.name.split(' ')[0] ?? finisher.name,
         px,
-        y + h - pad(token) - barH - pad(token, 0.75),
+        y + h - pad(token) - barH - pad(token, 0.5),
       );
     }
     ctx.restore();

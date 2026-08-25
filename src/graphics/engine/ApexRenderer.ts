@@ -66,7 +66,6 @@ export class ApexRenderer {
   private playerRingMesh: GpuMesh | null = null;
   private minimap: Array<{ nx: number; ny: number }> = [];
   private minimapExtent: { minX: number; maxX: number; minY: number; maxY: number } = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
-  private night = false;
   private rain = false;
   private readonly fx: FxParticle[] = [];
   private fxCount = 0;
@@ -178,7 +177,6 @@ export class ApexRenderer {
     const ring = buildPlayerRingGeometry();
     this.playerRingMesh = createMesh(gl, ring.vertices, ring.indices);
 
-    this.night = opts.night;
     this.rain = opts.rain;
     this.fxCount = 0;
   }
@@ -294,13 +292,34 @@ export class ApexRenderer {
   }
 
   /** @returns false when the frame was skipped (tiny canvas / missing mesh). */
+  // Discipline-specific background colors (day/night variants)
+  private getDisciplineBgColor(discipline: string, night: boolean): [number, number, number] {
+    // Background clear color matches fog color at horizon — the far ground
+    // plate converges to fogColor at distance, so the clear must too.
+    if (night) {
+      switch (discipline) {
+        case 'street': return [0.06, 0.07, 0.10];
+        case 'rally': return [0.07, 0.06, 0.05];
+        default: return [0.08, 0.1, 0.14];         // Night fog color
+      }
+    }
+    switch (discipline) {
+      case 'street': return [0.58, 0.66, 0.7];    // Day fog color
+      case 'rally': return [0.58, 0.66, 0.7];     // Day fog color
+      default: return [0.58, 0.66, 0.7];          // Day fog color
+    }
+  }
+
   render(frame: RaceFrameView): boolean {
     const gl = this.gl;
     const w = this.canvas.width;
     const h = this.canvas.height;
     if (w < 2 || h < 2 || !this.trackMesh || !this.carMesh) return false;
 
-    const bg = this.night ? [0.07, 0.09, 0.12] : [0.52, 0.62, 0.68];
+    const discipline = frame.discipline ?? 'track';
+    const isNight = frame.night ?? false;
+    const bg = this.getDisciplineBgColor(discipline, isNight);
+    
     gl.viewport(0, 0, w, h);
     gl.clearColor(bg[0]!, bg[1]!, bg[2]!, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);

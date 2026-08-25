@@ -11,30 +11,42 @@ export class FxOneShots {
 
   constructor(buses: AudioBuses) {
     this.buses = buses;
-    this.rainFilter = buses.ctx.createBiquadFilter();
+    const ctx = buses.ctx;
+
+    this.rainFilter = ctx.createBiquadFilter();
     this.rainFilter.type = 'bandpass';
-    this.rainFilter.frequency.value = 1400;
-    this.rainFilter.Q.value = 0.45;
-    this.rainGain = buses.ctx.createGain();
+    this.rainFilter.frequency.value = 3500;
+    this.rainFilter.Q.value = 0.6;
+
+    this.rainGain = ctx.createGain();
     this.rainGain.gain.value = 0;
+
     this.rainFilter.connect(this.rainGain);
     this.rainGain.connect(buses.fx);
   }
 
   ensureRain(): void {
     if (this.rainSrc) return;
-    const src = this.buses.ctx.createBufferSource();
-    src.buffer = makeNoiseBuffer(this.buses.ctx, 1.2, true, 0x0a11face);
+    const ctx = this.buses.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = makeNoiseBuffer(ctx, 1.2, false, 0x0a11face);
     src.loop = true;
-    src.connect(this.rainFilter);
+
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 800;
+    hp.Q.value = 0.7;
+    src.connect(hp);
+    hp.connect(this.rainFilter);
     src.start();
+
     this.rainSrc = src;
   }
 
   setRain(on: boolean): void {
-    this.ensureRain();
+    if (on) this.ensureRain();
     const t = this.buses.ctx.currentTime;
-    this.rainGain.gain.setTargetAtTime(on ? 0.04 : 0, t, 0.2);
+    this.rainGain.gain.setTargetAtTime(on ? 0.03 : 0, t, 0.2);
   }
 
   playTone(

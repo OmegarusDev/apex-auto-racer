@@ -3,6 +3,7 @@ import type { StandingEntry } from '../RaceDirector';
 import type { CarSimState } from '../Vehicle';
 import { raceDistance } from './trackMath';
 import type { RaceCarEntry } from './types';
+import { toOrdinal } from '../../utils/helpers';
 
 export interface StandingEvent {
   kind: 'overtake' | 'draftPass';
@@ -64,7 +65,7 @@ export function rebuildStandings(
         kind: 'overtake',
         car: entry.car,
         driverName: entry.driver.name,
-        detail: `P${st.position}`,
+        detail: `${toOrdinal(st.position)}`,
       });
       entry.car.overtakeCount += 1;
     }

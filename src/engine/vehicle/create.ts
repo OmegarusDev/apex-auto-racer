@@ -123,6 +123,13 @@ export function createCarState(
     penaltySec: 0,
     stuckTime: 0,
     stuckS: 0,
+    gridS,
+    idealLineO: [],
+    idealVLine: [],
+    brakeZoneStart: [],
+    turnInPoint: [],
+    apexNode: [],
+    trackOutNode: [],
     noiseSeed: (id.charCodeAt(0) * 2654435761) >>> 0,
   };
 }

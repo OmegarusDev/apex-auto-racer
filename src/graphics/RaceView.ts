@@ -12,6 +12,7 @@ import type { TrackPalette } from './materials';
 import { buildTrackPalette } from './materials';
 import type { MinimapPoint } from './track/MinimapPoint';
 import { writeCarWorld } from './TrackSampler';
+import { slToWorld, type RacingLineNode } from '../engine/RacingLine';
 import type {
   CarFrameDto,
   FxImpulse,
@@ -175,6 +176,11 @@ export class RaceView {
       // HUD canvas stays transparent over the GL world.
       ctx.clearRect(0, 0, frame.screenW, frame.screenH);
     }
+
+    // Debug racing lines overlay
+    if (frame.showRacingLines) {
+      this.drawRacingLines(ctx, frame);
+    }
   }
 
   drawMinimap(
@@ -199,8 +205,8 @@ export class RaceView {
     const iw = rect.w - pad * 2;
     const ih = rect.h - pad * 2;
 
-    // The minimap is tied to what is DRAWN — the full closed loop, for
-    // circuits and sprints alike.
+    // The minimap is tied to what is DRAWN — the sampled extent (the raced
+    // sprint ribbon for a sprint, the full loop for a circuit).
     const me = this.minimapExtent;
     const spanX = Math.max(me.maxX - me.minX, 1);
     const spanY = Math.max(me.maxY - me.minY, 1);
@@ -224,8 +230,10 @@ export class RaceView {
       const p = this.minimapPoints[i]!;
       ctx.lineTo(ix + ox + p.nx * drawW, iy + oy + p.ny * drawH);
     }
-    // The full loop always closes on itself.
-    ctx.closePath();
+    // A circuit closes its loop; a sprint is a line (start → finish) and must
+    // NOT close — closing draws a fake "return" chord that looks like the loop.
+    const isSprint = this.track.sprintFinishS !== undefined;
+    if (!isSprint) ctx.closePath();
     ctx.fillStyle = 'rgba(255,255,255,0.04)';
     ctx.fill();
     ctx.strokeStyle = this.palette?.accentDim ?? '#a88410';
@@ -261,6 +269,122 @@ export class RaceView {
       tx: carWorldScratch.tx,
       ty: carWorldScratch.ty,
     };
+  }
+
+  /** Debug draw: ideal line (white), personal line (team color), actual pos (bright). */
+  drawRacingLines(ctx: CanvasRenderingContext2D, frame: RaceFrameView): void {
+    if (!this.track || !frame.showRacingLines) return;
+    const cars = frame.cars;
+    const cam = frame.camera;
+
+    // World to screen projection
+    const project = (wx: number, wy: number): { x: number; y: number } => {
+      const dx = wx - cam.x;
+      const dy = wy - cam.y;
+      return {
+        x: frame.screenW * 0.5 + dx * cam.zoom,
+        y: frame.screenH * 0.5 + dy * cam.zoom,
+      };
+    };
+
+    const nodes = this.track.nodes as unknown as RacingLineNode[];
+    const trackLen = this.track.length;
+
+    for (const car of cars) {
+      if (car.finished && car.spinRemaining <= 0 && (car.stunRemaining ?? 0) <= 0) continue;
+
+      const nodeIdx = Math.min(nodes.length - 1,
+        Math.max(0, Math.floor((car.s / trackLen) * nodes.length)));
+      const node = nodes[nodeIdx];
+      if (!node) continue;
+
+      const color = car.isPlayer ? '#ffd700' : car.color;
+
+      // Draw ideal line (white dashed)
+      if (car.idealLineO && car.idealLineO.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 2 / Math.max(0.5, cam.zoom);
+        ctx.setLineDash([8 / cam.zoom, 4 / cam.zoom]);
+        ctx.beginPath();
+        for (let i = 0; i < car.idealLineO.length; i += 4) {
+          const n = nodes[i % nodes.length];
+          if (!n) continue;
+          const pt = slToWorld(nodes, trackLen, n.s, car.idealLineO[i]);
+          const p = project(pt.x, pt.y);
+          if (i === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      // Draw personal line (team color solid)
+      if (car.lineO && car.lineO.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2 / Math.max(0.5, cam.zoom);
+        ctx.beginPath();
+        for (let i = 0; i < car.lineO.length; i += 4) {
+          const n = nodes[i % nodes.length];
+          if (!n) continue;
+          const pt = slToWorld(nodes, trackLen, n.s, car.lineO[i]);
+          const p = project(pt.x, pt.y);
+          if (i === 0) ctx.moveTo(p.x, p.y);
+          else ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Draw actual car position (bright dot)
+      const carPos = project(car.worldX ?? 0, car.worldY ?? 0);
+      ctx.save();
+      ctx.fillStyle = car.isPlayer ? '#fff' : color;
+      ctx.beginPath();
+      ctx.arc(carPos.x, carPos.y, 4 / Math.max(0.5, cam.zoom), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Draw brake zones (red segments)
+      if (car.brakeZoneStart && car.brakeZoneStart.length > 0) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,80,80,0.7)';
+        ctx.lineWidth = 3 / Math.max(0.5, cam.zoom);
+        ctx.beginPath();
+        for (let i = 0; i < car.brakeZoneStart.length; i++) {
+          if (car.brakeZoneStart[i] > 0) {
+            const n = nodes[i % nodes.length];
+            if (!n) continue;
+            const pt = slToWorld(nodes, trackLen, n.s, car.lineO?.[i] ?? 0);
+            const p = project(pt.x, pt.y);
+            ctx.moveTo(p.x - 5 / cam.zoom, p.y);
+            ctx.lineTo(p.x + 5 / cam.zoom, p.y);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Draw apex markers (yellow)
+      if (car.apexNode && car.apexNode.length > 0) {
+        ctx.save();
+        ctx.fillStyle = '#ffdd00';
+        for (let i = 0; i < car.apexNode.length; i++) {
+          const apexIdx = car.apexNode[i];
+          if (apexIdx >= 0 && apexIdx < nodes.length) {
+            const n = nodes[apexIdx];
+            const pt = slToWorld(nodes, trackLen, n.s, car.lineO?.[apexIdx] ?? 0);
+            const p = project(pt.x, pt.y);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3 / Math.max(0.5, cam.zoom), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      }
+    }
   }
 }
 

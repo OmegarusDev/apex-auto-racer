@@ -261,7 +261,7 @@ export class TeamManagementScene implements Scene {
         x: x + pad(token, 1.5),
         y: cy,
         w: w - pad(token, 3),
-        h: btnH(token),
+h: btnH(token),
         label: 'Release',
         onClick: onRelease,
       };
@@ -325,6 +325,9 @@ export class TeamManagementScene implements Scene {
 
     const view = shell.contentRect;
     const gap = pad(token, 0.75);
+    const btnHVal = ensureMinTouch(pad(token, 5.5), token);
+    const addBtnH = Math.max(btnHVal, pad(token, 6));
+
     let contentH =
       token.fontCaption +
       pad(token, 1.5) +
@@ -333,7 +336,7 @@ export class TeamManagementScene implements Scene {
       token.fontCaption +
       pad(token, 1.5) +
       this.freeAgents.reduce((sum, a) => sum + this.agentBlockH(a, token) + gap, 0) +
-      btnH(token) +
+      addBtnH +
       pad(token, 2);
 
     this.scroller.layout(view, contentH);
@@ -342,6 +345,30 @@ export class TeamManagementScene implements Scene {
 
     this.scroller.begin(ctx, view);
     let y = 0;
+
+    // ═══════════════════════════════════════════
+    // PRIMARY CTA — ADD DRIVER (if roster not full)
+    // ════════════════════════════════════════════
+    const rosterFull = state.roster.length >= BALANCE.rosterCap;
+    if (!rosterFull) {
+      const addBtn: ButtonDef = {
+        x: pad(token, 1.5),
+        y: 0,
+        w: view.w - pad(token, 3),
+        h: addBtnH,
+        label: `▶  Add Driver ($${BALANCE.freeAgentRerollCost} to refresh)`,
+        cta: true,
+        fontSize: token.fontDisplay,
+        onClick: () => this.rerollAgents(),
+      };
+      drawButton(ctx, addBtn, { ...ui, accent: ACCENT_TRACK });
+      handleButton(addBtn, lui);
+      y += addBtnH + pad(token, 1.5);
+    }
+
+    // ══════════════════════════════════════════
+    // ROSTER
+    // ═══════════════════════════════════════════
     y += drawSectionTitle(
       ctx,
       0,

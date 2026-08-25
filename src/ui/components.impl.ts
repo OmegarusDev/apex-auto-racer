@@ -733,13 +733,13 @@ export interface SliderDef {
 
 /** Full vertical pitch for one labeled slider row. */
 export function sliderRowH(token: ThemeTokens): number {
-  const track = Math.max(6, pad(token, 0.7));
+  const track = pad(token, 0.75);
   return token.fontCaption + pad(token, 0.5) + track + pad(token, 2.5);
 }
 
 export function drawSlider(ctx: CanvasRenderingContext2D, slider: SliderDef, ui: UiContext): void {
   const { token } = ui;
-  const trackH = Math.max(6, Math.min(slider.h, pad(token, 1)));
+  const trackH = Math.min(slider.h, pad(token, 1));
   const labelH = token.fontCaption + pad(token, 0.35);
   const trackY = slider.y + labelH;
 
@@ -783,7 +783,7 @@ export function drawSlider(ctx: CanvasRenderingContext2D, slider: SliderDef, ui:
 
 export function handleSlider(slider: SliderDef, ui: UiContext): boolean {
   const { token } = ui;
-  const trackH = Math.max(6, Math.min(slider.h, pad(token, 1)));
+  const trackH = Math.min(slider.h, pad(token, 1));
   const labelH = token.fontCaption + pad(token, 0.35);
   const trackY = slider.y + labelH;
   const hitPad = (token.touchMin - trackH) * 0.5;
@@ -1347,9 +1347,9 @@ export function driverSpendPanelHeight(panel: DriverSpendPanelDef, token: ThemeT
   let h =
     pad(token, 2) +
     token.fontTitle +
-    pad(token, 0.5) +
+    pad(token, 0.25) +
     token.fontCaption +
-    pad(token) +
+    pad(token, 0.75) +
     barH +
     pad(token, 0.75) +
     stats * (barH + rowGap) +
@@ -1514,7 +1514,7 @@ export function upgradePanelHeight(panel: UpgradePanelDef, token: ThemeTokens): 
   const rowH = pad(token, 5.5);
   const headerH = pad(token, 5);
   if (panel.collapsed) return headerH + pad(token);
-  const conditionH = statBarHeight(token) + pad(token, 1.5) + btnH + pad(token);
+  const conditionH = statBarHeight(token) + pad(token, 0.75) + btnH + pad(token);
   return headerH + conditionH + PARTS.length * rowH + pad(token);
 }
 

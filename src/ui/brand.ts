@@ -11,10 +11,13 @@ import type { ThemeTokens } from './theme';
 export const BRAND_DISPLAY_FONT =
   '"Bebas Neue", "Arial Narrow", "Helvetica Neue Condensed", Impact, sans-serif';
 
+/**
+ * The two stacks below are the single source of truth for the app's typography.
+ * The static splash in `index.html` cannot import these, so its `.mark` / `.sub`
+ * rules mirror them byte-for-byte — keep both in sync when changing either.
+ */
 export const BRAND_BODY_FONT =
   '"IBM Plex Sans", "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif';
-
-export const BRAND_WORDMARK = 'APEX';
 
 /** Default product accent when no discipline is active (title / splash). */
 export const BRAND_SIGNAL = '#f0c41a';
@@ -104,22 +107,4 @@ export function drawBrandAtmosphere(
   ctx.restore();
 }
 
-export function drawBrandWordmark(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  token: ThemeTokens,
-  accent: string,
-  size = token.fontHero,
-): void {
-  ctx.save();
-  ctx.font = `400 ${size}px ${token.fontDisplayFamily}`;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = token.text;
-  ctx.fillText(BRAND_WORDMARK, x, y);
-  const tw = ctx.measureText(BRAND_WORDMARK).width;
-  ctx.fillStyle = accent;
-  ctx.fillRect(x, y + size * 0.08, tw, Math.max(3, size * 0.07));
-  ctx.restore();
-}
+

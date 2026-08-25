@@ -121,35 +121,34 @@ export class TitleScene implements Scene {
       ctx.save();
       const scrim = ctx.createLinearGradient(s.x, s.y, s.x, s.y + s.h);
       scrim.addColorStop(0, 'rgba(11,13,12,0.1)');
-      scrim.addColorStop(0.3, 'rgba(11,13,12,0.55)');
+      scrim.addColorStop(0.3, 'rgba(18, 40, 48, 0.35)');
       scrim.addColorStop(1, 'rgba(11,13,12,0.82)');
       ctx.fillStyle = scrim;
       const r = Math.max(2, pad(token, 0.35));
       ctx.beginPath();
       ctx.roundRect(s.x, s.y, s.w, s.h, r);
       ctx.fill();
-      // Left signal rail on menu column
       ctx.fillStyle = BRAND_SIGNAL;
       ctx.fillRect(s.x, s.y + pad(token, 0.5), Math.max(3, pad(token, 0.35)), s.h - pad(token));
       ctx.restore();
     }
 
-    const hasSave = g.save.hasSave();
-    let btnY = layout.menuY;
-    const btnX = layout.menuX;
-    const btnW = layout.menuW;
-    const btnH = layout.btnH;
-    const btnGap = layout.btnGap;
+const hasSave = g.save.hasSave();
     const btnFont = layout.btnFont;
 
+    // ═══════════════════════════════════════════
+    // PRIMARY CTA — QUICK RACE (large, prominent, top)
+    // ═══════════════════════════════════════════
+    let btnY = layout.menuY;
+
     const quickRaceBtn: ButtonDef = {
-      x: btnX,
-      y: btnY,
-      w: btnW,
-      h: btnH,
-      label: 'Quick Race',
+      x: layout.menuX,
+      y: layout.menuY,
+      w: layout.menuW,
+      h: Math.max(layout.btnH + pad(token, 2), pad(token, 8)),
+      label: '▶  Quick Race',
       cta: true,
-      fontSize: btnFont,
+      fontSize: Math.max(layout.btnFont, token.fontDisplay),
       onClick: () => {
         const state = ensureQuickRaceState();
         if (state.roster.length < 1) {
@@ -159,14 +158,23 @@ export class TitleScene implements Scene {
         getGameContext().scenes.push(new QuickRaceSetupScene({ returnTo: 'title' }));
       },
     };
-    btnY += btnH + btnGap;
+    drawButton(ctx, quickRaceBtn, { ...ui, accent: BRAND_SIGNAL });
+    handleButton(quickRaceBtn, ui);
+
+btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad(token, 2);
+
+    // ═══════════════════════════════════════════
+    // SECONDARY ACTIONS — Quick play modes
+    // ═══════════════════════════════════════════
+    const secondaryGap = pad(token, 1);
+    const secondaryH = Math.max(layout.btnH, pad(token, 5.5));
 
     const timeTrialBtn: ButtonDef = {
-      x: btnX,
+      x: layout.menuX,
       y: btnY,
-      w: btnW,
-      h: btnH,
-      label: 'Time Trial',
+      w: Math.floor((layout.menuW - secondaryGap) * 0.5),
+      h: secondaryH,
+      label: '⏱  Time Trial',
       cta: false,
       fontSize: btnFont,
       onClick: () => {
@@ -178,14 +186,12 @@ export class TitleScene implements Scene {
         launchRace(makeTimeTrialConfig(state, 'track', 'title'), this.toasts);
       },
     };
-    btnY += btnH + btnGap;
-
     const continueBtn: ButtonDef = {
-      x: btnX,
+      x: layout.menuX + Math.floor((layout.menuW - secondaryGap) * 0.5) + secondaryGap,
       y: btnY,
-      w: btnW,
-      h: btnH,
-      label: 'Continue',
+      w: Math.floor((layout.menuW - secondaryGap) * 0.5),
+      h: secondaryH,
+      label: hasSave ? '↻  Continue' : 'Continue',
       disabled: !hasSave,
       fontSize: btnFont,
       onClick: () => {
@@ -194,13 +200,25 @@ export class TitleScene implements Scene {
         g.scenes.replace(new GarageScene());
       },
     };
-    btnY += btnH + btnGap;
+
+    drawButton(ctx, timeTrialBtn, ui);
+    drawButton(ctx, continueBtn, ui);
+    handleButton(timeTrialBtn, ui);
+    handleButton(continueBtn, ui);
+
+    btnY += secondaryH + pad(token, 2);
+
+    // ════════════════════════════════════════════
+    // TERTIARY ACTIONS — Account / Settings
+    // ════════════════════════════════════════════
+    const tertiaryGap = pad(token, 1);
+    const tertiaryH = Math.max(layout.btnH - pad(token, 1), pad(token, 5));
 
     const newGameBtn: ButtonDef = {
-      x: btnX,
+      x: layout.menuX,
       y: btnY,
-      w: btnW,
-      h: btnH,
+      w: Math.floor((layout.menuW - tertiaryGap) * 0.5),
+      h: tertiaryH,
       label: 'New Game',
       fontSize: btnFont,
       onClick: () => {
@@ -211,21 +229,11 @@ export class TitleScene implements Scene {
             body: 'Starting a new game will replace\nyour current progress.',
             buttons: [
               {
-                x: 0,
-                y: 0,
-                w: 0,
-                h: 0,
-                label: 'Cancel',
-                onClick: () => {
-                  this.modal.open = false;
-                },
+                x: 0, y: 0, w: 0, h: 0, label: 'Cancel',
+                onClick: () => { this.modal.open = false; },
               },
               {
-                x: 0,
-                y: 0,
-                w: 0,
-                h: 0,
-                label: 'New Game',
+                x: 0, y: 0, w: 0, h: 0, label: 'New Game',
                 primary: true,
                 onClick: () => {
                   this.modal.open = false;
@@ -241,31 +249,36 @@ export class TitleScene implements Scene {
         }
       },
     };
-    btnY += btnH + btnGap;
-
     const optionsBtn: ButtonDef = {
-      x: btnX,
+      x: layout.menuX + Math.floor((layout.menuW - tertiaryGap) * 0.5) + tertiaryGap,
       y: btnY,
-      w: btnW,
-      h: btnH,
+      w: Math.floor((layout.menuW - tertiaryGap) * 0.5),
+      h: tertiaryH,
       label: 'Options',
       fontSize: btnFont,
       onClick: () => g.scenes.push(new OptionsScene()),
     };
 
-    drawButton(ctx, quickRaceBtn, ui);
-    drawButton(ctx, timeTrialBtn, ui);
-    drawButton(ctx, continueBtn, ui);
     drawButton(ctx, newGameBtn, ui);
     drawButton(ctx, optionsBtn, ui);
+    handleButton(newGameBtn, ui);
+    handleButton(optionsBtn, ui);
 
-    if (!this.modal.open) {
-      handleButton(quickRaceBtn, ui);
-      handleButton(timeTrialBtn, ui);
-      handleButton(continueBtn, ui);
-      handleButton(newGameBtn, ui);
-      handleButton(optionsBtn, ui);
-    }
+    // Draw primary button (already handled above)
+    drawButton(ctx, quickRaceBtn, { ...ui, accent: BRAND_SIGNAL });
+    handleButton(quickRaceBtn, ui);
+
+    // Draw secondary buttons
+    drawButton(ctx, timeTrialBtn, ui);
+    drawButton(ctx, continueBtn, ui);
+    handleButton(timeTrialBtn, ui);
+    handleButton(continueBtn, ui);
+
+    // Draw tertiary buttons
+    drawButton(ctx, newGameBtn, ui);
+    drawButton(ctx, optionsBtn, ui);
+    handleButton(newGameBtn, ui);
+    handleButton(optionsBtn, ui);
 
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);

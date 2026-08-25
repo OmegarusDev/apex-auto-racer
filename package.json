@@ -16,7 +16,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "play": "vite --host 127.0.0.1 --port 5173 --open",
+    "play": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "validate": "npm run validate:feel",

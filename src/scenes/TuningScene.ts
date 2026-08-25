@@ -103,27 +103,22 @@ export class TuningScene implements Scene {
       ? Math.min((view.w - pad(token, 5)) * 0.32, pad(token, 9))
       : pad(token, 7.5);
 
+    // ════════════════════════════════════════════
+    // PRIMARY CTA — REPAIR (if needed) / PARTS CTA
+    // ════════════════════════════════════════════
+    const repairBtnHCondition = Math.max(btnH + pad(token, 1), pad(token, 6));
+
     const contentH =
-      token.fontCaption +
-      pad(token, 0.75) +
-      radarR * 2 +
-      pad(token, 3.5) +
-      pad(token, 10) +
-      pad(token, 1) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      token.fontCaption * 2 +
-      pad(token, 1.5) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      statBarHeight(token) +
-      pad(token, 0.75) +
-      btnH +
-      pad(token, 1.5) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      PARTS.length * rowH +
-      pad(token, 2);
+      // Performance radar
+      token.fontCaption + pad(token, 0.75) + radarR * 2 + pad(token, 2.5) + pad(token, 1) +
+      // Loadout preview
+      pad(token, 9) + pad(token, 1.5) +
+      // Predicted pace
+      token.fontCaption + pad(token, 0.75) + token.fontCaption * 2 + pad(token, 1.5) +
+      // Condition + Repair CTA
+      statBarHeight(token) + pad(token, 0.75) + ensureMinTouch(pad(token, 6), token) + pad(token, 1.5) +
+      // Parts list
+      pad(token, 0.75) + PARTS.length * rowH + pad(token, 2);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
@@ -132,10 +127,10 @@ export class TuningScene implements Scene {
     this.scroller.begin(ctx, view);
     let y = 0;
     y += drawSectionTitle(ctx, 0, y, 'Performance', lui);
+
     const radarX = portrait
       ? (view.w - radarR * 2) * 0.5
       : pad(token, 2.5) + token.fontCaption;
-    // Clearance so the radar's top label clears the section title above it.
     const radarY = y + pad(token, 1.25) + token.fontCaption * 0.5;
     drawRadarChart(
       ctx,
@@ -144,8 +139,11 @@ export class TuningScene implements Scene {
     );
     y += radarR * 2 + pad(token, 2.5) + pad(token, 1);
 
+    // ════════════════════════════════════════════
+    // LOADOUT PREVIEW (large, central)
+    // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Loadout preview', lui);
-    const previewH = pad(token, 9);
+    const previewH = pad(token, 10);
     const previewCx = view.w * 0.5;
     const previewCy = y + previewH * 0.5;
     drawTopDownCar(ctx, previewCx, previewCy, pad(token, 14), previewH, accent, this.discipline, {
@@ -162,8 +160,9 @@ export class TuningScene implements Scene {
       ctx.fillText(`Preview: next ${this.previewPart} tier`, previewCx, y + previewH - token.fontCaption);
       ctx.restore();
     }
-    y += previewH + pad(token, 1);
+    y += previewH + pad(token, 1.5);
 
+    // Predicted pace
     const setup = carSetupFromParts(vehicle.partTiers, this.discipline);
     const stats = effectiveStats(this.discipline, vehicle.partTiers, vehicle.condition);
     const mu = getDiscipline(this.discipline).muSurface;
@@ -181,20 +180,23 @@ export class TuningScene implements Scene {
     );
     ctx.fillStyle = token.textDim;
     ctx.fillText(
-      `Mass ${setup.massKg.toFixed(0)} kg · Bias ${(setup.brakeBiasFront * 100).toFixed(0)}%F · CL×${setup.clScale.toFixed(2)} / CD×${setup.cdScale.toFixed(2)}`,
+      `Mass ${carSetupFromParts(vehicle.partTiers, this.discipline).massKg.toFixed(0)} kg · Bias ${(carSetupFromParts(vehicle.partTiers, this.discipline).brakeBiasFront * 100).toFixed(0)}%F · CL×${carSetupFromParts(vehicle.partTiers, this.discipline).clScale.toFixed(2)} / CD×${carSetupFromParts(vehicle.partTiers, this.discipline).cdScale.toFixed(2)}`,
       pad(token, 0.5),
-      y + token.fontCaption + 4,
+      y + token.fontCaption + pad(token, 0.5),
     );
     ctx.restore();
     y += token.fontCaption * 2 + pad(token, 1.5);
 
+    // ═══════════════════════════════════════════
+    // CONDITION + REPAIR (prominent CTA if needed)
+    // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Condition', lui);
     drawStatBar(
       ctx,
       {
-        x: 0,
+        x: pad(token, 1),
         y,
-        w: view.w,
+        w: view.w - pad(token, 2),
         label: 'Condition',
         value: vehicle.condition * 100,
         color: vehicle.condition < BALANCE.conditionMin + 0.05 ? token.danger : accent,
@@ -205,14 +207,16 @@ export class TuningScene implements Scene {
 
     const repairPts = Math.max(0, Math.ceil((BALANCE.conditionMax - vehicle.condition) * 100));
     const repairCost = repairPts * BALANCE.repairCostPerPoint;
+    const repairBtnH = repairBtnHCondition;
     const repairBtn: ButtonDef = {
-      x: 0,
+      x: pad(token, 1.5),
       y,
-      w: view.w,
-      h: btnH,
+      w: view.w - pad(token, 3),
+      h: repairBtnH,
       label: repairPts > 0 ? `Repair ($${repairCost})` : 'Fully Repaired',
       disabled: repairPts <= 0 || state.cash < repairCost,
       primary: repairPts > 0 && state.cash >= repairCost,
+      fontSize: token.fontDisplay,
       onClick: () => {
         if (repairVehicle(state, this.discipline)) {
           this.toasts.push('Vehicle repaired', accent);
@@ -221,8 +225,9 @@ export class TuningScene implements Scene {
     };
     drawButton(ctx, repairBtn, lui);
     handleButton(repairBtn, lui);
-    y += btnH + pad(token, 1.5);
+    y += repairBtnH + pad(token, 1.5);
 
+    // Parts list
     y += drawSectionTitle(ctx, 0, y, 'Parts', lui);
 
     for (const part of PARTS) {
@@ -232,7 +237,6 @@ export class TuningScene implements Scene {
       const atMax = tier >= BALANCE.maxPartTier;
 
       drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui);
-      // lui is content-local (0..view.w, content y) — don't mix with view screen coords.
       if (
         lui.pointerX >= 0 &&
         lui.pointerX <= view.w &&

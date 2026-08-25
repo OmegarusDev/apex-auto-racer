@@ -234,8 +234,8 @@ export function stepVehicle(
   const brakingLoss = brake > 0.1 ? surface.brakingMuLoss * brake : 0;
   const muFactor = muSurface * (1 + noise) * (1 - brakingLoss) * (condGrip ?? 1);
 
-  // Steering clamp (a real rack: ±~35°).
-  const maxSteer = 0.6;
+  // Steering clamp (a real rack: ±~40°).
+  const maxSteer = 0.7;
   const delta = Math.max(-maxSteer, Math.min(maxSteer, steer));
 
   // Zone (asphalt / kerb / runoff / grass).

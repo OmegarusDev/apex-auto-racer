@@ -24,7 +24,7 @@ export const PHYSICS = {
    * Soft drive-cap overshoot past gear topFrac — stops a bogged gear from
    * hard-bricking accel for a frame while auto-upshift lands.
    */
-  gearCapSoft: 1.08,
+  gearCapSoft: 1.12,
   kerbOuterM: 0.8,
   /** Kappa gate for painted kerbs — must match Vehicle zone detection. */
   kerbKappa: 0.012,
@@ -151,23 +151,14 @@ export const PHYSICS = {
   throttleAuthoritySpan: 0.75,
   /** Mild launch caution — cold adhesion already lowers v_deslot. */
   aiLaunchSec: 1.6,
-  /**
-   * Hold grid lateral columns after GO so the pack does not magnet sideways
-   * into one shared line. Pure hold then slow blend into each car's personal line.
-   */
-  gridHoldSec: 2.6,
-  /** Fraction of gridHoldSec spent on pure grid L before blending to personal line. */
-  gridHoldPureFrac: 0.62,
-  /** Groove spring multiplier during gridHoldSec (soft pack-clear after GO). */
-  /** Cap on |dl| (m/s) during grid hold — prevents sideways teleport. */
   /** Minimum AI throttle while clearing the grid (avoids reaction-queue stalls). */
   detBonus: 0.12,
   /** Yaw damping (1/s) — the tyre self-aligning moments that stop the bicycle model's yaw from oscillating/running away. */
   yawDamping: 1.3,
   cameraPosRate: 6,
   cameraZoomRate: 3,
-  zoomMin: 0.48,
-  zoomMax: 0.88,
+  zoomMin: 0.55,
+  zoomMax: 0.95,
   lineNoiseBase: 0.8,
   sampleDs: 2,
   racingLineIters: 400,
@@ -177,6 +168,27 @@ export const PHYSICS = {
   maxGenAttempts: 20,
   baseRadiusMin: 140,
   baseRadiusMax: 260,
+  /** Car-specific ideal line tuning. */
+  idealLine: {
+    /** |κ| above this counts as a corner for segmentation. */
+    cornerKappaThreshold: 0.012,
+    /** |κ| below this counts as a straight (used to bracket corners). */
+    straightKappa: 0.004,
+    /** Half-window (nodes) around apex for lateral pull. */
+    apexHalfWindow: 6,
+    /** Outside bias on straights (fraction of half-width). */
+    outsideBias: 0.85,
+    /** Driver style blend weight (0..1). 0.3 = 30% driver, 70% car physics. */
+    driverStyleWeight: 0.3,
+    /** Max apex cut toward inside (m) for skill=100. */
+    maxSkillApexCut: 2.5,
+    /** Max wide carry toward outside (m) for bravery=100. */
+    maxBraveryWideCarry: 2.5,
+    /** Smoothing passes range [min, max] based on focus 0..1. */
+    focusSmoothPasses: [2, 6] as [number, number],
+    /** Distance (m) from grid to blend gridL -> personal line. */
+    gridAnchorDist: 50,
+  },
 };
 
 export const SURFACE_MU: Record<string, number> = {

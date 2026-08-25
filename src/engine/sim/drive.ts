@@ -41,7 +41,7 @@ export function driveForce(
   const torque = gearTorque(gear, box) * torqueCurveAtBand(band, discipline);
   const driveFront = resolveDriveBias(car.setup, discipline);
   const fxMax =
-    throttle * massKg * aAccel * torque * (1 - Math.pow(car.v / Math.max(vGearMax, 0.1), 2));
+    throttle * massKg * aAccel * torque * (1 - Math.pow(car.v / Math.max(vGearMax, 0.1), 1.6));
   return { fxDemand: Math.max(0, fxMax), driveFront, torque, vGearMax };
 }
 

@@ -41,7 +41,7 @@ export function resolveContacts(ctx: ContactContext): ContactStats {
   /** Centers inside this share a lane — stack in S, never peel-through. */
   const laneShareL = PHYSICS.carWidth * 0.48;
   /** Soften stun / drive-kill while the pack is still clearing grid columns. */
-  const launchSoft = raceTime < PHYSICS.gridHoldSec;
+  const launchSoft = raceTime < PHYSICS.aiLaunchSec;
   const launchStunScale = launchSoft ? 0.2 : 1;
   const launchBlockThresh = launchSoft ? 0.85 : 0.5;
 

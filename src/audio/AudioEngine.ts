@@ -44,7 +44,8 @@ export class AudioEngine {
     this.engine.start();
     this.tyres.start();
     this.crowd.start();
-    this.fx.ensureRain();
+    // Rain source is started lazily in setRain(true) — no point running it
+    // when there's no rain.
     this.unlocked = true;
   }
 

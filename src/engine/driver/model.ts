@@ -374,24 +374,30 @@ export function tickDriverBrain(
 
   // Target line (personal racing line + mistake wobble).
   const shaken = state.shaken;
+  const mistakeShift = raceTime < state.mistakeLUntil ? state.mistakeLShift : 0;
+  // Grid anchor: hold starting column for first gridAnchorDist, then ease to
+  // the personal line. Distance-based (not time-based) so it works at any
+  // launch speed. Shared by BOTH the position target and the steering
+  // lookahead — otherwise the steering aims at the raw personal line (often the
+  // opposite side of the track) while the car is still pinned to its grid
+  // column, yanking the wheel hard and spinning the car out of the gate.
+  const anchorDist = PHYSICS.idealLine.gridAnchorDist;
+  const blendedLineAt = (s: number): number => {
+    const base = personalLineAt(car, track, s) + mistakeShift;
+    const dsFromGrid = s - car.gridS;
+    const dsNormalized = dsFromGrid < 0 ? dsFromGrid + track.length : dsFromGrid;
+    let t = base;
+    if (dsNormalized < anchorDist) {
+      const w = 1 - dsNormalized / anchorDist;
+      const blend = w * w * (3 - 2 * w); // smoothstep
+      t = car.gridL * blend + base * (1 - blend);
+    }
+    // While shaken the line morphs toward centerline (safer), not grid column.
+    t = t * (1 - 0.7 * shaken);
+    return Math.max(-lineClamp, Math.min(lineClamp, t));
+  };
 
-  const baseLine = personalLineAt(car, track, car.s) + (raceTime < state.mistakeLUntil ? state.mistakeLShift : 0);
-  // Grid anchor: hold starting column for first 50m, then ease to personal line.
-  // Distance-based (not time-based) so it works at any launch speed.
-  let lineT: number;
-  const anchorDist = 50;
-  const dsFromGrid = car.s - car.gridS;
-  const dsNormalized = dsFromGrid < 0 ? dsFromGrid + track.length : dsFromGrid;
-  if (dsNormalized < anchorDist) {
-    const w = 1 - dsNormalized / anchorDist;
-    const blend = w * w * (3 - 2 * w); // smoothstep
-    lineT = car.gridL * blend + baseLine * (1 - blend);
-  } else {
-    lineT = baseLine;
-  }
-  // While shaken the line morphs toward centerline (safer), not grid column.
-  lineT = lineT * (1 - 0.7 * shaken);
-  lineT = Math.max(-lineClamp, Math.min(lineClamp, lineT));
+  const lineT = blendedLineAt(car.s);
 
   // --- Throttle plan (grip-budget management) ---
   // Corner braking = throttle OFF (braking and flooring together make the car
@@ -457,39 +463,39 @@ export function tickDriverBrain(
     if (car.v < 3) desiredThrottle = 1;
   }
 
-  // Pure pursuit lookahead — scales with speed and skill so faster / better
-  // drivers look further ahead on straights but the car still reacts to sharp
-  // corners.  CRITICAL: lookahead must be SHORTER than the upcoming corner, or
-  // the car sees the EXIT (opposite side of the track) and steers the WRONG
-  // WAY.  Low speed = tight corners = very short lookahead.
-  const lookahead = Math.max(6, Math.min(60, v * (0.5 + 0.5 * skill01) + 5));
-  const lookS = (car.s + lookahead) % track.length;
+  // Pure pursuit: aim at the racing line a lookahead ahead of the car, so the
+  // recovery arcs in smoothly instead of yanking across the track.
+  const lookahead = Math.max(12, Math.min(80, v * (0.9 + 0.9 * skill01) + 8));
+  const lookS = (car.s + lookahead * 0.6) % track.length;
+  // Same grid-anchored blend as the position target (see blendedLineAt above).
   const lineTAhead = Math.max(
     -lineClamp,
-    Math.min(lineClamp, personalLineAt(car, track, lookS)),
+    Math.min(lineClamp, blendedLineAt(lookS)),
   );
   const errLat = lineTAhead - (car.l + lookahead * Math.sin(car.slipAngle));
-  const wb = car.setup?.wheelbase ?? 2.7;
-
-  // Lateral-error pursuit (position controller).
-  const steerLat = Math.atan((2 * errLat * wb) / (lookahead * lookahead));
-
-  // Heading-error pursuit (direction controller) — the angle between the
-  // car's velocity and the line to the target point.  Directly encodes how
-  // much the car needs to rotate, so it works at any speed.
-  const dx = lookahead;
-  const dy = lineTAhead - car.l;
-  const steerHeading = Math.atan2(dy, Math.max(dx, 1));
-
-  // Blend: LOW speed uses heading (responsiveness in tight corners),
-  // high speed uses lateral-error (smooth high-speed path following).
-  const headingW = Math.max(0.3, Math.min(0.9, 1.2 - v / 35));
-  const steerPursuit = steerLat * (1 - headingW) + steerHeading * headingW;
-  // Countersteer: the Racer reads its own slide and counters — scaled down
-  // at low speed so tight cornering isn't fighting the damping.
-  const steerYaw = v > 8 ? -0.15 * car.slipAngle : -0.06 * car.slipAngle;
-  const steerDamp = v > 6 ? -0.12 * (car.dl / v) : 0;
+  // Kinematic pursuit: requested curvature = 2·err/λ² → steer angle for that arc.
+  const lam = Math.max(lookahead, 14);
+  const steerPursuit = Math.atan(
+    (2 * errLat * (car.setup?.wheelbase ?? 2.7)) / (lam * lam),
+  );
+  // The wheels point where the Racer aims the nose (pure pursuit) plus a hint
+  // of countersteer (the Racer reads its own slide) — and a SMALL lateral
+  // damper that catches a momentum plow in a hairpin without erasing the drift
+  // (the drift lives in the body slip, not the lateral velocity). This D term
+  // is the stabilizer: weakening it (or dropping the max(v,6) floor) let the
+  // lateral loop go unstable and oscillate the car across the track.
+  const steerYaw = -0.15 * car.slipAngle;
+  const steerDamp = -0.18 * (car.dl / Math.max(v, 6));
   let steer = Math.max(-0.7, Math.min(0.7, steerPursuit + steerYaw + steerDamp));
+  // Grip-limited steering: at speed the tyres can only turn the car so hard
+  // (max yaw ≈ grip/v). Demanding more just slides the front — a spin.
+  const steerCap = Math.atan(
+    (1.5 * G * (car.setup?.wheelbase ?? 2.7)) / Math.max(v * v, 18),
+  );
+  steer = Math.max(-steerCap, Math.min(steerCap, steer));
+  // Threshold braking: while braking hard, keep the wheel almost straight —
+  // braking and big steering together overload the front axle (understeer-wide).
+  if (desiredBrake > 0.2) steer *= 1 - 0.55 * Math.min(1, desiredBrake - 0.2);
 
   // Skill: rate limit (neuromuscular) + tracking noise.
   // Low speed demands sharper turn-in — boost the rate for tight corners.

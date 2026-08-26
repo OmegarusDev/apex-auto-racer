@@ -19,16 +19,21 @@ import {
   drawCard,
   drawRow,
   drawSectionTitle,
+  drawInfoIcon,
+  infoIconRadius,
   drawModal,
   handleModal,
   layoutModalButtons,
+  modalBoxRect,
   layoutShell,
   ContentScroller,
+  TooltipManager,
   pad,
   ensureMinTouch,
   hitRect,
   beginClip,
   endClip,
+  fmtCash,
   ToastManager,
   truncateText,
   type ButtonDef,
@@ -53,6 +58,7 @@ const LINEUP_VISIBLE_ROWS = 4;
 export class CampaignScene implements Scene {
   private readonly discipline: DisciplineId;
   private toasts = new ToastManager();
+  private tooltips = new TooltipManager();
   private modal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private lineupModalOpen = false;
   private pendingTournamentId: string | null = null;
@@ -62,11 +68,16 @@ export class CampaignScene implements Scene {
   private detachWheel: (() => void) | null = null;
   private lineupScroll = 0;
   private lineupBodyBase = '';
+  private lineupDragFrom: number | null = null;
+  private lineupScrollAtDrag = 0;
+  private lineupDragMoved = false;
 
   private onLineupWheel = (ev: WheelEvent): void => {
     if (!this.lineupModalOpen || !this.modal.open) return;
     ev.preventDefault();
+    const before = this.lineupScroll;
     this.lineupScroll += ev.deltaY;
+    if (this.lineupScroll !== before) this.tooltips.close();
   };
 
   constructor(discipline: DisciplineId) {
@@ -80,6 +91,7 @@ export class CampaignScene implements Scene {
     this.pendingTournamentId = null;
     this.lineupScroll = 0;
     this.scroller.scroll.offset = 0;
+    this.scroller.onUserScroll = () => this.tooltips.close();
     const canvas = getGameContext().canvas;
     this.detachWheel = this.scroller.attachWheel(canvas, () => !this.modal.open);
     canvas.addEventListener('wheel', this.onLineupWheel, { passive: false });
@@ -132,7 +144,7 @@ export class CampaignScene implements Scene {
     this.leadDriverId = defaultLeadDriver(g.state, this.lineupSelection);
     this.lineupModalOpen = true;
     this.lineupScroll = 0;
-    this.lineupBodyBase = `Pick ${teamSize} driver${teamSize > 1 ? 's' : ''} for this series.\nTap drivers to toggle.`;
+    this.lineupBodyBase = `Pick ${teamSize} driver${teamSize > 1 ? 's' : ''} for this series.\nTap drivers to toggle · the ★ lead's style drives the car.`;
     this.modal = {
       open: true,
       title: 'Select Lineup',
@@ -213,7 +225,14 @@ export class CampaignScene implements Scene {
     const g = getGameContext();
     const progress = this.inProgress();
     if (g.state === null || progress === null) return;
-    const def = getTournament(this.discipline, TOURNAMENTS.find((t) => t.id === progress.defId)!.rank);
+    // A save may reference a removed tournament def — bail out gracefully.
+    const defId = TOURNAMENTS.find((t) => t.id === progress.defId);
+    if (defId === undefined) {
+      g.state.inProgressTournaments[this.discipline] = null;
+      this.toasts.push('Series no longer exists', '#f87171');
+      return;
+    }
+    const def = getTournament(this.discipline, defId.rank);
     const raceDef = def.races[progress.raceIndex];
     if (raceDef === undefined) return;
 
@@ -245,24 +264,19 @@ export class CampaignScene implements Scene {
     }
   }
 
-  /** Mirror drawModal / layoutModalButtons box math. */
+  /** Shared modal geometry — same source as drawModal/layoutModalButtons. */
   private modalLayout(ui: UiContext) {
-    const { token, w, h } = ui;
-    const boxW = Math.min(w - pad(token, 4), pad(token, 40));
-    const btnH = ensureMinTouch(pad(token, 5.5), token);
-    const btnGap = pad(token, 0.75);
-    const btnRowH = this.modal.buttons.length > 0 ? btnH + pad(token, 2) : 0;
-    const bodyLines = this.modal.body.split('\n').length;
-    const bodyH = bodyLines * token.fontBody * 1.35 + pad(token);
-    const boxH = pad(token, 3) + token.fontTitle + pad(token) + bodyH + btnRowH + pad(token);
-    const boxX = (w - boxW) * 0.5;
-    const boxY = (h - boxH) * 0.5;
-    const bodyY = boxY + pad(token, 1.5) + token.fontTitle + pad(token, 0.75);
-    return { boxX, boxY, boxW, boxH, bodyY, btnH, btnGap, token };
+    const box = modalBoxRect(this.modal, ui);
+    return { ...box, token: ui.token };
+  }
+
+  /** Full touch-target row height — shared by the body reservation and the draw. */
+  private lineupRowH(token: ThemeTokens): number {
+    return ensureMinTouch(pad(token, 4.25), token);
   }
 
   private reserveLineupBody(token: ThemeTokens, rosterLen: number): number {
-    const rowH = pad(token, 5);
+    const rowH = this.lineupRowH(token);
     const listH = Math.min(LINEUP_VISIBLE_ROWS, Math.max(1, rosterLen)) * rowH;
     const lineH = token.fontBody * 1.35;
     const blankLines = Math.ceil(listH / lineH);
@@ -281,7 +295,7 @@ export class CampaignScene implements Scene {
 
     const accent = ui.accent;
     const { token } = ui;
-    const rowH = pad(token, 5);
+    const rowH = this.lineupRowH(token);
     const listH = Math.min(LINEUP_VISIBLE_ROWS, Math.max(1, state.roster.length)) * rowH;
     const layout = this.modalLayout(ui);
     const baseLines = this.lineupBodyBase.split('\n').length;
@@ -292,6 +306,24 @@ export class CampaignScene implements Scene {
     const maxScroll = Math.max(0, contentH - listH);
     this.lineupScroll = Math.max(0, Math.min(maxScroll, this.lineupScroll));
 
+    // Drag-to-scroll (touch users had no way to reach rows past the fourth).
+    const insideList = hitRect(ui.pointerX, ui.pointerY, listX, listTop, listW, listH);
+    if (ui.pointerDown && insideList && this.lineupDragFrom === null) {
+      this.lineupDragFrom = ui.pointerY;
+      this.lineupScrollAtDrag = this.lineupScroll;
+      this.lineupDragMoved = false;
+    }
+    if (!ui.pointerDown) {
+      this.lineupDragFrom = null;
+    } else if (this.lineupDragFrom !== null) {
+      const dy = ui.pointerY - this.lineupDragFrom;
+      if (Math.abs(dy) > 8) {
+        this.lineupDragMoved = true;
+        this.tooltips.close();
+        this.lineupScroll = Math.max(0, Math.min(maxScroll, this.lineupScrollAtDrag - dy));
+      }
+    }
+
     beginClip(ctx, listX, listTop, listW, listH);
     let rowY = listTop - this.lineupScroll;
     for (const driver of state.roster) {
@@ -299,7 +331,12 @@ export class CampaignScene implements Scene {
       const isLead = driver.id === this.leadDriverId;
       const rowVisible = rowY + rowH > listTop && rowY < listTop + listH;
 
-      if (rowVisible && ui.pointerClicked && hitRect(ui.pointerX, ui.pointerY, listX, rowY, listW, rowH)) {
+      if (
+        rowVisible &&
+        !this.lineupDragMoved &&
+        ui.pointerClicked &&
+        hitRect(ui.pointerX, ui.pointerY, listX, rowY, listW, rowH)
+      ) {
         const leadHit = hitRect(
           ui.pointerX,
           ui.pointerY,
@@ -323,13 +360,13 @@ export class CampaignScene implements Scene {
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(
-        `${selected ? '✓ ' : ''}${driver.name}${isLead ? ' ★' : ''}`,
+        truncateText(ctx, `${selected ? '✓ ' : ''}${driver.name}${isLead ? ' ★' : ''}`, listW - pad(token, 9.5)),
         listX + pad(token),
         rowY + rowH * 0.5,
       );
       if (selected) {
         ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-        ctx.fillStyle = isLead ? accent : token.textDim;
+        ctx.fillStyle = isLead ? accent : token.textMuted;
         ctx.textAlign = 'right';
         ctx.fillText(isLead ? 'Lead' : 'Set lead', listX + listW - pad(token, 0.5), rowY + rowH * 0.5);
       }
@@ -337,6 +374,21 @@ export class CampaignScene implements Scene {
       rowY += rowH;
     }
     endClip(ctx);
+
+    // Scroll affordance — show there are more drivers beyond the fold.
+    if (maxScroll > 0) {
+      const trackW = Math.max(3, pad(token, 0.4));
+      const thumbH = Math.max(pad(token, 1.5), listH * (listH / contentH));
+      const thumbY =
+        listTop +
+        (this.lineupScroll / maxScroll) * (listH - thumbH);
+      ctx.save();
+      ctx.fillStyle = token.bgElevated;
+      ctx.fillRect(listX + listW - trackW * 2, listTop, trackW, listH);
+      ctx.fillStyle = token.textDim;
+      ctx.fillRect(listX + listW - trackW * 2, thumbY, trackW, thumbH);
+      ctx.restore();
+    }
   }
 
   private drawDisciplineChip(
@@ -346,7 +398,7 @@ export class CampaignScene implements Scene {
     ui: UiContext,
   ): number {
     const { token, accent } = ui;
-    const label = disciplineLabel(this.discipline);
+    const label = disciplineLabel(this.discipline).toUpperCase();
     const chipH = token.fontCaption + pad(token, 1);
     ctx.save();
     ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
@@ -421,6 +473,8 @@ export class CampaignScene implements Scene {
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
     const interactive = !this.modal.open;
+    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
+    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
@@ -435,7 +489,13 @@ export class CampaignScene implements Scene {
     ctx.fillText('Quick Race', pad(token, 1.5), y + pad(token, 1.5));
     ctx.font = `${token.fontBody}px ${token.fontFamily}`;
     ctx.fillStyle = token.textMuted;
-    ctx.fillText('Jump in for cash and XP', pad(token, 1.5), y + pad(token, 1.5) + token.fontTitle);
+    // Keep clear of the Start button on the right.
+    const subtitleMax = view.w - pad(token, 3) - pad(token, 12);
+    ctx.fillText(
+      truncateText(ctx, 'Jump in for cash and XP', subtitleMax),
+      pad(token, 1.5),
+      y + pad(token, 1.5) + token.fontTitle,
+    );
     ctx.restore();
 
     const startBtn: ButtonDef = {
@@ -467,26 +527,38 @@ export class CampaignScene implements Scene {
     for (const objId of state.objectives.active.slice(0, BALANCE.activeObjectives)) {
       const def = getObjectiveDef(objId);
       drawRow(ctx, { x: 0, y, w: view.w, h: objH }, lui);
-      const rewardStr = `$${def?.reward ?? 0}`;
+      const rewardStr = fmtCash(def?.reward ?? 0);
+      const infoR = infoIconRadius(token);
       const titleY = y + pad(token, 0.5) + token.fontBody * 0.5;
       const descY = y + pad(token, 0.5) + token.fontBody + pad(token, 0.25) + token.fontCaption * 0.5;
       ctx.save();
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       const rewardW = ctx.measureText(rewardStr).width;
-      const textMax = view.w - pad(token, 2) - rewardW - pad(token, 1);
+      // Reserve room for the ⓘ between text and the payout figure.
+      const textMax = view.w - pad(token, 2) - rewardW - infoR * 3.6;
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(truncateText(ctx, def?.title ?? objId, textMax), pad(token, 1), titleY);
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = token.textDim;
+      ctx.fillStyle = token.textMuted;
       ctx.fillText(truncateText(ctx, def?.description ?? '', textMax), pad(token, 1), descY);
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       ctx.fillStyle = accent;
       ctx.textAlign = 'right';
       ctx.fillText(rewardStr, view.w - pad(token, 1), y + objH * 0.5);
       ctx.restore();
+
+      // ⓘ — when the cash lands.
+      const icx = view.w - pad(token, 1) - rewardW - infoR * 2.2;
+      const icy = y + objH * 0.5;
+      drawInfoIcon(ctx, icx, icy, infoR, lui, false);
+      this.tooltips.register(
+        { x: icx - infoR * 1.6, y: icy - infoR * 1.6, w: infoR * 3.2, h: infoR * 3.2 },
+        { title: 'Reward', body: 'Cash bonus, paid the moment the objective completes.' },
+        tooltipOrigin,
+      );
       y += objH + objGap;
     }
 
@@ -509,17 +581,27 @@ export class CampaignScene implements Scene {
         const lockLabel = `Locked · ${RANK_NAMES[rank]}`;
         ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
         const lockW = ctx.measureText(lockLabel).width;
+        const infoR2 = infoIconRadius(token);
         ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
         ctx.fillText(
-          truncateText(ctx, t.name, view.w - pad(token, 2) - lockW - pad(token, 1)),
+          truncateText(ctx, t.name, view.w - pad(token, 1.5) - lockW - infoR2 * 3.6),
           pad(token, 1),
           y + lockedH * 0.5,
         );
         ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-        ctx.fillStyle = token.textDim;
+        ctx.fillStyle = token.textMuted;
         ctx.textAlign = 'right';
         ctx.fillText(lockLabel, view.w - pad(token, 1), y + lockedH * 0.5);
         ctx.restore();
+        // ⓘ — how ranks unlock (winning the current top series promotes you).
+        const icx = view.w - pad(token, 1) - lockW - infoR2 * 2.4;
+        const icy = y + lockedH * 0.5;
+        drawInfoIcon(ctx, icx, icy, infoR2, lui, false);
+        this.tooltips.register(
+          { x: icx - infoR2 * 1.6, y: icy - infoR2 * 1.6, w: infoR2 * 3.2, h: infoR2 * 3.2 },
+          { title: 'Locked', body: `Reach ${RANK_NAMES[rank]} rank to enter — win the current top series in this discipline to promote.` },
+          tooltipOrigin,
+        );
         y += lockedH + objGap;
         continue;
       }
@@ -530,11 +612,18 @@ export class CampaignScene implements Scene {
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(t.name, pad(token, 1.5), y + pad(token, 1));
+      const progressStr =
+        isActive && progress !== null ? `Race ${progress.raceIndex + 1}/${t.races.length}` : '';
+      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+      const progressW = progressStr !== '' ? ctx.measureText(progressStr).width : 0;
+      ctx.font = `700 ${token.fontBody}px ${token.fontFamily}`;
+      const nameMax = view.w - pad(token, 3) - progressW - pad(token, 1.5);
+      ctx.fillText(truncateText(ctx, t.name, nameMax), pad(token, 1.5), y + pad(token, 1));
       ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = token.textDim;
+      ctx.fillStyle = token.textMuted;
+      const meta = `${RANK_NAMES[rank]} · ${t.races.length} races · ${t.teamSize}-car team`;
       ctx.fillText(
-        `${RANK_NAMES[rank]} · ${t.races.length} races · ${t.teamSize}-car team`,
+        truncateText(ctx, meta, nameMax),
         pad(token, 1.5),
         y + pad(token, 1) + token.fontBody,
       );
@@ -542,7 +631,7 @@ export class CampaignScene implements Scene {
         ctx.fillStyle = accent;
         ctx.textAlign = 'right';
         ctx.fillText(
-          `Race ${progress.raceIndex + 1}/${t.races.length}`,
+          progressStr,
           view.w - pad(token, 1.5),
           y + pad(token, 1),
         );
@@ -551,19 +640,23 @@ export class CampaignScene implements Scene {
 
       const actionY = y + cardH - pad(token, 1) - btnH;
       if (isActive && progress !== null) {
+        // Even split with a real gap — two adjacent primaries were 2-3px apart.
+        const availW = view.w - pad(token, 3);
+        const resumeW = availW * 0.55;
+        const abandonW = availW - resumeW - pad(token, 0.75);
         const resumeBtn: ButtonDef = {
           x: pad(token, 1.5),
           y: actionY,
-          w: (view.w - pad(token, 4)) * 0.55,
+          w: resumeW,
           h: btnH,
           label: 'Resume',
           primary: true,
           onClick: () => this.startTournamentRace(),
         };
         const abandonBtn: ButtonDef = {
-          x: pad(token, 2) + (view.w - pad(token, 4)) * 0.55,
+          x: pad(token, 1.5) + resumeW + pad(token, 0.75),
           y: actionY,
-          w: (view.w - pad(token, 4)) * 0.4,
+          w: abandonW,
           h: btnH,
           label: 'Abandon',
           onClick: () => {
@@ -573,7 +666,7 @@ export class CampaignScene implements Scene {
               body: 'Progress in this series will be lost.',
               buttons: [
                 { x: 0, y: 0, w: 0, h: 0, label: 'Cancel', onClick: () => { this.modal.open = false; } },
-                { x: 0, y: 0, w: 0, h: 0, label: 'Abandon', primary: true, onClick: () => { this.modal.open = false; this.abandonTournament(); } },
+                { x: 0, y: 0, w: 0, h: 0, label: 'Abandon', danger: true, onClick: () => { this.modal.open = false; this.abandonTournament(); } },
               ],
             };
           },
@@ -600,7 +693,7 @@ export class CampaignScene implements Scene {
         // Another series is already underway — don't leave a blank action strip.
         ctx.save();
         ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
-        ctx.fillStyle = token.textDim;
+        ctx.fillStyle = token.textMuted;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         ctx.fillText('Finish current series', view.w - pad(token, 1.5), actionY + btnH * 0.5);
@@ -611,6 +704,10 @@ export class CampaignScene implements Scene {
     }
 
     this.scroller.end(ctx);
+
+    // Tooltips live above content, below modal chrome.
+    this.tooltips.handle(lui, interactive && !this.scroller.isScrolling);
+    this.tooltips.draw(ctx, ui);
 
     handleHeader(header, ui);
 

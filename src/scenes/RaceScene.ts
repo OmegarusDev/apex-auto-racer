@@ -304,10 +304,20 @@ export class RaceScene implements Scene {
       return true;
     }
     if (this.director.isRaceFinished) return true;
-    if (!this.paused) {
-      this.openPause();
+    if (this.paused) {
+      // Escape dismisses the pause modal — resume racing.
+      this.closePause(true);
+      return true;
     }
+    this.openPause();
     return true;
+  }
+
+  private closePause(resume: boolean): void {
+    this.paused = false;
+    this.pauseModal.open = false;
+    this.g.input.setUiCapture(false);
+    if (resume) this.director?.resume();
   }
 
   private leaveToCampaign(): void {
@@ -492,7 +502,13 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
     this.pauseModal = {
       open: true,
       title: 'Paused',
-      body: 'Resume racing or retire from the event.',
+      body: [
+        'Resume racing or retire from the event.',
+        '',
+        'GROOVE — grip margin before deslot',
+        'SHIFT bar — shift while it pulses',
+        'Car·Tyres·Line — wear · temp · focus',
+      ].join('\n'),
       buttons: [
         {
           x: 0,
@@ -500,10 +516,9 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
           w: 0,
           h: 0,
           label: 'Retire',
+          danger: true,
           onClick: () => {
-            this.paused = false;
-            this.pauseModal.open = false;
-            this.g.input.setUiCapture(false);
+            this.closePause(false);
             this.director?.retire();
           },
         },
@@ -515,10 +530,7 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
           label: 'Resume',
           primary: true,
           onClick: () => {
-            this.paused = false;
-            this.pauseModal.open = false;
-            this.g.input.setUiCapture(false);
-            this.director?.resume();
+            this.closePause(true);
           },
         },
       ],
@@ -1034,12 +1046,13 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
       onClick: () => this.openPause(),
     };
 
-    // Racing lines toggle button (below pause button)
+    // Racing lines toggle — geometry lives in the shared chrome layout so the
+    // zoom slider stacks below it instead of overlapping its hit zone.
     const linesBtn: ButtonDef = {
-      x: chrome.pause.x,
-      y: chrome.pause.y + chrome.pause.h + pad(token, 0.5),
-      w: chrome.pause.w,
-      h: chrome.pause.h,
+      x: chrome.lines.x,
+      y: chrome.lines.y,
+      w: chrome.lines.w,
+      h: chrome.lines.h,
       label: this.showRacingLines ? 'Hide Lines' : 'Show Lines',
       onClick: () => { this.showRacingLines = !this.showRacingLines; },
     };
@@ -1059,15 +1072,43 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
     // Hide the telemetry column while the pre-race card / countdown is up —
     // the card (top-centre) overlaps these lines on narrow phones.
     if (director.countdown === null) {
+      // Backing plate so micro-text stays readable over the moving world.
+      // Mirrors the draw chain below (peg meter advance = caption + 0.25u + bar + 0.5u).
+      {
+        const pegAdv =
+          token.fontCaption + pad(token, 0.25) + Math.max(5, pad(token, 0.55)) + pad(token, 0.5);
+        let plateH = pad(token);
+        if (standing !== undefined) plateH += token.fontDisplay * 1.15 + pad(token, 0.35);
+        plateH += token.fontBody + pad(token, 0.45);
+        if (director.session === 'sprint') plateH += token.fontBody + pad(token, 0.45);
+        if (player !== undefined) {
+          plateH +=
+            token.fontTitle + pad(token, 0.35) +
+            pegAdv +
+            token.fontCaption + pad(token, 0.35) +
+            token.fontCaption;
+        }
+        ctx.fillStyle = 'rgba(11,13,12,0.6)';
+        ctx.beginPath();
+        ctx.roundRect(
+          safe.left + pad(token, 0.4),
+          safe.top + pad(token, 0.4),
+          telemetryMaxW + pad(token, 1.2),
+          plateH + pad(token, 1),
+          Math.max(2, pad(token, 0.35)),
+        );
+        ctx.fill();
+      }
+
       if (standing !== undefined) {
-      ctx.fillStyle = accent;
-      ctx.fillText(`${toOrdinal(standing.position)}`, hudX, hudY);
-      // Hairline under position
-      const pw = ctx.measureText(`${toOrdinal(standing.position)}`).width;
-      ctx.fillStyle = `${accent}88`;
-      ctx.fillRect(hudX, hudY + token.fontDisplay * 1.05, Math.min(pw, pad(token, 6)), 3);
-      hudY += token.fontDisplay * 1.15 + pad(token, 0.35);
-    }
+        ctx.fillStyle = accent;
+        ctx.fillText(`${toOrdinal(standing.position)}`, hudX, hudY);
+        // Hairline under position
+        const pw = ctx.measureText(`${toOrdinal(standing.position)}`).width;
+        ctx.fillStyle = `${accent}88`;
+        ctx.fillRect(hudX, hudY + token.fontDisplay * 1.05, Math.min(pw, pad(token, 6)), 3);
+        hudY += token.fontDisplay * 1.15 + pad(token, 0.35);
+      }
 
     ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
     ctx.fillStyle = token.textMuted;
@@ -1283,8 +1324,10 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
         ? 1.08
         : 1 + 0.04 * Math.sin(this.animTime * 10);
     ctx.save();
+    // Dim the world but leave the pedal deck readable — it is live during the count.
+    const deckTop = (this.chrome ?? raceChromeLayout(w, h, token)).deckTop;
     ctx.fillStyle = 'rgba(10,12,11,0.35)';
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(0, 0, w, deckTop);
     ctx.translate(w * 0.5, h * 0.38);
     ctx.scale(pulse, pulse);
     ctx.font = `400 ${Math.min(token.fontDisplay * 2.4, h * 0.18)}px ${token.fontDisplayFamily}`;
@@ -1351,10 +1394,24 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
     const maxW = Math.min(w - pad(token, 4) - token.safe.left - token.safe.right, pad(token, 40));
     ctx.save();
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
+    const lines = this.ticker.slice(0, 2);
+    // Backing plate — ticker text rides over live world pixels.
+    {
+      const plateH = lines.length * (token.fontCaption + 4) + pad(token, 1.2);
+      ctx.fillStyle = 'rgba(11,13,12,0.6)';
+      ctx.beginPath();
+      ctx.roundRect(
+        token.safe.left + pad(token, 0.4),
+        deckTop - pad(token, 0.75) - plateH,
+        Math.min(maxW + pad(token, 1.6), w * 0.7),
+        plateH,
+        Math.max(2, pad(token, 0.35)),
+      );
+      ctx.fill();
+    }
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
     let y = deckTop - pad(token, 0.75);
-    const lines = this.ticker.slice(0, 2);
     for (const line of lines) {
       ctx.globalAlpha = Math.min(1, line.ttl / TICKER_TTL);
       ctx.fillStyle = token.textMuted;

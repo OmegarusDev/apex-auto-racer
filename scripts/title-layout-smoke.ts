@@ -1,5 +1,9 @@
 import { createTheme } from '../src/ui/theme';
-import { computeTitleLayout, measureTitleLogoHeight } from '../src/scenes/titleArt';
+import {
+  computeTitleLayout,
+  measureTitleLogoHeight,
+  titleMenuStackHeight,
+} from '../src/scenes/titleArt';
 
 const sizes: [number, number, string][] = [
   [390, 844, 'phone portrait'],
@@ -15,11 +19,12 @@ let bad = 0;
 for (const [w, h, label] of sizes) {
   const t = createTheme(w, h);
   const L = computeTitleLayout(w, h, t);
-  const menuBottom = L.menuY + 4 * L.btnH + 3 * L.btnGap;
+  // Same stack math the scene and layout both use — cannot drift.
+  const menuBottom = L.menuY + titleMenuStackHeight(t, L.btnH);
   const logoH = measureTitleLogoHeight(L.apexSize);
   const logoBottom = L.logoY + logoH;
   const fits = menuBottom <= h - t.safe.bottom + 2;
-  const clear = L.mode === 'landscape' ? L.menuY + 2 >= logoBottom : L.menuY >= logoBottom - 4;
+  const clear = L.mode === 'landscape' ? L.menuY >= logoBottom - 2 : L.menuY >= logoBottom - 4;
   const ok = fits && clear;
   if (!ok) bad += 1;
   console.log(

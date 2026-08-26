@@ -101,6 +101,24 @@
         text-indent: 0.14em;
         margin-top: 0.2rem;
       }
+      #splash .status {
+        font: 500 12px/1.4 "IBM Plex Sans", "Segoe UI", sans-serif;
+        letter-spacing: 0.04em;
+        color: #9a9f96;
+        min-height: 17px;
+        margin-top: 0.15rem;
+      }
+      #splash .reload {
+        margin-top: 1rem;
+        padding: 0.55rem 1.4rem;
+        font: 600 13px/1 "IBM Plex Sans", "Segoe UI", sans-serif;
+        letter-spacing: 0.06em;
+        color: #0b0d0c;
+        background: #f0c41a;
+        border: none;
+        border-radius: 3px;
+        cursor: pointer;
+      }
       /* WebGL world under HUD — never hit-tests; pedals/UI live on #game. */
       #world {
         position: fixed;
@@ -133,10 +151,11 @@
     </style>
   </head>
   <body>
-    <div id="splash" aria-hidden="true">
+    <div id="splash">
       <span class="mark">APEX</span>
-      <div class="loader"><div class="loader-fill" id="loader-fill"></div></div>
+      <div class="loader" role="progressbar" aria-label="Loading" aria-valuemin="0" aria-valuemax="100"><div class="loader-fill" id="loader-fill"></div></div>
       <span class="sub">AUTO-RACER</span>
+      <span class="status" id="boot-status" role="status" aria-live="polite">Warming up…</span>
     </div>
     <canvas id="world" aria-hidden="true"></canvas>
     <canvas id="game"></canvas>
@@ -146,19 +165,19 @@
       (function () {
         var splash = document.getElementById('splash');
         var fill = document.getElementById('loader-fill');
+        var status = document.getElementById('boot-status');
         var progress = 0;
         var target = 12;
         var done = false;
         var failed = false;
 
-        function setProgress(p) {
-          target = Math.max(target, p);
+        function setStatus(text) {
+          if (status) status.textContent = text;
         }
 
-        function escapeHtml(s) {
-          return String(s).replace(/[<>&]/g, function (c) {
-            return c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;';
-          });
+        function setProgress(p, label) {
+          target = Math.max(target, p);
+          if (label) setStatus(label);
         }
 
         function showError(msg) {
@@ -167,19 +186,25 @@
           splash.dataset.apexBoot = 'error';
           splash.style.pointerEvents = 'auto';
           splash.style.opacity = '1';
-          splash.innerHTML =
-            '<span class="mark">APEX</span><span class="sub">BOOT FAILED</span>' +
-            '<pre style="max-width:min(92vw,42rem);margin:1.25rem 1rem 0;padding:0;white-space:pre-wrap;word-break:break-word;' +
-            'font:500 12px/1.45 IBM Plex Sans,Segoe UI,sans-serif;letter-spacing:0.02em;color:#f2efe6;opacity:0.85;text-align:center">' +
-            escapeHtml(msg) +
-            '</pre>';
+          setStatus('Something went wrong while starting.');
+          var bar = document.querySelector('.loader');
+          var reload =
+            '<button class="reload" type="button" onclick="window.location.reload()">Reload</button>';
+          if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+          var pre = document.createElement('pre');
+          pre.style.cssText =
+            'max-width:min(92vw,42rem);margin:1.25rem 1rem 0;padding:0;white-space:pre-wrap;word-break:break-word;' +
+            'font:500 12px/1.45 IBM Plex Sans,Segoe UI,sans-serif;letter-spacing:0.02em;color:#f2efe6;opacity:0.85;text-align:center';
+          pre.textContent = msg;
+          splash.appendChild(pre);
+          splash.appendChild(document.createRange().createContextualFragment(reload));
         }
 
         window.__apexBoot = {
           progress: setProgress,
           ready: function () {
             done = true;
-            setProgress(100);
+            setProgress(100, 'Starting engines…');
           },
           error: showError,
         };
@@ -187,14 +212,19 @@
         // Self-hosted fonts — bump the bar once they are ready (near-instant).
         if (document.fonts && document.fonts.ready) {
           document.fonts.ready.then(function () {
-            setProgress(60);
+            setProgress(60, 'Loading fonts…');
           });
         }
+        setStatus('Loading…');
 
         function tick() {
           if (failed) return;
           progress += (target - progress) * 0.12;
-          if (fill) fill.style.width = Math.min(100, progress).toFixed(1) + '%';
+          if (fill) {
+            fill.style.width = Math.min(100, progress).toFixed(1) + '%';
+            var bar = fill.parentElement;
+            if (bar) bar.setAttribute('aria-valuenow', String(Math.round(Math.min(100, progress))));
+          }
           if (done && progress >= 99.5) {
             splash.dataset.apexBoot = 'done';
             splash.style.opacity = '0';
@@ -220,11 +250,11 @@
         window.setTimeout(function () {
           if (!splash || splash.dataset.apexBoot === 'done' || splash.dataset.apexBoot === 'error') return;
           if (splash.style.opacity === '0') return;
-          var msg =
+          showError(
             splash.dataset.apexBoot === 'loading'
-              ? 'Boot hung after module load — check the console.'
-              : 'Boot timed out — check the console / refresh after restarting Vite.';
-          showError(msg);
+              ? 'The game hung while starting. Try reloading — if it keeps happening, your browser may be out of memory.'
+              : 'The game took too long to start. Tap Reload to try again.'
+          );
         }, 12000);
       })();
     </script>

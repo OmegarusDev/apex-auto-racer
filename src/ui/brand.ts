@@ -3,8 +3,6 @@
  * Pit-night asphalt + signal amber (not cyan-on-zinc).
  */
 
-import type { DisciplineId } from '../data/disciplines';
-import { getDiscipline } from '../data/disciplines';
 import type { ThemeTokens } from './theme';
 
 /** Condensed timing-board display. Loaded via index.html Google Fonts. */
@@ -21,14 +19,6 @@ export const BRAND_BODY_FONT =
 
 /** Default product accent when no discipline is active (title / splash). */
 export const BRAND_SIGNAL = '#f0c41a';
-
-export function brandAccent(discipline: DisciplineId): string {
-  return getDiscipline(discipline).accent;
-}
-
-export function brandAccentDim(discipline: DisciplineId): string {
-  return getDiscipline(discipline).accentDim;
-}
 
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace('#', '');

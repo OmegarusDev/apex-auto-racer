@@ -178,6 +178,10 @@ export const PHYSICS = {
     apexHalfWindow: 6,
     /** Outside bias on straights (fraction of half-width). */
     outsideBias: 0.85,
+    /** Hard cap on the line's transverse slope (m of offset per m of arc).
+     *  A car can only change lateral position at ~v·sin(steer) — a line
+     *  steeper than this is undrivable and makes the controller snake. */
+    maxLateralSlope: 0.12,
     /** Driver style blend weight (0..1). 0.3 = 30% driver, 70% car physics. */
     driverStyleWeight: 0.3,
     /** Max apex cut toward inside (m) for skill=100. */

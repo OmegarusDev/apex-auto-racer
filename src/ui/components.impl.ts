@@ -46,6 +46,8 @@ export interface ButtonDef {
   label: string;
   disabled?: boolean;
   primary?: boolean;
+  /** Destructive action — red plate regardless of primary/secondary. */
+  danger?: boolean;
   /** Hero CTA — filled accent with a play mark (title Quick Race). */
   cta?: boolean;
   /** Optional label size — defaults to fontBody. Title menu uses a larger display size. */
@@ -67,6 +69,12 @@ export interface StatBarDef {
   label: string;
   value: number;
   color?: string;
+  /** Unit readout after the number, e.g. '%'. */
+  suffix?: string;
+  /** Suppress the numeric readout (label carries the numbers instead). */
+  hideValue?: boolean;
+  /** When present, an (i) hotspot is drawn beside the label. */
+  info?: TooltipInfo;
 }
 
 export interface RadarChartDef {
@@ -117,6 +125,8 @@ export type DriverStatKey = 'skill' | 'bravery' | 'focus' | 'determination';
 export interface DriverSpendData {
   name: string;
   trait: string;
+  /** Optional plain-language trait description shown via an (i) hotspot. */
+  traitDescription?: string;
   skill: number;
   bravery: number;
   focus: number;
@@ -127,13 +137,36 @@ export interface DriverSpendData {
   xpToNext: number;
 }
 
+/** Optional full-width action row under a driver card (Release / Hire …). */
+export interface DriverPanelAction {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}
+
 export interface DriverSpendPanelDef {
   x: number;
   y: number;
   w: number;
   driver: DriverSpendData;
   onSpend?: (stat: DriverStatKey) => void;
+  /** Extra action buttons drawn under the stat block. */
+  actions?: DriverPanelAction[];
+  /** Receives stat ⓘ hotspots so hosts can feed their TooltipManager. */
+  registerInfo?: (rect: Rect, info: TooltipInfo) => void;
 }
+
+/** What each driver rating does in a race — surfaced through the ⓘ hotspots. */
+export const DRIVER_STAT_INFO: Record<DriverStatKey, string> = {
+  skill: 'Control quality — carries corners closer to the limit, brakes later and straighter, catches slides faster.',
+  bravery: 'Corner commitment — keeps momentum through bends and brakes later. Riskier in traffic and rain.',
+  focus: 'Concentration — fewer lapses like missed braking points or line wobbles. Matters most in the wet.',
+  determination: 'Fightback — finds extra pace when running behind in the field.',
+};
+
+const DRIVER_XP_INFO =
+  'Races award XP. Every level-up grants one point to spend on the ratings below.';
 
 export interface UpgradePanelDef {
   x: number;
@@ -143,9 +176,55 @@ export interface UpgradePanelDef {
   condition: number;
   cash: number;
   collapsed?: boolean;
+  /** Part whose row reads highlighted (e.g. hovered for a preview elsewhere). */
+  activePart?: PartCategory | null;
   onBuy?: (part: PartCategory) => void;
   onRepair?: () => void;
   onToggleCollapse?: () => void;
+  /** Per-part explanation for the row ⓘ hotspots. */
+  infoForPart?: (part: PartCategory) => TooltipInfo | undefined;
+  /** Receives ⓘ hotspots so hosts can feed their TooltipManager. */
+  registerInfo?: (rect: Rect, info: TooltipInfo) => void;
+}
+
+/** Cash + points needed to go back to perfect condition. */
+export function repairQuote(condition: number): { pts: number; cost: number } {
+  const pts = Math.max(0, Math.ceil((BALANCE.conditionMax - condition) * 100));
+  return { pts, cost: pts * BALANCE.repairCostPerPoint };
+}
+
+interface UpgradePanelMetrics {
+  btnH: number;
+  rowH: number;
+  headerH: number;
+}
+
+function upgradePanelMetrics(token: ThemeTokens): UpgradePanelMetrics {
+  const btnH = ensureMinTouch(pad(token, 4.5), token);
+  // Rows must fully contain their buy button (a flat 5.5u row bled ±2px).
+  return {
+    btnH,
+    rowH: Math.max(pad(token, 5.5), btnH + pad(token, 0.5)),
+    headerH: pad(token, 5),
+  };
+}
+
+/** Absolute y of the first part row — lets hosts do their own hover hit-tests. */
+export function upgradePanelRowsTop(panel: UpgradePanelDef, token: ThemeTokens): number {
+  const m = upgradePanelMetrics(token);
+  return (
+    panel.y +
+    pad(token, 1) +
+    m.headerH +
+    (panel.collapsed
+      ? 0
+      : statBarHeight(token) + pad(token, 0.75) + m.btnH + pad(token, 1))
+  );
+}
+
+/** Row pitch of the part rows — hosts use it with upgradePanelRowsTop. */
+export function upgradePanelRowHeight(token: ThemeTokens): number {
+  return upgradePanelMetrics(token).rowH;
 }
 
 const RADAR_LABELS = ['Top Speed', 'Accel', 'Braking', 'Grip', 'Downforce'] as const;
@@ -302,7 +381,7 @@ export function layoutHintBox(
   const padX = pad(token, 1.5);
   const padY = pad(token, 1);
   const lineH = fontSize * 1.35;
-  const boxW = Math.min(opts.maxW, opts.maxW);
+  const boxW = opts.maxW;
   setFont(ctx, token, fontSize, '600');
   const lines = wrapText(ctx, opts.text, boxW - padX * 2, maxLines);
   const textH = Math.max(lineH, lines.length * lineH);
@@ -381,12 +460,14 @@ function drawGearIcon(
 
 export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: UiContext): void {
   const { token, accent } = ui;
+  // Destructive actions keep their identity even when styled primary.
+  const actionAccent = btn.danger === true && !btn.disabled ? token.danger : accent;
   const hovered = !btn.disabled && hitRect(ui.pointerX, ui.pointerY, btn.x, btn.y, btn.w, btn.h);
   // Sharp pit-plate corners — not soft app cards.
   const r = Math.max(2, pad(token, 0.25));
   const rail = Math.max(3, pad(token, 0.35));
   const isCta = btn.cta === true && !btn.disabled;
-  const isPrimary = (btn.primary === true || isCta) && !btn.disabled;
+  const isPrimary = (btn.primary === true || btn.danger === true || isCta) && !btn.disabled;
 
   ctx.save();
   if (btn.disabled) {
@@ -396,7 +477,7 @@ export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: Ui
     ctx.fillStyle = token.disabled;
   } else if (isCta) {
     // CTA: solid signal plate + dark inset edge (reads hotter than a normal primary).
-    ctx.fillStyle = accent;
+    ctx.fillStyle = actionAccent;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
     ctx.fillStyle = hovered ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.16)';
@@ -412,7 +493,7 @@ export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: Ui
     }
     ctx.fillStyle = token.bg;
   } else if (isPrimary) {
-    const fill = accent;
+    const fill = actionAccent;
     ctx.fillStyle = fill;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
@@ -433,9 +514,9 @@ export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: Ui
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.fill();
     // Left signal rail
-    ctx.fillStyle = hovered ? accent : `${accent}99`;
+    ctx.fillStyle = hovered ? actionAccent : `${actionAccent}99`;
     ctx.fillRect(btn.x, btn.y, rail, btn.h);
-    ctx.strokeStyle = hovered ? `${accent}55` : token.cardStroke;
+    ctx.strokeStyle = hovered ? `${actionAccent}55` : token.cardStroke;
     ctx.lineWidth = 1;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
     ctx.stroke();
@@ -628,6 +709,8 @@ export function layoutShell(
  */
 export class ContentScroller {
   readonly scroll: ScrollState = { offset: 0, max: 0 };
+  /** Fired once per user-initiated scroll (drag commit or wheel) — dismiss tooltips. */
+  onUserScroll: (() => void) | null = null;
   private dragging = false;
   private dragStartY = 0;
   private dragStartX = 0;
@@ -644,7 +727,9 @@ export class ContentScroller {
   }
 
   onWheel(deltaY: number): void {
+    const before = this.scroll.offset;
     wheelScroll(this.scroll, deltaY);
+    if (this.scroll.offset !== before) this.onUserScroll?.();
   }
 
   begin(ctx: CanvasRenderingContext2D, view: Rect = this.bound): void {
@@ -692,6 +777,7 @@ export class ContentScroller {
       const dx = ui.pointerX - this.dragStartX;
       this.dragDist = Math.max(this.dragDist, Math.abs(dy), Math.abs(dx));
       if (Math.abs(dy) > 8 && Math.abs(dy) >= Math.abs(dx) * 1.15) {
+        if (!this.didScroll) this.onUserScroll?.();
         this.didScroll = true;
         this.scroll.offset = this.scrollAtDrag - dy;
         clampScroll(this.scroll);
@@ -781,6 +867,9 @@ export function drawSlider(ctx: CanvasRenderingContext2D, slider: SliderDef, ui:
   ctx.restore();
 }
 
+/** Slider currently held — keeps the gesture alive when the drag leaves the track. */
+let capturedSlider: SliderDef | null = null;
+
 export function handleSlider(slider: SliderDef, ui: UiContext): boolean {
   const { token } = ui;
   const trackH = Math.min(slider.h, pad(token, 1));
@@ -789,8 +878,13 @@ export function handleSlider(slider: SliderDef, ui: UiContext): boolean {
   const hitPad = (token.touchMin - trackH) * 0.5;
   const hitY = trackY - hitPad;
   const hitH = trackH + hitPad * 2;
-  if (!ui.pointerDown) return false;
-  if (!hitRect(ui.pointerX, ui.pointerY, slider.x, hitY, slider.w, hitH)) return false;
+  if (!ui.pointerDown) {
+    if (capturedSlider === slider) capturedSlider = null;
+    return false;
+  }
+  const captured = capturedSlider === slider;
+  if (!captured && !hitRect(ui.pointerX, ui.pointerY, slider.x, hitY, slider.w, hitH)) return false;
+  capturedSlider = slider;
   const v = Math.max(0, Math.min(1, (ui.pointerX - slider.x) / slider.w));
   slider.onChange?.(v);
   return true;
@@ -844,10 +938,17 @@ export function drawStatBar(ctx: CanvasRenderingContext2D, bar: StatBarDef, ui: 
   ctx.textBaseline = 'top';
   ctx.fillText(bar.label, bar.x, bar.y);
 
-  setFont(ctx, token, token.fontCaption, '600');
-  ctx.textAlign = 'right';
-  ctx.fillStyle = token.text;
-  ctx.fillText(String(Math.round(value)), bar.x + bar.w, bar.y);
+  if (bar.info !== undefined) {
+    const r = infoIconRadius(token);
+    drawInfoIcon(ctx, statBarInfoIconX(ctx, bar, token) + r, bar.y + token.fontCaption * 0.45, r, ui, false);
+  }
+
+  if (!bar.hideValue) {
+    setFont(ctx, token, token.fontCaption, '600');
+    ctx.textAlign = 'right';
+    ctx.fillStyle = token.text;
+    ctx.fillText(`${String(Math.round(value))}${bar.suffix ?? ''}`, bar.x + bar.w, bar.y);
+  }
 
   ctx.fillStyle = token.bgElevated;
   roundRectPath(ctx, bar.x, trackY, bar.w, barH, barH * 0.5);
@@ -863,6 +964,192 @@ export function drawStatBar(ctx: CanvasRenderingContext2D, bar: StatBarDef, ui: 
 
 export function statBarHeight(token: ThemeTokens): number {
   return token.fontCaption + pad(token, 0.25) + pad(token, 0.75);
+}
+
+// ── Info tooltips ───────────────────────────────────────────────────────────
+
+/** Explanation payload attached to a stat via its (i) hotspot. */
+export interface TooltipInfo {
+  title: string;
+  body: string;
+}
+
+interface InfoHotspot {
+  /** Rect in the coordinate space where the stat was drawn (scroller-local OK). */
+  rect: Rect;
+  /** Local→screen translation (e.g. scroller view origin minus scroll offset). */
+  origin: { x: number; y: number };
+  info: TooltipInfo;
+}
+
+/** Painted ⓘ glyph — ring + dot/stem, tinted accent while its tooltip is open. */
+export function drawInfoIcon(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  ui: UiContext,
+  active: boolean,
+): void {
+  ctx.save();
+  const ink = active ? ui.accent : `${ui.token.textMuted}cc`;
+  ctx.lineWidth = Math.max(1.2, r * 0.26);
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.44, r * 0.13, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(cx - r * 0.12, cy - r * 0.08, r * 0.24, r * 0.6, r * 0.12);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Visual radius for an inline stat (i). */
+export function infoIconRadius(token: ThemeTokens): number {
+  return Math.max(7, token.fontCaption * 0.66);
+}
+
+/** X where a stat-bar's (i) starts, just past its measured label. */
+function statBarInfoIconX(
+  ctx: CanvasRenderingContext2D,
+  bar: StatBarDef,
+  token: ThemeTokens,
+): number {
+  setFont(ctx, token, token.fontCaption, '500');
+  return bar.x + ctx.measureText(bar.label).width + pad(token, 0.6);
+}
+
+/**
+ * Hit rect for a stat-bar's (i). Slightly under touchMin so dense card stacks
+ * don't overlap neighbouring rows' targets.
+ */
+export function statBarInfoHit(
+  ctx: CanvasRenderingContext2D,
+  bar: StatBarDef,
+  token: ThemeTokens,
+): Rect {
+  const r = infoIconRadius(token);
+  const cx = statBarInfoIconX(ctx, bar, token) + r;
+  const cy = bar.y + token.fontCaption * 0.45;
+  const side = Math.max(Math.round(r * 2.8), pad(token, 3));
+  return { x: cx - side * 0.5, y: cy - side * 0.5, w: side, h: side };
+}
+
+/**
+ * Tap-to-toggle explainer cards for stat (i) hotspots.
+ * Per-frame contract: beginFrame() → register()/registerStatBar() while drawing
+ * → handle() once after content input → draw() after all other content layers.
+ */
+export class TooltipManager {
+  private hotspots: InfoHotspot[] = [];
+  private activeIndex = -1;
+
+  beginFrame(): void {
+    this.hotspots = [];
+  }
+
+  close(): void {
+    this.activeIndex = -1;
+  }
+
+  get isOpen(): boolean {
+    return this.activeIndex >= 0 && this.activeIndex < this.hotspots.length;
+  }
+
+  /**
+   * Register an (i) hotspot for this frame. `rect` lives in the same space the
+   * stat was drawn in; pass the local→screen origin when inside a scroller.
+   */
+  register(rect: Rect, info: TooltipInfo, origin: { x: number; y: number } = { x: 0, y: 0 }): void {
+    this.hotspots.push({ rect, origin, info });
+  }
+
+  /** Convenience for stats drawn via drawStatBar. */
+  registerStatBar(
+    ctx: CanvasRenderingContext2D,
+    bar: StatBarDef,
+    token: ThemeTokens,
+    origin: { x: number; y: number } = { x: 0, y: 0 },
+  ): void {
+    if (bar.info !== undefined) this.register(statBarInfoHit(ctx, bar, token), bar.info, origin);
+  }
+
+  /** Resolve taps: toggle on (i), switch between them, dismiss on anywhere else. */
+  handle(ui: UiContext, allowInput = true): void {
+    if (!allowInput || !ui.pointerClicked) return;
+    let tapped = -1;
+    for (let i = this.hotspots.length - 1; i >= 0; i--) {
+      const h = this.hotspots[i]!;
+      const { x, y } = h.rect;
+      if (hitRect(ui.pointerX, ui.pointerY, x, y, h.rect.w, h.rect.h)) {
+        tapped = i;
+        break;
+      }
+    }
+    this.activeIndex = tapped >= 0 ? (this.activeIndex === tapped ? -1 : tapped) : -1;
+  }
+
+  /** Draw the open tooltip card, viewport-clamped near its hotspot. */
+  draw(ctx: CanvasRenderingContext2D, ui: UiContext): void {
+    const spot = this.hotspots[this.activeIndex];
+    if (!spot) return;
+    const { token } = ui;
+    // Hotspot in screen space for placement.
+    const hx = spot.rect.x + spot.origin.x;
+    const hy = spot.rect.y + spot.origin.y;
+    const boxW = Math.min(ui.w - pad(token, 4) - token.safe.left - token.safe.right, pad(token, 36));
+    const padX = pad(token, 1.25);
+    const padY = pad(token, 1);
+    const lineH = token.fontCaption * 1.4;
+
+    setFont(ctx, token, token.fontCaption, '700', true);
+    const titleLines = wrapText(ctx, spot.info.title.toUpperCase(), boxW - padX * 2, 1);
+    setFont(ctx, token, token.fontCaption, '500');
+    const bodyLines = wrapText(ctx, spot.info.body, boxW - padX * 2, 8);
+    const titleH = titleLines.length > 0 ? token.fontCaption + pad(token, 0.4) : 0;
+    const boxH = padY * 2 + titleH + bodyLines.length * lineH;
+
+    // Prefer above the hotspot; flip below when clipped; clamp into view.
+    let x = hx + spot.rect.w * 0.5 - boxW * 0.5;
+    x = Math.max(token.safe.left + pad(token, 1), Math.min(x, ui.w - token.safe.right - pad(token, 1) - boxW));
+    let y = hy - pad(token, 0.75) - boxH;
+    if (y < token.safe.top + pad(token, 1)) {
+      y = hy + spot.rect.h + pad(token, 0.75);
+    }
+    y = Math.min(y, ui.h - token.safe.bottom - pad(token, 1) - boxH);
+
+    ctx.save();
+    ctx.fillStyle = token.card;
+    roundRectPath(ctx, x, y, boxW, boxH, pad(token, 0.5));
+    ctx.fill();
+    ctx.strokeStyle = `${ui.accent}88`;
+    ctx.lineWidth = 1;
+    roundRectPath(ctx, x, y, boxW, boxH, pad(token, 0.5));
+    ctx.stroke();
+
+    let ty = y + padY;
+    if (titleLines.length > 0) {
+      setFont(ctx, token, token.fontCaption, '700', true);
+      ctx.fillStyle = ui.accent;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(titleLines[0]!, x + padX, ty);
+      ty += titleH;
+    }
+    setFont(ctx, token, token.fontCaption, '500');
+    ctx.fillStyle = token.text;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    for (const line of bodyLines) {
+      ctx.fillText(line, x + padX, ty);
+      ty += lineH;
+    }
+    ctx.restore();
+  }
 }
 
 // ── RadarChart ──────────────────────────────────────────────────────────────
@@ -945,51 +1232,75 @@ export function drawRadarChart(ctx: CanvasRenderingContext2D, chart: RadarChartD
 
 // ── Modal ───────────────────────────────────────────────────────────────────
 
-export function drawModal(ctx: CanvasRenderingContext2D, modal: ModalDef, ui: UiContext): void {
-  if (!modal.open) return;
+/** Shared modal geometry — drawing, hit-testing, and overlays must agree. */
+export interface ModalBoxRect {
+  boxX: number;
+  boxY: number;
+  boxW: number;
+  boxH: number;
+  bodyY: number;
+  btnX: number;
+  btnY: number;
+  btnW: number;
+  btnH: number;
+}
+
+export function modalBoxRect(modal: ModalDef, ui: UiContext): ModalBoxRect {
   const { token, w, h } = ui;
-
-  ctx.save();
-  ctx.fillStyle = token.overlay;
-  ctx.fillRect(0, 0, w, h);
-
   const boxW = Math.min(w - pad(token, 4), pad(token, 40));
   const btnH = ensureMinTouch(pad(token, 5.5), token);
   const btnGap = pad(token, 0.75);
-  const btnRowH = modal.buttons.length > 0 ? btnH + pad(token, 2) : 0;
+  const hasButtons = modal.buttons.length > 0;
+  const btnRowH = hasButtons ? btnH + pad(token, 2) : 0;
   const bodyLines = modal.body.split('\n').length;
   const bodyH = bodyLines * token.fontBody * 1.35 + pad(token);
   const boxH = pad(token, 3) + token.fontTitle + pad(token) + bodyH + btnRowH + pad(token);
-
   const boxX = (w - boxW) * 0.5;
   const boxY = (h - boxH) * 0.5;
+  const btnW = hasButtons
+    ? (boxW - pad(token, 3) - btnGap * (modal.buttons.length - 1)) / modal.buttons.length
+    : 0;
+  return {
+    boxX,
+    boxY,
+    boxW,
+    boxH,
+    bodyY: boxY + pad(token, 1.5) + token.fontTitle + pad(token, 0.75),
+    btnX: boxX + pad(token, 1.5),
+    btnY: boxY + boxH - pad(token, 1.5) - btnH,
+    btnW,
+    btnH,
+  };
+}
 
-  drawCard(ctx, { x: boxX, y: boxY, w: boxW, h: boxH }, ui);
+export function drawModal(ctx: CanvasRenderingContext2D, modal: ModalDef, ui: UiContext): void {
+  if (!modal.open) return;
+  const { token } = ui;
+
+  ctx.save();
+  ctx.fillStyle = token.overlay;
+  ctx.fillRect(0, 0, ui.w, ui.h);
+
+  const box = modalBoxRect(modal, ui);
+  drawCard(ctx, { x: box.boxX, y: box.boxY, w: box.boxW, h: box.boxH }, ui);
 
   setFont(ctx, token, token.fontTitle, '700');
   ctx.fillStyle = token.text;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(modal.title, boxX + boxW * 0.5, boxY + pad(token, 1.5));
+  ctx.fillText(modal.title, box.boxX + box.boxW * 0.5, box.boxY + pad(token, 1.5));
 
   setFont(ctx, token, token.fontBody, '400');
   ctx.fillStyle = token.textMuted;
-  const bodyY = boxY + pad(token, 1.5) + token.fontTitle + pad(token, 0.75);
   const lines = modal.body.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i]!, boxX + boxW * 0.5, bodyY + i * token.fontBody * 1.35);
+    ctx.fillText(lines[i]!, box.boxX + box.boxW * 0.5, box.bodyY + i * token.fontBody * 1.35);
   }
 
-  let btnX = boxX + pad(token, 1.5);
-  const btnY = boxY + boxH - pad(token, 1.5) - btnH;
-  const btnW =
-    modal.buttons.length > 0
-      ? (boxW - pad(token, 3) - btnGap * (modal.buttons.length - 1)) / modal.buttons.length
-      : 0;
-
+  let btnX = box.btnX;
   for (const btn of modal.buttons) {
-    drawButton(ctx, { ...btn, x: btnX, y: btnY, w: btnW, h: btnH }, ui);
-    btnX += btnW + btnGap;
+    drawButton(ctx, { ...btn, x: btnX, y: box.btnY, w: box.btnW, h: box.btnH }, ui);
+    btnX += box.btnW + pad(token, 0.75);
   }
 
   ctx.restore();
@@ -1006,28 +1317,14 @@ export function handleModal(modal: ModalDef, ui: UiContext): boolean {
 
 export function layoutModalButtons(modal: ModalDef, ui: UiContext): void {
   if (!modal.open) return;
-  const { token, w, h } = ui;
-  const boxW = Math.min(w - pad(token, 4), pad(token, 40));
-  const btnH = ensureMinTouch(pad(token, 5.5), token);
-  const btnGap = pad(token, 0.75);
-  const bodyLines = modal.body.split('\n').length;
-  const bodyH = bodyLines * token.fontBody * 1.35 + pad(token);
-  const btnRowH = modal.buttons.length > 0 ? btnH + pad(token, 2) : 0;
-  const boxH = pad(token, 3) + token.fontTitle + pad(token) + bodyH + btnRowH + pad(token);
-  const boxX = (w - boxW) * 0.5;
-  const boxY = (h - boxH) * 0.5;
-  const btnY = boxY + boxH - pad(token, 1.5) - btnH;
-  const btnW =
-    modal.buttons.length > 0
-      ? (boxW - pad(token, 3) - btnGap * (modal.buttons.length - 1)) / modal.buttons.length
-      : 0;
-  let btnX = boxX + pad(token, 1.5);
+  const box = modalBoxRect(modal, ui);
+  let btnX = box.btnX;
   for (const btn of modal.buttons) {
     btn.x = btnX;
-    btn.y = btnY;
-    btn.w = btnW;
-    btn.h = btnH;
-    btnX += btnW + btnGap;
+    btn.y = box.btnY;
+    btn.w = box.btnW;
+    btn.h = box.btnH;
+    btnX += box.btnW + pad(ui.token, 0.75);
   }
 }
 
@@ -1049,11 +1346,11 @@ export class ToastManager {
     this.items = this.items.filter((t) => t.ttl > 0);
   }
 
-  draw(ctx: CanvasRenderingContext2D, ui: UiContext): void {
+  draw(ctx: CanvasRenderingContext2D, ui: UiContext, opts: { avoidBottomPx?: number } = {}): void {
     if (this.items.length === 0) return;
     const { token, w } = ui;
     const toastW = Math.min(w - pad(token, 4), pad(token, 44));
-    let y = ui.h - pad(token, 2) - token.safe.bottom;
+    let y = ui.h - (opts.avoidBottomPx ?? 0) - pad(token, 2) - token.safe.bottom;
 
     ctx.save();
     for (let i = this.items.length - 1; i >= 0; i--) {
@@ -1088,6 +1385,18 @@ export class ToastManager {
   }
 }
 
+// ── Shared formatting / sizing helpers ──────────────────────────────────────
+
+/** Standard full-width hero CTA height (hub + setup screens). */
+export function ctaHeight(token: ThemeTokens): number {
+  return ensureMinTouch(pad(token, 7), token);
+}
+
+/** "$12,400" — the one currency format across HUD + menus. */
+export function fmtCash(n: number): string {
+  return `$${Math.round(n).toLocaleString('en-US')}`;
+}
+
 // ── Header ──────────────────────────────────────────────────────────────────
 
 /** Wide enough for "Back" / "Options" labels beside icons. */
@@ -1099,7 +1408,8 @@ function headerBackRect(header: HeaderDef, token: ThemeTokens): Rect {
   const btnSize = ensureMinTouch(pad(token, 5.5), token);
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
   const wide = headerWideLabels(header.w, token);
-  const w = wide ? ensureMinTouch(pad(token, 10), token) : btnSize;
+  // pad(12.5) keeps '← Back' un-truncated at the max 1.35 scale.
+  const w = wide ? ensureMinTouch(pad(token, 12.5), token) : btnSize;
   return {
     x: header.x + pad(token, 0.75) + token.safe.left,
     y: midY - btnSize * 0.5,
@@ -1112,7 +1422,7 @@ function headerSettingsRect(header: HeaderDef, token: ThemeTokens): Rect {
   const btnSize = ensureMinTouch(pad(token, 5.5), token);
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
   const wide = headerWideLabels(header.w, token);
-  const w = wide ? ensureMinTouch(pad(token, 12), token) : btnSize;
+  const w = wide ? ensureMinTouch(pad(token, 13), token) : btnSize;
   const rightEdge = header.x + header.w - pad(token, 0.75) - token.safe.right;
   return {
     x: rightEdge - w,
@@ -1198,7 +1508,7 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
 
   if (header.cash !== undefined) {
     setFont(ctx, token, token.fontBody, '700');
-    const cashStr = `$${header.cash.toLocaleString()}`;
+    const cashStr = fmtCash(header.cash);
     const cashW = ctx.measureText(cashStr).width;
     ctx.fillStyle = accent;
     ctx.textAlign = 'right';
@@ -1252,6 +1562,22 @@ export function handleHeader(header: HeaderDef, ui: UiContext): boolean {
 
 // ── DriverSpendPanel ────────────────────────────────────────────────────────
 
+const PLUS_SIZE_UNITS = 4.5;
+
+function driverPlusSize(token: ThemeTokens): number {
+  return ensureMinTouch(pad(token, PLUS_SIZE_UNITS), token);
+}
+
+/**
+ * Vertical pitch of one stat row. When the + button shows, the pitch grows to
+ * contain it — a 48px button on a ~20px row painted four overlapping plates.
+ */
+function driverRowPitch(token: ThemeTokens, showPlus: boolean): number {
+  const barH = statBarHeight(token);
+  if (!showPlus) return barH + pad(token, 0.5);
+  return Math.max(barH + pad(token, 0.5), driverPlusSize(token) + pad(token, 0.5));
+}
+
 export function drawDriverSpendPanel(
   ctx: CanvasRenderingContext2D,
   panel: DriverSpendPanelDef,
@@ -1259,30 +1585,39 @@ export function drawDriverSpendPanel(
 ): void {
   const { token, accent } = ui;
   const d = panel.driver;
-  const barH = statBarHeight(token);
-  const plusSize = ensureMinTouch(pad(token, 4.5), token);
-  const rowGap = pad(token, 0.5);
+  const plusSize = driverPlusSize(token);
+  const showPlus = d.unspentPoints > 0;
+  const pitch = driverRowPitch(token, showPlus);
+  const actionBtnH = ensureMinTouch(pad(token, 4.5), token);
   const stats: DriverStatKey[] = ['skill', 'bravery', 'focus', 'determination'];
-  const contentH = driverSpendPanelHeight(panel, token);
 
-  drawCard(ctx, { x: panel.x, y: panel.y, w: panel.w, h: contentH }, ui);
+  drawCard(ctx, { x: panel.x, y: panel.y, w: panel.w, h: driverSpendPanelHeight(panel, token) }, ui);
 
   let y = panel.y + pad(token, 1.5);
   setFont(ctx, token, token.fontTitle, '700');
   ctx.fillStyle = token.text;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  const nameMax = panel.w - pad(token, 3);
+  let nameMax = panel.w - pad(token, 3);
+  if (d.traitDescription !== undefined) nameMax -= infoIconRadius(token) * 3;
   ctx.fillText(truncateText(ctx, d.name, nameMax), panel.x + pad(token, 1.5), y);
   y += token.fontTitle + pad(token, 0.25);
 
+  // Trait line + optional ⓘ describing what the trait does.
   setFont(ctx, token, token.fontCaption, '500');
   ctx.fillStyle = accent;
-  ctx.fillText(
-    truncateText(ctx, `${d.trait} · Lv ${d.level}`, nameMax),
-    panel.x + pad(token, 1.5),
-    y,
-  );
+  const traitStr = truncateText(ctx, `${d.trait} · Lv ${d.level}`, nameMax);
+  ctx.fillText(traitStr, panel.x + pad(token, 1.5), y);
+  if (d.traitDescription !== undefined && panel.registerInfo !== undefined) {
+    const r = infoIconRadius(token);
+    const icx = panel.x + pad(token, 1.5) + ctx.measureText(traitStr).width + r * 1.6;
+    const icy = y + token.fontCaption * 0.45;
+    drawInfoIcon(ctx, icx, icy, r, ui, false);
+    panel.registerInfo(
+      { x: icx - r * 1.6, y: icy - r * 1.6, w: r * 3.2, h: r * 3.2 },
+      { title: d.trait, body: d.traitDescription },
+    );
+  }
   y += token.fontCaption + pad(token, 0.75);
 
   if (d.unspentPoints > 0) {
@@ -1293,40 +1628,46 @@ export function drawDriverSpendPanel(
   }
 
   const xpRatio = d.xpToNext > 0 ? d.xp / d.xpToNext : 0;
-  drawStatBar(
-    ctx,
-    {
-      x: panel.x + pad(token, 1.5),
-      y,
-      w: panel.w - pad(token, 3),
-      label: 'XP',
-      value: xpRatio * 100,
-      color: token.textDim,
-    },
-    ui,
-  );
-  y += barH + pad(token, 0.75);
+  const xpBar: StatBarDef = {
+    x: panel.x + pad(token, 1.5),
+    y,
+    w: panel.w - pad(token, 3),
+    label: `XP ${Math.round(d.xp)}/${Math.round(d.xpToNext)}`,
+    value: xpRatio * 100,
+    color: token.textDim,
+    // The label carries the real numbers — a bare percent next to them misreads.
+    hideValue: true,
+    info: { title: 'Experience', body: DRIVER_XP_INFO },
+  };
+  drawStatBar(ctx, xpBar, ui);
+  if (panel.registerInfo !== undefined && xpBar.info !== undefined) {
+    setFont(ctx, token, token.fontCaption, '500');
+    panel.registerInfo(statBarInfoHit(ctx, xpBar, token), xpBar.info);
+  }
+  y += statBarHeight(token) + pad(token, 0.75);
 
   for (const key of stats) {
     const value = d[key];
-    const barW = panel.w - pad(token, 3) - (d.unspentPoints > 0 ? plusSize + pad(token, 0.5) : 0);
+    const barW = panel.w - pad(token, 3) - (showPlus ? plusSize + pad(token, 0.5) : 0);
 
-    drawStatBar(
-      ctx,
-      {
-        x: panel.x + pad(token, 1.5),
-        y,
-        w: barW,
-        label: STAT_LABELS[key],
-        value,
-      },
-      ui,
-    );
+    const statBar: StatBarDef = {
+      x: panel.x + pad(token, 1.5),
+      y,
+      w: barW,
+      label: STAT_LABELS[key],
+      value,
+      info: { title: STAT_LABELS[key], body: DRIVER_STAT_INFO[key] },
+    };
+    drawStatBar(ctx, statBar, ui);
+    if (panel.registerInfo !== undefined && statBar.info !== undefined) {
+      setFont(ctx, token, token.fontCaption, '500');
+      panel.registerInfo(statBarInfoHit(ctx, statBar, token), statBar.info);
+    }
 
-    if (d.unspentPoints > 0) {
+    if (showPlus) {
       const plusBtn: ButtonDef = {
         x: panel.x + panel.w - pad(token, 1.5) - plusSize,
-        y: y + (barH - plusSize) * 0.5,
+        y: y + (pitch - plusSize) * 0.5,
         w: plusSize,
         h: plusSize,
         label: '+',
@@ -1336,36 +1677,61 @@ export function drawDriverSpendPanel(
       drawButton(ctx, plusBtn, ui);
     }
 
-    y += barH + rowGap;
+    y += pitch;
+  }
+
+  if (panel.actions !== undefined && panel.actions.length > 0) {
+    y += pad(token, 0.25);
+    for (const action of panel.actions) {
+      drawButton(
+        ctx,
+        {
+          x: panel.x + pad(token, 1.5),
+          y,
+          w: panel.w - pad(token, 3),
+          h: actionBtnH,
+          label: action.label,
+          disabled: action.disabled,
+          danger: action.danger,
+          onClick: action.onClick,
+        },
+        ui,
+      );
+      y += actionBtnH + pad(token, 0.5);
+    }
   }
 }
 
 export function driverSpendPanelHeight(panel: DriverSpendPanelDef, token: ThemeTokens): number {
-  const barH = statBarHeight(token);
-  const rowGap = pad(token, 0.5);
   const stats = 4;
+  const showPlus = panel.driver.unspentPoints > 0;
+  const pitch = driverRowPitch(token, showPlus);
+  const hasActions = panel.actions !== undefined && panel.actions.length > 0;
+  // Mirrors the draw chain: name/trait header, optional spend line, XP, stats, actions.
   let h =
-    pad(token, 2) +
+    pad(token, 1.5) +
     token.fontTitle +
     pad(token, 0.25) +
     token.fontCaption +
-    pad(token, 0.75) +
-    barH +
-    pad(token, 0.75) +
-    stats * (barH + rowGap) +
-    pad(token);
-  if (panel.driver.unspentPoints > 0) {
+    pad(token, 0.75);
+  if (showPlus) {
     h += token.fontCaption + pad(token, 0.5);
   }
-  return h;
+  h += statBarHeight(token) + pad(token, 0.75) + stats * pitch;
+  if (hasActions) {
+    const btnH = ensureMinTouch(pad(token, 4.5), token);
+    h += pad(token, 0.25) + panel.actions!.length * (btnH + pad(token, 0.5));
+  }
+  return h + pad(token, 0.75);
 }
 
 export function handleDriverSpendPanel(panel: DriverSpendPanelDef, ui: UiContext): boolean {
-  if (panel.driver.unspentPoints <= 0) return false;
+  const hasActions = panel.actions !== undefined && panel.actions.length > 0;
+  const showPlus = panel.driver.unspentPoints > 0;
+  if (!showPlus && !hasActions) return false;
   const { token } = ui;
-  const plusSize = ensureMinTouch(pad(token, 4.5), token);
-  const barH = statBarHeight(token);
-  const rowGap = pad(token, 0.5);
+  const plusSize = driverPlusSize(token);
+  const pitch = driverRowPitch(token, showPlus);
   const stats: DriverStatKey[] = ['skill', 'bravery', 'focus', 'determination'];
 
   let y =
@@ -1376,25 +1742,46 @@ export function handleDriverSpendPanel(panel: DriverSpendPanelDef, ui: UiContext
     token.fontCaption +
     pad(token, 0.75);
 
-  if (panel.driver.unspentPoints > 0) {
+  if (showPlus) {
     y += token.fontCaption + pad(token, 0.5);
   }
 
-  y += barH + pad(token, 0.75);
+  y += statBarHeight(token) + pad(token, 0.75);
 
   let handled = false;
   for (const key of stats) {
-    const plusBtn: ButtonDef = {
-      x: panel.x + panel.w - pad(token, 1.5) - plusSize,
-      y: y + (barH - plusSize) * 0.5,
-      w: plusSize,
-      h: plusSize,
-      label: '+',
-      primary: true,
-      onClick: () => panel.onSpend?.(key),
-    };
-    if (handleButton(plusBtn, ui)) handled = true;
-    y += barH + rowGap;
+    if (showPlus) {
+      const plusBtn: ButtonDef = {
+        x: panel.x + panel.w - pad(token, 1.5) - plusSize,
+        y: y + (pitch - plusSize) * 0.5,
+        w: plusSize,
+        h: plusSize,
+        label: '+',
+        primary: true,
+        onClick: () => panel.onSpend?.(key),
+      };
+      if (handleButton(plusBtn, ui)) handled = true;
+    }
+    y += pitch;
+  }
+
+  if (hasActions) {
+    const btnH = ensureMinTouch(pad(token, 4.5), token);
+    y += pad(token, 0.25);
+    for (const action of panel.actions!) {
+      const btn: ButtonDef = {
+        x: panel.x + pad(token, 1.5),
+        y,
+        w: panel.w - pad(token, 3),
+        h: btnH,
+        label: action.label,
+        disabled: action.disabled,
+        danger: action.danger,
+        onClick: action.onClick,
+      };
+      if (handleButton(btn, ui)) handled = true;
+      y += btnH + pad(token, 0.5);
+    }
   }
 
   return handled;
@@ -1404,29 +1791,36 @@ export function handleDriverSpendPanel(panel: DriverSpendPanelDef, ui: UiContext
 
 export function drawUpgradePanel(ctx: CanvasRenderingContext2D, panel: UpgradePanelDef, ui: UiContext): void {
   const { token, accent } = ui;
-  const btnH = ensureMinTouch(pad(token, 4.5), token);
-  const rowH = pad(token, 5.5);
-  const headerH = pad(token, 5);
-  const conditionH = statBarHeight(token) + pad(token, 1.5) + btnH + pad(token);
-  const partRows = panel.collapsed ? 0 : PARTS.length;
-  const totalH = headerH + (panel.collapsed ? 0 : conditionH + partRows * rowH) + pad(token);
+  const { btnH, rowH, headerH } = upgradePanelMetrics(token);
+  const totalH = upgradePanelHeight(panel, token);
 
   drawCard(ctx, { x: panel.x, y: panel.y, w: panel.w, h: totalH }, ui);
 
   let y = panel.y + pad(token, 1);
-  const toggleLabel = panel.collapsed ? '▸ Upgrades' : '▾ Upgrades';
-  const toggleBtn: ButtonDef = {
+  // Collapse toggle painted as plate + chevron (no font-dependent glyphs).
+  const collapsed = panel.collapsed === true;
+  const toggleRect = {
     x: panel.x + pad(token, 0.75),
     y,
     w: panel.w - pad(token, 1.5),
     h: headerH - pad(token, 0.5),
-    label: toggleLabel,
-    onClick: panel.onToggleCollapse,
   };
-  drawButton(ctx, toggleBtn, ui);
+  const toggleHovered = hitRect(ui.pointerX, ui.pointerY, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h);
+  if (toggleHovered) {
+    ctx.fillStyle = token.bgElevated;
+    roundRectPath(ctx, toggleRect.x, toggleRect.y, toggleRect.w, toggleRect.h, Math.max(2, pad(token, 0.25)));
+    ctx.fill();
+  }
+  drawChevron(ctx, panel.x + pad(token, 0.9), y + (headerH - pad(token, 0.5)) * 0.5, pad(token, 0.55), collapsed ? -Math.PI / 2 : Math.PI / 2, token.textMuted);
+  setFont(ctx, token, token.fontBody, '600', true);
+  ctx.fillStyle = token.text;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Upgrades', panel.x + pad(token, 2.2), y + (headerH - pad(token, 0.5)) * 0.5);
+  handleButton({ ...toggleRect, h: toggleRect.h, w: toggleRect.w, label: '', onClick: panel.onToggleCollapse }, ui);
   y += headerH;
 
-  if (panel.collapsed) return;
+  if (collapsed) return;
 
   const condPct = Math.max(0, Math.min(100, panel.condition * 100));
   drawStatBar(
@@ -1437,26 +1831,33 @@ export function drawUpgradePanel(ctx: CanvasRenderingContext2D, panel: UpgradePa
       w: panel.w - pad(token, 3),
       label: 'Condition',
       value: condPct,
+      suffix: '%',
       color: condPct < BALANCE.conditionMin * 100 ? token.danger : accent,
     },
     ui,
   );
   y += statBarHeight(token) + pad(token, 0.75);
 
-  const repairPts = Math.max(0, Math.ceil((BALANCE.conditionMax - panel.condition) * 100));
-  const repairCost = repairPts * BALANCE.repairCostPerPoint;
+  const quote = repairQuote(panel.condition);
   const repairBtn: ButtonDef = {
     x: panel.x + pad(token, 1.5),
     y,
     w: panel.w - pad(token, 3),
     h: btnH,
-    label: repairPts > 0 ? `Repair ($${repairCost})` : 'Fully Repaired',
-    disabled: repairPts <= 0 || panel.cash < repairCost,
-    primary: repairPts > 0 && panel.cash >= repairCost,
+    label: quote.pts > 0 ? `Repair (${fmtCash(quote.cost)})` : 'Fully Repaired',
+    disabled: quote.pts <= 0 || panel.cash < quote.cost,
+    primary: quote.pts > 0 && panel.cash >= quote.cost,
     onClick: panel.onRepair,
   };
   drawButton(ctx, repairBtn, ui);
   y += btnH + pad(token, 1);
+
+  // Wide enough for the priciest label at max scale ('$1,102' truncated at pad(10)).
+  const buyW = Math.min(pad(token, 12), panel.w * 0.3);
+  const pipR = pad(token, 0.4);
+  const pipGap = pad(token, 0.5);
+  const pipsW = (BALANCE.maxPartTier + 1) * pipR * 2 + BALANCE.maxPartTier * pipGap;
+  const infoR = panel.infoForPart !== undefined ? infoIconRadius(token) * 2.8 : 0;
 
   for (const part of PARTS) {
     const tier = panel.partTiers[part.id] ?? 0;
@@ -1465,39 +1866,52 @@ export function drawUpgradePanel(ctx: CanvasRenderingContext2D, panel: UpgradePa
     const atMax = tier >= BALANCE.maxPartTier;
     const broke = panel.cash < cost;
 
-    ctx.save();
+    const nameX = panel.x + pad(token, 1.5);
+    const nameMaxW = panel.w - buyW - pipsW - infoR - pad(token, 3) - pad(token, 1);
     setFont(ctx, token, token.fontBody, '600');
-    ctx.fillStyle = token.text;
+    ctx.fillStyle = panel.activePart === part.id ? accent : token.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(part.name, panel.x + pad(token, 1.5), y + rowH * 0.5);
+    const nameStr = truncateText(ctx, part.name, Math.max(pad(token, 4), nameMaxW));
+    ctx.fillText(nameStr, nameX, y + rowH * 0.5);
+    const nameW = ctx.measureText(nameStr).width;
 
-    const pipR = pad(token, 0.4);
-    const pipGap = pad(token, 0.5);
-    let pipX = panel.x + pad(token, 1.5) + token.fontBody * 4;
+    // ⓘ — what this part does per tier.
+    const info = panel.infoForPart?.(part.id);
+    if (info !== undefined && panel.registerInfo !== undefined) {
+      const r = infoIconRadius(token);
+      const icx = nameX + nameW + r * 1.6;
+      const icy = y + rowH * 0.5;
+      drawInfoIcon(ctx, icx, icy, r, ui, false);
+      panel.registerInfo(
+        { x: icx - r * 1.6, y: icy - r * 1.6, w: r * 3.2, h: r * 3.2 },
+        info,
+      );
+    }
+
+    let pipX = nameX + nameW + infoR + pad(token, 1);
     for (let p = 0; p <= BALANCE.maxPartTier; p++) {
+      if (pipX + pipR * 2 > panel.x + panel.w - buyW - pad(token, 1.5)) break;
       ctx.beginPath();
       ctx.arc(pipX, y + rowH * 0.5, pipR, 0, Math.PI * 2);
-      ctx.fillStyle = p <= tier ? accent : token.bgElevated;
+      ctx.fillStyle = p <= tier && tier > 0 ? accent : p === 0 && tier === 0 ? `${accent}66` : token.bgElevated;
       ctx.fill();
       ctx.strokeStyle = token.cardStroke;
       ctx.stroke();
       pipX += pipR * 2 + pipGap;
     }
 
-    const buyW = pad(token, 10);
     const buyBtn: ButtonDef = {
       x: panel.x + panel.w - pad(token, 1.5) - buyW,
       y: y + (rowH - btnH) * 0.5,
       w: buyW,
       h: btnH,
-      label: atMax ? 'MAX' : `$${cost}`,
+      label: atMax ? 'MAX' : fmtCash(cost),
       disabled: atMax || broke,
       primary: !atMax && !broke,
       onClick: () => panel.onBuy?.(part.id),
     };
     drawButton(ctx, buyBtn, ui);
-    ctx.restore();
 
     ctx.strokeStyle = token.cardStroke;
     ctx.beginPath();
@@ -1509,20 +1923,46 @@ export function drawUpgradePanel(ctx: CanvasRenderingContext2D, panel: UpgradePa
   }
 }
 
+/** Small filled triangle — collapse/pager chevrons without font glyph roulette. */
+function drawChevron(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  rotation: number,
+  color: string,
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rotation);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(-size * 0.6, -size * 0.8);
+  ctx.lineTo(size * 0.75, 0);
+  ctx.lineTo(-size * 0.6, size * 0.8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
 export function upgradePanelHeight(panel: UpgradePanelDef, token: ThemeTokens): number {
-  const btnH = ensureMinTouch(pad(token, 4.5), token);
-  const rowH = pad(token, 5.5);
-  const headerH = pad(token, 5);
-  if (panel.collapsed) return headerH + pad(token);
-  const conditionH = statBarHeight(token) + pad(token, 0.75) + btnH + pad(token);
-  return headerH + conditionH + PARTS.length * rowH + pad(token);
+  const m = upgradePanelMetrics(token);
+  if (panel.collapsed) return m.headerH + pad(token);
+  // Mirrors the draw chain: top pad + toggle + condition bar + repair + rows.
+  return (
+    pad(token) +
+    m.headerH +
+    statBarHeight(token) +
+    pad(token, 0.75) +
+    m.btnH +
+    pad(token, 1) +
+    PARTS.length * m.rowH
+  );
 }
 
 export function handleUpgradePanel(panel: UpgradePanelDef, ui: UiContext): boolean {
   const { token } = ui;
-  const btnH = ensureMinTouch(pad(token, 4.5), token);
-  const rowH = pad(token, 5.5);
-  const headerH = pad(token, 5);
+  const { btnH, rowH, headerH } = upgradePanelMetrics(token);
   let handled = false;
 
   const toggleBtn: ButtonDef = {
@@ -1530,7 +1970,7 @@ export function handleUpgradePanel(panel: UpgradePanelDef, ui: UiContext): boole
     y: panel.y + pad(token, 1),
     w: panel.w - pad(token, 1.5),
     h: headerH - pad(token, 0.5),
-    label: panel.collapsed ? '▸ Upgrades' : '▾ Upgrades',
+    label: '',
     onClick: panel.onToggleCollapse,
   };
   if (handleButton(toggleBtn, ui)) handled = true;
@@ -1544,33 +1984,33 @@ export function handleUpgradePanel(panel: UpgradePanelDef, ui: UiContext): boole
     statBarHeight(token) +
     pad(token, 0.75);
 
-  const repairPts = Math.max(0, Math.ceil((BALANCE.conditionMax - panel.condition) * 100));
-  const repairCost = repairPts * BALANCE.repairCostPerPoint;
+  const quote = repairQuote(panel.condition);
   const repairBtn: ButtonDef = {
     x: panel.x + pad(token, 1.5),
     y,
     w: panel.w - pad(token, 3),
     h: btnH,
-    label: repairPts > 0 ? `Repair ($${repairCost})` : 'Fully Repaired',
-    disabled: repairPts <= 0 || panel.cash < repairCost,
+    label: quote.pts > 0 ? `Repair (${fmtCash(quote.cost)})` : 'Fully Repaired',
+    disabled: quote.pts <= 0 || panel.cash < quote.cost,
     onClick: panel.onRepair,
   };
   if (handleButton(repairBtn, ui)) handled = true;
   y += btnH + pad(token, 1);
 
+  // Wide enough for the priciest label at max scale ('$1,102' truncated at pad(10)).
+  const buyW = Math.min(pad(token, 12), panel.w * 0.3);
   for (const part of PARTS) {
     const tier = panel.partTiers[part.id] ?? 0;
     const nextTier = tier + 1;
     const cost = partCost(part.baseCost, nextTier);
     const atMax = tier >= BALANCE.maxPartTier;
     const broke = panel.cash < cost;
-    const buyW = pad(token, 10);
     const buyBtn: ButtonDef = {
       x: panel.x + panel.w - pad(token, 1.5) - buyW,
       y: y + (rowH - btnH) * 0.5,
       w: buyW,
       h: btnH,
-      label: atMax ? 'MAX' : `$${cost}`,
+      label: atMax ? 'MAX' : fmtCash(cost),
       disabled: atMax || broke,
       onClick: () => panel.onBuy?.(part.id),
     };

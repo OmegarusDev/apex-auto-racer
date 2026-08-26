@@ -2,7 +2,6 @@ import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
 import { BALANCE } from '../data/balance';
 import { hireCost } from '../engine/DriverGenerator';
-import { getTrait } from '../data/traits';
 import type { Driver } from '../engine/types';
 import type { DriverStatKey } from '../ui/components';
 import {
@@ -10,22 +9,22 @@ import {
   handleButton,
   drawHeader,
   handleHeader,
-  drawStatBar,
   drawSectionTitle,
   drawModal,
   handleModal,
   layoutModalButtons,
   layoutShell,
   ContentScroller,
+  TooltipManager,
+  drawDriverSpendPanel,
+  handleDriverSpendPanel,
+  driverSpendPanelHeight,
   pad,
   ensureMinTouch,
-  statBarHeight,
+  fmtCash,
   ToastManager,
   type ButtonDef,
   type ModalDef,
-  type ThemeTokens,
-  type UiContext,
-  truncateText,
 } from '../ui/components';
 import { ACCENT_TRACK } from '../ui/theme';
 import {
@@ -35,10 +34,23 @@ import {
   onSceneResize,
 } from './sceneChrome';
 import { generateFreeAgents } from '../career/roster';
-import { spendStatPoint, xpToNextLevel } from '../career/xp';
+import { driverSpendData } from '../career/garage';
+import { spendStatPoint } from '../career/xp';
+
+interface PanelRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+interface PanelInfo {
+  title: string;
+  body: string;
+}
 
 export class TeamManagementScene implements Scene {
   private toasts = new ToastManager();
+  private tooltips = new TooltipManager();
   private modal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private freeAgents: Driver[] = [];
   private rerollCount = 0;
@@ -53,6 +65,7 @@ export class TeamManagementScene implements Scene {
     }
     this.modal.open = false;
     this.scroller.scroll.offset = 0;
+    this.scroller.onUserScroll = () => this.tooltips.close();
     this.detachWheel = this.scroller.attachWheel(g.canvas, () => !this.modal.open);
   }
 
@@ -111,12 +124,13 @@ export class TeamManagementScene implements Scene {
           w: 0,
           h: 0,
           label: 'Release',
-          primary: true,
+          danger: true,
           onClick: () => {
             if (g.state === null) return;
             g.state.roster = g.state.roster.filter((d) => d.id !== driver.id);
             g.autosave();
             this.modal.open = false;
+            this.tooltips.close();
             this.toasts.push(`${driver.name} released`, '#f87171');
           },
         },
@@ -140,6 +154,7 @@ export class TeamManagementScene implements Scene {
     g.state.roster.push({ ...agent });
     this.freeAgents = this.freeAgents.filter((a) => a.id !== agent.id);
     g.autosave();
+    this.tooltips.close();
     this.toasts.push(`${agent.name} hired`, '#4ade80');
   }
 
@@ -154,151 +169,8 @@ export class TeamManagementScene implements Scene {
     this.rerollCount += 1;
     this.freeAgents = generateFreeAgents(g.state, this.rerollCount);
     g.autosave();
+    this.tooltips.close();
     this.toasts.push('Free agents refreshed', ACCENT_TRACK);
-  }
-
-  private driverCardH(driver: Driver, token: ThemeTokens, withRelease: boolean): number {
-    const barH = statBarHeight(token);
-    const stats = 4;
-    let h =
-      pad(token, 2) +
-      token.fontTitle +
-      token.fontCaption +
-      pad(token) +
-      barH +
-      pad(token) +
-      stats * (barH + pad(token, 0.5)) +
-      pad(token);
-    if (driver.unspentPoints > 0) h += token.fontCaption + pad(token, 0.5);
-    if (withRelease) h += btnH(token) + pad(token);
-    return h;
-  }
-
-  private agentBlockH(agent: Driver, token: ThemeTokens): number {
-    return this.driverCardH(agent, token, false) + pad(token, 0.5) + btnH(token);
-  }
-
-  private drawDriverCard(
-    ctx: CanvasRenderingContext2D,
-    driver: Driver,
-    x: number,
-    y: number,
-    w: number,
-    ui: UiContext,
-    onRelease?: () => void,
-  ): number {
-    const { token, accent } = ui;
-    const trait = getTrait(driver.trait);
-    const barH = statBarHeight(token);
-    const plusSize = ensureMinTouch(pad(token, 4), token);
-    const stats: DriverStatKey[] = ['skill', 'bravery', 'focus', 'determination'];
-    const cardH = this.driverCardH(driver, token, onRelease !== undefined);
-    const interactive = !this.modal.open;
-
-    ctx.save();
-    ctx.fillStyle = token.card;
-    ctx.strokeStyle = token.cardStroke;
-    ctx.beginPath();
-    ctx.roundRect(x, y, w, cardH, pad(token, 0.75));
-    ctx.fill();
-    ctx.stroke();
-
-    let cy = y + pad(token, 1.5);
-    ctx.font = `700 ${token.fontTitle}px ${token.fontFamily}`;
-    ctx.fillStyle = token.text;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    const nameMax = w - pad(token, 3);
-    ctx.fillText(truncateText(ctx, driver.name, nameMax), x + pad(token, 1.5), cy);
-    cy += token.fontTitle + pad(token, 0.25);
-
-    ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-    ctx.fillStyle = accent;
-    ctx.fillText(
-      truncateText(ctx, `${trait.name} · Lv ${driver.level}`, nameMax),
-      x + pad(token, 1.5),
-      cy,
-    );
-    cy += token.fontCaption + pad(token, 0.5);
-
-    if (driver.unspentPoints > 0) {
-      ctx.fillStyle = token.success;
-      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillText(`${driver.unspentPoints} pts to spend`, x + pad(token, 1.5), cy);
-      cy += token.fontCaption + pad(token, 0.5);
-    }
-
-    const xpNeeded = xpToNextLevel(driver.level);
-    drawStatBar(ctx, { x: x + pad(token, 1.5), y: cy, w: w - pad(token, 3), label: 'XP', value: (driver.xp / xpNeeded) * 100, color: token.textDim }, ui);
-    cy += barH + pad(token, 0.75);
-
-    for (const key of stats) {
-      const statW = w - pad(token, 3) - (driver.unspentPoints > 0 ? plusSize + pad(token, 0.5) : 0);
-      drawStatBar(ctx, { x: x + pad(token, 1.5), y: cy, w: statW, label: key.charAt(0).toUpperCase() + key.slice(1), value: driver[key] }, ui);
-      if (driver.unspentPoints > 0) {
-        const plusBtn: ButtonDef = {
-          x: x + w - pad(token, 1.5) - plusSize,
-          y: cy + (barH - plusSize) * 0.5,
-          w: plusSize,
-          h: plusSize,
-          label: '+',
-          primary: true,
-          onClick: () => {
-            const g = getGameContext();
-            if (g.state === null) return;
-            const d = g.state.roster.find((r) => r.id === driver.id);
-            if (d !== undefined && spendStatPoint(d, key)) g.autosave();
-          },
-        };
-        drawButton(ctx, plusBtn, ui);
-        if (interactive) handleButton(plusBtn, ui);
-      }
-      cy += barH + pad(token, 0.5);
-    }
-
-    if (onRelease !== undefined) {
-      const relBtn: ButtonDef = {
-        x: x + pad(token, 1.5),
-        y: cy,
-        w: w - pad(token, 3),
-h: btnH(token),
-        label: 'Release',
-        onClick: onRelease,
-      };
-      drawButton(ctx, relBtn, ui);
-      if (interactive) handleButton(relBtn, ui);
-    }
-
-    ctx.restore();
-    return cardH;
-  }
-
-  private drawAgentCard(
-    ctx: CanvasRenderingContext2D,
-    agent: Driver,
-    x: number,
-    y: number,
-    w: number,
-    ui: UiContext,
-    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
-  ): number {
-    const token = ui.token;
-    const innerH = this.drawDriverCard(ctx, agent, x, y, w, ui);
-    const gap = pad(token, 0.5);
-    const cost = hireCost(agent);
-    const hireBtn: ButtonDef = {
-      x,
-      y: y + innerH + gap,
-      w,
-      h: btnH(token),
-      label: `Hire $${cost}`,
-      disabled: state.cash < cost || state.roster.length >= BALANCE.rosterCap,
-      primary: state.cash >= cost && state.roster.length < BALANCE.rosterCap,
-      onClick: () => this.hireAgent(agent),
-    };
-    drawButton(ctx, hireBtn, ui);
-    if (!this.modal.open) handleButton(hireBtn, ui);
-    return innerH + gap + btnH(token);
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -325,50 +197,71 @@ h: btnH(token),
 
     const view = shell.contentRect;
     const gap = pad(token, 0.75);
-    const btnHVal = ensureMinTouch(pad(token, 5.5), token);
-    const addBtnH = Math.max(btnHVal, pad(token, 6));
+    const rerollBtnH = Math.max(ensureMinTouch(pad(token, 5.5), token), pad(token, 6));
+    const interactive = !this.modal.open;
 
-    let contentH =
-      token.fontCaption +
-      pad(token, 1.5) +
-      state.roster.reduce((sum, d) => sum + this.driverCardH(d, token, true) + gap, 0) +
+    // Hotspots are registered in scroller-local space; tooltips draw in screen space.
+    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
+    const registerInfo = (rect: PanelRect, info: PanelInfo): void => {
+      this.tooltips.register(rect, info, tooltipOrigin);
+    };
+
+    // Panel definitions are built once and reused by measure + draw + handle,
+    // so the three can never drift apart again.
+    const rosterDefs = state.roster.map((driver) => ({
+      x: 0,
+      y: 0,
+      w: view.w,
+      driver: driverSpendData(driver),
+      onSpend: (stat: DriverStatKey) => {
+        const d = state.roster.find((r) => r.id === driver.id);
+        if (d !== undefined && spendStatPoint(d, stat)) g.autosave();
+      },
+      actions: [
+        { label: 'Release', danger: true, onClick: () => this.releaseDriver(driver) },
+      ],
+      registerInfo,
+    }));
+    const agentDefs = this.freeAgents.map((agent) => {
+      const cost = hireCost(agent);
+      const full = state.roster.length >= BALANCE.rosterCap;
+      return {
+        x: 0,
+        y: 0,
+        w: view.w,
+        driver: driverSpendData(agent),
+        actions: [
+          {
+            label: `Hire ${fmtCash(cost)}`,
+            disabled: full || state.cash < cost,
+            onClick: () => this.hireAgent(agent),
+          },
+        ],
+        registerInfo,
+      };
+    });
+
+    // Content height — mirrors the draw chain below exactly.
+    const contentH =
+      token.fontCaption + pad(token, 1.5) +
+      rosterDefs.reduce((sum, def) => sum + driverSpendPanelHeight(def, token) + gap, 0) +
       pad(token) +
-      token.fontCaption +
-      pad(token, 1.5) +
-      this.freeAgents.reduce((sum, a) => sum + this.agentBlockH(a, token) + gap, 0) +
-      addBtnH +
+      token.fontCaption + pad(token, 1.5) +
+      agentDefs.reduce((sum, def) => sum + driverSpendPanelHeight(def, token) + gap, 0) +
+      rerollBtnH +
       pad(token, 2);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
+    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
 
-    // ═══════════════════════════════════════════
-    // PRIMARY CTA — ADD DRIVER (if roster not full)
-    // ════════════════════════════════════════════
-    const rosterFull = state.roster.length >= BALANCE.rosterCap;
-    if (!rosterFull) {
-      const addBtn: ButtonDef = {
-        x: pad(token, 1.5),
-        y: 0,
-        w: view.w - pad(token, 3),
-        h: addBtnH,
-        label: `▶  Add Driver ($${BALANCE.freeAgentRerollCost} to refresh)`,
-        cta: true,
-        fontSize: token.fontDisplay,
-        onClick: () => this.rerollAgents(),
-      };
-      drawButton(ctx, addBtn, { ...ui, accent: ACCENT_TRACK });
-      handleButton(addBtn, lui);
-      y += addBtnH + pad(token, 1.5);
-    }
-
     // ══════════════════════════════════════════
     // ROSTER
-    // ═══════════════════════════════════════════
+    // ══════════════════════════════════════════
     y += drawSectionTitle(
       ctx,
       0,
@@ -377,31 +270,43 @@ h: btnH(token),
       lui,
     );
 
-    for (const driver of state.roster) {
-      const cardH = this.drawDriverCard(ctx, driver, 0, y, view.w, lui, () => this.releaseDriver(driver));
-      y += cardH + gap;
+    for (const def of rosterDefs) {
+      def.y = y;
+      drawDriverSpendPanel(ctx, def, lui);
+      if (interactive) handleDriverSpendPanel(def, lui);
+      y += driverSpendPanelHeight(def, token) + gap;
     }
 
+    // ══════════════════════════════════════════
+    // FREE AGENTS
+    // ══════════════════════════════════════════
     y += pad(token);
     y += drawSectionTitle(ctx, 0, y, 'Free Agents', lui);
 
-    for (const agent of this.freeAgents) {
-      const agentCardH = this.drawAgentCard(ctx, agent, 0, y, view.w, lui, state);
-      y += agentCardH + gap;
+    for (const def of agentDefs) {
+      def.y = y;
+      drawDriverSpendPanel(ctx, def, lui);
+      if (interactive) handleDriverSpendPanel(def, lui);
+      y += driverSpendPanelHeight(def, token) + gap;
     }
 
+    // Single refresh entry point — labelled as what it actually does.
     const rerollBtn: ButtonDef = {
       x: 0,
       y,
       w: view.w,
-      h: btnH(token),
-      label: `Reroll Agents ($${BALANCE.freeAgentRerollCost})`,
+      h: rerollBtnH,
+      label: `Refresh Agents (${fmtCash(BALANCE.freeAgentRerollCost)})`,
       disabled: state.cash < BALANCE.freeAgentRerollCost,
       onClick: () => this.rerollAgents(),
     };
     drawButton(ctx, rerollBtn, lui);
-    if (!this.modal.open) handleButton(rerollBtn, lui);
+    if (interactive) handleButton(rerollBtn, lui);
+
     this.scroller.end(ctx);
+
+    this.tooltips.handle(lui, interactive && !this.scroller.isScrolling);
+    this.tooltips.draw(ctx, ui);
 
     handleHeader(header, ui);
     if (this.modal.open) layoutModalButtons(this.modal, ui);
@@ -409,8 +314,4 @@ h: btnH(token),
     handleModal(this.modal, ui);
     this.toasts.draw(ctx, ui);
   }
-}
-
-function btnH(token: ThemeTokens): number {
-  return ensureMinTouch(pad(token, 5.5), token);
 }

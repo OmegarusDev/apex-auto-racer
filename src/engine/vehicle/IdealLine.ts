@@ -61,6 +61,31 @@ function smooth(profile: number[], passes: number): number[] {
   return out;
 }
 
+/**
+ * Band-limit a periodic profile: no adjacent pair may differ by more than
+ * maxStep. This caps the transverse slope of the racing line so the car can
+ * actually follow it (a line steeper than the car's lateral speed is just a
+ * deslot generator). Iterated until the slope constraint is satisfied.
+ */
+function clampSlope(profile: number[], maxStep: number): number[] {
+  const n = profile.length;
+  const out = profile.slice();
+  for (let pass = 0; pass < 8; pass++) {
+    const src = out.slice();
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const diff = out[j]! - out[i]!;
+      if (Math.abs(diff) > maxStep) {
+        const mid = (src[i]! + src[j]!) / 2;
+        const dir = Math.sign(diff);
+        out[i] = mid - (dir * maxStep) / 2;
+        out[j] = mid + (dir * maxStep) / 2;
+      }
+    }
+  }
+  return out;
+}
+
 /** Corner speed from real tyre limit with aero downforce iteration. */
 function cornerSpeedAt(
   kappa: number,
@@ -119,15 +144,26 @@ export function computeIdealLine(
   const powerRatio = stats.aAccel / Math.max(0.5, muSurface * compoundMu * 9.81);
   const corners: Corner[] = peaks.map((peak) => {
     const kappa = nodes[peak]!.kappaLine;
-    const v = cornerSpeedAt(kappa, muSurface, setup, stats.vMax, compoundMu);
     // Exit-line tradeoff: grippy -> geometric apex; powerful -> late apex.
     let apexFrac = Math.max(0.45, Math.min(0.98, 0.3 + 0.7 * powerRatio));
     apexFrac += (setup.diffLock ?? 0) * 0.06;
     apexFrac = Math.min(0.98, apexFrac);
 
-    // Brake distance from approach speed to corner speed using aBrake
+    // Corner speed at the APEX PATH radius, not the centerline: the line sits
+    // apexFrac·halfWidth inside the centerline, tightening the corner. Using
+    // the centerline κ made the envelope ~10% optimistic exactly at the apex.
+    const apexInset = apexFrac * halfWidth(nodes[peak]!);
+    const rCenter = 1 / Math.max(1e-4, Math.abs(kappa));
+    const rApex = Math.max(8, rCenter - apexInset);
+    const v = cornerSpeedAt(Math.sign(kappa || 1) / rApex, muSurface, setup, stats.vMax, compoundMu);
+
+    // Brake distance from approach speed to corner speed using aBrake.
+    // Physical distance × 1.15 (perception error + plant noise headroom).
+    // The old /3 here demanded 3× the braking the car physically has — the
+    // envelope was unreachable and every car arrived at corners way over the
+    // limit (flat-throttle understeer-wide deslots).
     const approach = stats.vMax; // will be refined after speed envelope
-    const brakeDist = ((approach * approach - v * v) / (2 * Math.max(0.5, stats.aBrake))) / 3;
+    const brakeDist = ((approach * approach - v * v) / (2 * Math.max(0.5, stats.aBrake))) * 1.15;
 
     // Turn-in ~1/3 into brake zone, track-out ~1/3 after apex
     const turnInIdx = (peak - Math.max(4, Math.round(brakeDist / 3 / 2))) % n;
@@ -159,7 +195,14 @@ export function computeIdealLine(
       line[i] = line[i]! * (1 - blend) + apex * blend;
     }
   }
-  const idealLineO = smooth(line, 4).map((v, i) => Math.max(-halfWidth(nodes[i]!), Math.min(halfWidth(nodes[i]!), v)));
+  // Heavy smoothing removes node-scale jitter from the apex windows, then we
+  // band-limit the transverse slope so the line is followable. A raw line can
+  // whip from +halfWidth to -halfWidth across a straight between opposite
+  // corners (slope >2 m/m) — undrivable, so the controller snakes and deslots.
+  const ds = track.length / n;
+  const idealLineO = clampSlope(smooth(line, 14), idealLine.maxLateralSlope * ds).map((v, i) =>
+    Math.max(-halfWidth(nodes[i]!), Math.min(halfWidth(nodes[i]!), v)),
+  );
 
   // --- 4. Speed envelope: brake into v_c, carry, full-throttle exit. ---
   const vProfile = new Array<number>(n).fill(stats.vMax);
@@ -174,7 +217,7 @@ export function computeIdealLine(
     // Brake point: the node where braking for this corner must begin
     const approach = vProfile[c.peak]!;
     if (approach > c.v) {
-      const dBrake = ((approach * approach - c.v * c.v) / (2 * Math.max(0.5, stats.aBrake))) / 3;
+      const dBrake = ((approach * approach - c.v * c.v) / (2 * Math.max(0.5, stats.aBrake))) * 1.15;
       for (let i = 0; i < n; i++) {
         let back = c.peak - i;
         back = ((back % n) + n) % n;

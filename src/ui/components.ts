@@ -17,3 +17,4 @@ export * from './toast';
 export * from './shell';
 export * from './charts';
 export * from './panels';
+export * from './tooltip';

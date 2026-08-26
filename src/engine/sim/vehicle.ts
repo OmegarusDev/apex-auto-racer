@@ -404,9 +404,14 @@ export function stepVehicle(
     Math.sqrt(Math.max(1, (muFactor * (setup.compoundMu ?? 1) * g) / Math.max(Math.abs(kappa), 1e-3))),
   );
 
-  // Off-line / lost = "off the slot"; spin when body slip crosses the line.
-  const stable = Math.abs(car.l) < width / 2 && Math.abs(theta) < SLIDE_BETA;
-  car.slotMode = stable ? 'groove' : 'deslot';
+  // Off the slot = actually leaving the track. A high slip angle alone is NOT
+  // a deslot: cars routinely carry 0.2-0.4 rad of slide through corners and
+  // must stay "on the slot" while they do — only genuine corner-exit slides
+  // that run the car off the track count. (Spins are still detected separately
+  // via SPIN_BETA.) Flagging deslot on slip alone produced hundreds of false
+  // "wide" deslots every race.
+  const offTrack = Math.abs(car.l) >= width / 2;
+  car.slotMode = offTrack ? 'deslot' : 'groove';
   if (Math.abs(theta) > SPIN_BETA && car.spinRemaining <= 0) {
     car.spinRemaining = PHYSICS.spinStun;
     car.spinCount += 1;

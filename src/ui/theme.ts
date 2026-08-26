@@ -139,12 +139,6 @@ export function createTheme(w: number, h: number): ThemeTokens {
   return cachedTheme;
 }
 
-/** Snap a length to the 8px grid (scaled). */
-export function snapGrid(token: ThemeTokens, value: number): number {
-  const g = token.grid;
-  return Math.round(value / g) * g;
-}
-
 /** Padding helper: n grid units. */
 export function pad(token: ThemeTokens, units = 1): number {
   return token.grid * units;

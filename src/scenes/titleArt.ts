@@ -458,6 +458,17 @@ export interface TitleScreenLayout {
  * Priority: brand → menu → track (track shrinks first).
  * Portrait phones get fat touch targets and large display labels.
  */
+/**
+ * Exact height of the title's three-row menu stack.
+ * Layout reserve and TitleScene's draw chain both call this — they cannot drift.
+ */
+export function titleMenuStackHeight(token: ThemeTokens, btnH: number): number {
+  const quickH = Math.max(btnH + pad(token, 2), pad(token, 8));
+  const secondaryH = Math.max(btnH, pad(token, 5.5));
+  const tertiaryH = Math.max(btnH, pad(token, 5));
+  return quickH + pad(token, 2) + secondaryH + pad(token, 2) + tertiaryH;
+}
+
 export function computeTitleLayout(w: number, h: number, token: ThemeTokens): TitleScreenLayout {
   const safe = token.safe;
   const margin = Math.max(12, Math.min(w, h) * 0.035);
@@ -470,14 +481,13 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
   const landscape = w / Math.max(h, 1) >= 1.15;
   const shortH = h < 520;
   const phone = Math.min(w, h) < 520;
-  const btnCount = 4;
 
   // Mobile-first: big hit targets; shrink only as a last resort below.
   let btnH = phone
     ? Math.max(token.touchMin * 1.28, pad(token, 7.25), 56)
     : Math.max(token.touchMin * 1.1, pad(token, 5.75), 50);
   let btnGap = phone ? Math.max(10, pad(token, 1.15)) : Math.max(8, pad(token, 0.85));
-  let menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+  let menuH = titleMenuStackHeight(token, btnH);
   const btnFontFor = (height: number): number =>
     Math.max(
       token.fontTitle,
@@ -491,25 +501,34 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
       const s = menuBudget / menuH;
       btnH = Math.max(token.touchMin, btnH * s);
       btnGap = Math.max(phone ? 6 : 4, btnGap * s);
-      menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+      menuH = titleMenuStackHeight(token, btnH);
     }
 
     const colMax = Math.min(innerW * (phone ? 0.48 : 0.4), phone ? 460 : 420);
     const colW = Math.max(phone ? 240 : 200, colMax);
     const colX = innerL;
-    const brandBudget = Math.max(48, innerH - menuH - margin * 2);
+    const logoY = innerT;
+    const logoFloorSize = shortH ? 38 : 48;
     const apexSize = Math.max(
-      shortH ? 38 : 48,
+      logoFloorSize,
       Math.min(
         colW * (phone ? 0.3 : 0.24),
         h * (shortH ? 0.15 : 0.13),
-        brandBudget * 0.7,
         shortH ? 56 : 78,
       ),
     );
     const logoH = measureTitleLogoHeight(apexSize, token);
-    const logoY = innerT + Math.min(margin, brandBudget * 0.08);
-    const menuY = Math.min(innerB - menuH, Math.max(logoY + logoH + margin, innerT + innerH * 0.38));
+    // The menu may never paint over the brand — shrink buttons (touchMin floor)
+    // rather than cover the wordmark.
+    const menuFloor = logoY + logoH + margin;
+    const availForMenu = innerB - menuFloor;
+    if (menuH > availForMenu && availForMenu > 0) {
+      const s = availForMenu / menuH;
+      btnH = Math.max(token.touchMin, btnH * s);
+      btnGap = Math.max(phone ? 6 : 4, btnGap * s);
+      menuH = titleMenuStackHeight(token, btnH);
+    }
+    const menuY = Math.max(menuFloor, innerB - menuH);
 
     const trackLeft = colX + colW + margin;
     const trackRight = innerR;
@@ -517,6 +536,8 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     const trackCx = trackLeft + trackW * 0.5;
     const trackCy = innerT + innerH * (shortH ? 0.48 : 0.46);
     const trackScale = Math.min(trackW * 0.55, innerH * (shortH ? 0.5 : 0.58), Math.min(w, h) * 0.48);
+
+    const scrimPad = margin * 0.55;
 
     return {
       mode: 'landscape',
@@ -534,7 +555,12 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
       btnGap,
       btnFont: btnFontFor(btnH),
       fadeTop: menuY - margin,
-      menuScrim: null,
+      menuScrim: {
+        x: colX - scrimPad,
+        y: menuY - scrimPad,
+        w: colW + scrimPad * 2,
+        h: menuH + scrimPad * 2,
+      },
     };
   }
 
@@ -545,7 +571,7 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     const s = menuBudget / menuH;
     btnH = Math.max(token.touchMin, btnH * s);
     btnGap = Math.max(phone ? 8 : 5, btnGap * s);
-    menuH = btnCount * btnH + (btnCount - 1) * btnGap;
+    menuH = titleMenuStackHeight(token, btnH);
   }
 
   const menuW = Math.min(innerW, Math.min(phone ? 480 : 420, Math.max(phone ? 300 : 260, w * 0.9)));

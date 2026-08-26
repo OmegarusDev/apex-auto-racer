@@ -26,18 +26,16 @@ import { ACCENT_TRACK } from '../ui/theme';
 import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneChrome';
 import { TitleScene } from './TitleScene';
 
-type ResetStep = 'none' | 'confirm1' | 'confirm2';
-
 export class OptionsScene implements Scene {
   private toasts = new ToastManager();
-  private resetStep: ResetStep = 'none';
   private modal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private scroller = new ContentScroller();
   private detachWheel: (() => void) | null = null;
+  /** Live fallback so sliders work before any save exists. */
+  private localVols: VolumeOptions | null = null;
 
   enter(): void {
     onSceneEnter();
-    this.resetStep = 'none';
     this.modal.open = false;
     this.scroller.scroll.offset = 0;
     this.detachWheel = this.scroller.attachWheel(getGameContext().canvas, () => !this.modal.open);
@@ -55,7 +53,6 @@ export class OptionsScene implements Scene {
   handleBack(): boolean {
     if (this.modal.open) {
       this.modal.open = false;
-      this.resetStep = 'none';
       return true;
     }
     getGameContext().scenes.back();
@@ -69,19 +66,25 @@ export class OptionsScene implements Scene {
   private volumes(): VolumeOptions {
     const g = getGameContext();
     if (g.state !== null) return g.state.options.volumes;
-    return { master: 0.8, engine: 0.28, fx: 0.5, crowd: 0.45, ui: 0.6 };
+    if (this.localVols === null) {
+      this.localVols = { master: 0.8, engine: 0.28, fx: 0.5, crowd: 0.45, ui: 0.6 };
+    }
+    return this.localVols;
   }
 
   private setVolume(key: keyof VolumeOptions, value: number): void {
     const g = getGameContext();
-    if (g.state === null) return;
-    g.state.options.volumes[key] = value;
-    g.audio.setVolumes(g.state.options.volumes);
-    g.autosave();
+    const vols = this.volumes();
+    vols[key] = value;
+    // Always audible immediately; persisted only when a save exists.
+    g.audio.setVolumes(vols);
+    if (g.state !== null) {
+      g.state.options.volumes[key] = value;
+      g.autosave();
+    }
   }
 
   private openResetConfirm(): void {
-    this.resetStep = 'confirm1';
     this.modal = {
       open: true,
       title: 'Reset Save?',
@@ -94,7 +97,6 @@ export class OptionsScene implements Scene {
           h: 0,
           label: 'Cancel',
           onClick: () => {
-            this.resetStep = 'none';
             this.modal.open = false;
           },
         },
@@ -112,7 +114,6 @@ export class OptionsScene implements Scene {
   }
 
   private openResetConfirm2(): void {
-    this.resetStep = 'confirm2';
     this.modal = {
       open: true,
       title: 'Are you absolutely sure?',
@@ -125,7 +126,6 @@ export class OptionsScene implements Scene {
           h: 0,
           label: 'Cancel',
           onClick: () => {
-            this.resetStep = 'none';
             this.modal.open = false;
           },
         },
@@ -135,13 +135,12 @@ export class OptionsScene implements Scene {
           w: 0,
           h: 0,
           label: 'Delete Save',
-          primary: true,
+          danger: true,
           onClick: () => {
             const g = getGameContext();
             g.save.reset();
             g.state = null;
             this.modal.open = false;
-            this.resetStep = 'none';
             this.toasts.push('Save deleted', '#f87171');
             g.scenes.replace(new TitleScene());
           },
@@ -174,15 +173,14 @@ export class OptionsScene implements Scene {
     const trackH = pad(token, 0.75);
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const sectionGap = pad(token, 2);
+    const resetH = Math.max(btnH, pad(token, 6));
+    // Content height — mirrors the draw chain below exactly.
     const contentH =
-      token.fontCaption +
-      pad(token, 1.5) +
+      token.fontCaption + pad(token, 0.75) + pad(token, 1) +
       rowH * 5 +
       sectionGap +
-      token.fontCaption +
-      pad(token, 1) +
-      btnH +
-      pad(token, 2);
+      token.fontCaption + pad(token, 0.75) + pad(token, 1) +
+      resetH;
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
@@ -231,10 +229,9 @@ export class OptionsScene implements Scene {
       x: pad(token, 1.5),
       y,
       w: view.w - pad(token, 3),
-      h: Math.max(btnH, pad(token, 6)),
-      label: '⚠  Reset Save Data',
+      h: resetH,
+      label: 'Reset Save Data',
       cta: false,
-      fontSize: token.fontDisplay,
       onClick: () => this.openResetConfirm(),
     };
     drawButton(ctx, resetBtn, lui);
@@ -249,6 +246,5 @@ export class OptionsScene implements Scene {
     handleModal(this.modal, ui);
 
     this.toasts.draw(ctx, ui);
-    void this.resetStep;
   }
 }

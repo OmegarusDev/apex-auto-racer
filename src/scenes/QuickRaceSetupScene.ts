@@ -1,8 +1,5 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
-import { createNewGame } from '../engine/SaveManager';
-import { mulberry32 } from '../engine/rng';
-import type { GameState } from '../engine/types';
 import type { DisciplineId } from '../data/disciplines';
 import {
   drawButton,
@@ -11,11 +8,16 @@ import {
   handleHeader,
   drawRow,
   drawSectionTitle,
+  drawInfoIcon,
+  infoIconRadius,
   layoutShell,
   ContentScroller,
+  TooltipManager,
+  ctaHeight,
   pad,
   ensureMinTouch,
   hitRect,
+  wrapText,
   ToastManager,
   truncateText,
   type ButtonDef,
@@ -33,21 +35,11 @@ import {
 } from '../career/quickRacePresets';
 import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneChrome';
 import { disciplineQrBlurb } from '../graphics/materials';
-
-function ensureQuickRaceState(): GameState {
-  const g = getGameContext();
-  if (g.state !== null) return g.state;
-  const loaded = g.bootstrap();
-  if (loaded !== null) return loaded;
-  const seed = Date.now() >>> 0;
-  const state = createNewGame(mulberry32(seed), seed);
-  g.state = state;
-  g.audio.setVolumes(state.options.volumes);
-  return state;
-}
+import { ensureQuickRaceState } from '../career/quickPlayState';
 
 export class QuickRaceSetupScene implements Scene {
   private toasts = new ToastManager();
+  private tooltips = new TooltipManager();
   private scroller = new ContentScroller();
   private detachWheel: (() => void) | null = null;
   private discipline: DisciplineId;
@@ -57,16 +49,16 @@ export class QuickRaceSetupScene implements Scene {
   constructor(opts?: {
     discipline?: DisciplineId;
     returnTo?: 'title' | 'campaign';
-    presetId?: QuickRacePresetId;
   }) {
     this.discipline = opts?.discipline ?? 'track';
     this.returnTo = opts?.returnTo ?? 'title';
-    this.presetId = opts?.presetId ?? 'rookie';
+    this.presetId = 'rookie';
   }
 
   enter(): void {
     onSceneEnter();
     this.scroller.scroll.offset = 0;
+    this.scroller.onUserScroll = () => this.tooltips.close();
     this.detachWheel = this.scroller.attachWheel(getGameContext().canvas);
     const g = getGameContext();
     if (g.save.hasSave() && this.presetId === 'rookie') {
@@ -131,23 +123,24 @@ export class QuickRaceSetupScene implements Scene {
       pad(token, 1.5) + token.fontBody + pad(token, 0.5) + token.fontCaption + pad(token, 0.5) + token.fontCaption + pad(token, 1.5),
       token,
     );
+    // Coaching blurbs wrap to two lines instead of ellipsizing control advice.
+    setBlurbFont(ctx, token);
+    const blurbLines = wrapText(ctx, disciplineQrBlurb(this.discipline), view.w - pad(token), 2).length;
 
-    // Calculate content height for scroller
+    // Content height — mirrors the draw chain below exactly.
+    const heroCtaH = ctaHeight(token);
     const contentH =
-      pad(token, 1) +
-      // Primary CTA card
-      ensureMinTouch(pad(token, 6), token) + pad(token, 1.5) +
-      // Discipline selector
-      token.fontCaption + pad(token, 0.75) + discH + pad(token, 1) +
-      // Discipline blurb
-      token.fontCaption + pad(token, 1.5) +
-      // Preset selector
-      token.fontCaption + pad(token, 0.75) + presets.length * rowH +
-      pad(token, 2);
+      heroCtaH + pad(token, 1.5) +
+      token.fontCaption + pad(token, 0.75) + discH + pad(token, 0.75) +
+      blurbLines * token.fontCaption + pad(token, 1.5) +
+      token.fontCaption + pad(token, 0.75) +
+      presets.length * rowH;
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
+    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
+    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
@@ -155,20 +148,19 @@ export class QuickRaceSetupScene implements Scene {
     // ════════════════════════════════════════════
     // PRIMARY CTA - START RACE (top, prominent)
     // ════════════════════════════════════════════
-    const ctaH = ensureMinTouch(pad(token, 6), token);
     const ctaBtn: ButtonDef = {
       x: pad(token, 1.5),
       y,
       w: view.w - pad(token, 3),
-      h: ctaH,
-      label: '▶  Start Race',
+      h: heroCtaH,
+      label: 'Start Race',
       cta: true,
       fontSize: token.fontDisplay,
       onClick: () => this.startRace(),
     };
     drawButton(ctx, ctaBtn, { ...lui, accent });
     handleButton(ctaBtn, lui);
-    y += ctaH + pad(token, 1.5);
+    y += heroCtaH + pad(token, 1.5);
 
     // ════════════════════════════════════════════
     // DISCIPLINE SELECTOR (compact row)
@@ -188,26 +180,25 @@ export class QuickRaceSetupScene implements Scene {
         h: discH,
         label: disciplineLabel(id),
         primary: selected,
-        onClick: () => { this.discipline = id; },
+        onClick: () => { this.tooltips.close(); this.discipline = id; },
       };
       drawButton(ctx, btn, { ...lui, accent: disciplineAccent(id) });
       handleButton(btn, lui);
     }
     y += discH + pad(token, 0.75);
 
-    // Discipline blurb
+    // Discipline blurb — wraps to two lines so tips survive narrow phones.
     ctx.save();
-    ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+    setBlurbFont(ctx, token);
     ctx.fillStyle = token.textMuted;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(
-      truncateText(ctx, disciplineQrBlurb(this.discipline), view.w - pad(token)),
-      pad(token, 0.5),
-      y,
-    );
+    for (const line of wrapText(ctx, disciplineQrBlurb(this.discipline), view.w - pad(token), 2)) {
+      ctx.fillText(line, pad(token, 0.5), y);
+      y += token.fontCaption;
+    }
     ctx.restore();
-    y += token.fontCaption + pad(token, 1.5);
+    y += pad(token, 1.5);
 
     // ════════════════════════════════════════════
     // PRESET SELECTOR (Car & Driver)
@@ -219,11 +210,13 @@ export class QuickRaceSetupScene implements Scene {
       const hovered = hitRect(lui.pointerX, lui.pointerY, 0, y, view.w, rowH);
       drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui, { hovered: hovered || selected });
 
-      const padX = pad(token, 1.5);
+      // Selection rail sits left of the text column — real clearance, no graze.
+      const railX = pad(token, 0.75);
+      const padX = pad(token, 2.25);
       const labelY = y + pad(token, 1.5);
       const blurbY = labelY + token.fontBody + pad(token, 0.5);
       const statsY = blurbY + token.fontCaption + pad(token, 0.5);
-      const textMax = view.w - pad(token, 3);
+      const textMax = view.w - padX - pad(token, 5.5);
 
       ctx.save();
       ctx.font = `700 ${token.fontBody}px ${token.fontDisplayFamily}`;
@@ -236,14 +229,30 @@ export class QuickRaceSetupScene implements Scene {
       ctx.fillText(truncateText(ctx, preset.blurb, textMax), padX, blurbY);
       const stats = presetStatSummary(preset);
       if (stats) {
-        ctx.fillStyle = token.textDim;
+        ctx.fillStyle = token.textMuted;
         ctx.fillText(truncateText(ctx, stats, textMax), padX, statsY);
       }
       if (selected) {
         ctx.fillStyle = accent;
-        ctx.fillRect(pad(token, 0.75), y + pad(token, 0.75), 4, rowH - pad(token, 1.5));
+        ctx.fillRect(railX, y + pad(token, 0.75), 4, rowH - pad(token, 1.5));
       }
       ctx.restore();
+
+      // ⓘ — what the driver stat shorthand actually does in a race.
+      if (stats) {
+        const r = infoIconRadius(token);
+        const icx = view.w - pad(token, 2.5);
+        const icy = statsY + token.fontCaption * 0.45;
+        drawInfoIcon(ctx, icx, icy, r, lui, false);
+        this.tooltips.register(
+          { x: icx - r * 1.8, y: icy - r * 1.8, w: r * 3.6, h: r * 3.6 },
+          {
+            title: 'Driver Ratings',
+            body: 'Sk Skill drives precisely and saves slides · Br Bravery carries speed through corners · Fo Focus avoids mistakes (rain matters) · Det Determination pushes harder when running behind.',
+          },
+          tooltipOrigin,
+        );
+      }
 
       if (lui.pointerClicked && hovered) {
         this.presetId = preset.id;
@@ -253,7 +262,14 @@ export class QuickRaceSetupScene implements Scene {
 
     this.scroller.end(ctx);
 
+    this.tooltips.handle(lui, !this.scroller.isScrolling);
+    this.tooltips.draw(ctx, ui);
+
     handleHeader(header, ui);
     this.toasts.draw(ctx, ui);
   }
+}
+
+function setBlurbFont(ctx: CanvasRenderingContext2D, token: ReturnType<typeof buildUi>['token']): void {
+  ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
 }

@@ -8,15 +8,20 @@ import {
   handleHeader,
   drawStatBar,
   drawRadarChart,
+  drawInfoIcon,
+  infoIconRadius,
   drawSectionTitle,
   layoutShell,
   ContentScroller,
+  TooltipManager,
+  ctaHeight,
   pad,
   ensureMinTouch,
   statBarHeight,
   isPortrait,
   truncateText,
   type ButtonDef,
+  type UiContext,
 } from '../ui/components';
 import {
   buildUi,
@@ -40,6 +45,7 @@ import { TitleScene } from './TitleScene';
 export class GarageScene implements Scene {
   private disciplineIndex = 0;
   private scroller = new ContentScroller();
+  private tooltips = new TooltipManager();
   private detachWheel: (() => void) | null = null;
   private swipeStartX: number | null = null;
   private swipeStartY: number | null = null;
@@ -49,6 +55,7 @@ export class GarageScene implements Scene {
     onSceneEnter();
     this.disciplineIndex = 0;
     this.scroller.scroll.offset = 0;
+    this.scroller.onUserScroll = () => this.tooltips.close();
     this.detachWheel = this.scroller.attachWheel(getGameContext().canvas);
   }
 
@@ -152,35 +159,27 @@ export class GarageScene implements Scene {
     // ════════════════════════════════════════════
     // PRIMARY CTA — ENTER CAMPAIGN (large, prominent, top)
     // ════════════════════════════════════════════
-    const campaignBtnH = Math.max(btnH * 1.3, pad(token, 8));
-    
-    // Measure content height
-    let contentH = pad(token, 0.5) + navSize + pad(token, 1);
+    const campaignBtnH = ctaHeight(token);
+
+    // Content height — mirrors the draw chain below exactly.
+    let contentH = pad(token, 0.25) + navSize + pad(token, 1);
     if (portrait) {
       contentH += carH + pad(token, 0.75) + radarR * 2 + pad(token, 2.5) + pad(token, 1);
     } else {
-      contentH += Math.max(carH, radarR * 2 + pad(token, 2)) + pad(token, 1);
+      contentH += Math.max(carH, radarR * 2 + pad(token, 2.5)) + pad(token, 1);
     }
     contentH +=
-      statBarHeight(token) +
-      pad(token, 1) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      // Primary CTA (Campaign)
       campaignBtnH + pad(token, 1.5) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      // Garage actions row
-      btnH + btnGap +
-      pad(token, 0.35) +
-      token.fontCaption +
-      pad(token, 0.75) +
-      btnH +
-      pad(token, 1.5);
+      token.fontCaption + pad(token, 0.75) + pad(token, 0.35) +
+      btnH + btnGap + pad(token, 0.25) +
+      statBarHeight(token) + pad(token, 1);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
+    // Hotspots are registered in scroller-local space; tooltips draw in screen space.
+    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
+    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = pad(token, 0.25);
@@ -213,7 +212,7 @@ export class GarageScene implements Scene {
     const titleMax = view.w - navSize * 2 - pad(token, 1);
     ctx.fillText(truncateText(ctx, discLabel, titleMax), view.w * 0.5, y + navSize * 0.42);
     ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textDim;
+    ctx.fillStyle = token.textMuted;
     ctx.fillText('Swipe or tap arrows', view.w * 0.5, y + navSize * 0.78);
     ctx.restore();
     if (!swipeHandled && !this.scroller.isScrolling) {
@@ -238,17 +237,20 @@ export class GarageScene implements Scene {
         condition: vehicle.condition,
       });
       y += carH + pad(token, 0.75);
+      const chartX = (view.w - radarR * 2) * 0.5;
+      const chartY = y + pad(token, 1.25);
       drawRadarChart(
         ctx,
         {
-          x: (view.w - radarR * 2) * 0.5,
-          y: y + pad(token, 1.25),
+          x: chartX,
+          y: chartY,
           radius: radarR,
           viewW: view.w,
           values: vehicleRadarValues(discipline, vehicle),
         },
         lui,
       );
+      this.drawRadarInfo(ctx, chartX + radarR * 2, chartY, lui, tooltipOrigin);
       y += radarR * 2 + pad(token, 2.5) + pad(token, 1);
     } else {
       const blockH = Math.max(carH, radarR * 2 + pad(token, 2.5));
@@ -277,6 +279,7 @@ export class GarageScene implements Scene {
         },
         lui,
       );
+      this.drawRadarInfo(ctx, radarInset + radarR * 2, y + (blockH - radarR * 2) * 0.5, lui, tooltipOrigin);
       y += blockH + pad(token, 1);
     }
 
@@ -288,13 +291,13 @@ export class GarageScene implements Scene {
       y,
       w: view.w - pad(token, 3),
       h: campaignBtnH,
-      label: '▶  Enter Campaign',
+      label: 'Enter Campaign',
       cta: true,
       fontSize: token.fontDisplay,
       onClick: () => g.scenes.push(new CampaignScene(discipline)),
     };
-    drawButton(ctx, campaignBtn, { ...ui, accent });
-    handleButton(campaignBtn, lui);
+    drawButton(ctx, campaignBtn, { ...lui, accent });
+    if (!swipeHandled && !this.scroller.isScrolling) handleButton(campaignBtn, lui);
     y += campaignBtnH + pad(token, 1.5);
 
     // ════════════════════════════════════════════
@@ -329,21 +332,50 @@ export class GarageScene implements Scene {
     y += btnH + btnGap + pad(token, 0.25);
 
     // Condition bar
-    drawStatBar(
-      ctx,
-      {
-        x: 0,
-        y,
-        w: view.w,
-        label: 'Condition',
-        value: vehicle.condition * 100,
-        color: vehicle.condition < 0.75 ? token.danger : accent,
+    const conditionBar = {
+      x: 0,
+      y,
+      w: view.w,
+      label: 'Condition',
+      value: vehicle.condition * 100,
+      suffix: '%',
+      color: vehicle.condition < 0.75 ? token.danger : accent,
+      info: {
+        title: 'Condition',
+        body: 'Wear from bumps and crashes. Low condition cuts grip and top speed and adds line wander — repair in Tuning or after a race.',
       },
-      lui,
-    );
+    } as const;
+    drawStatBar(ctx, conditionBar, lui);
+    this.tooltips.registerStatBar(ctx, conditionBar, token, tooltipOrigin);
     y += statBarHeight(token) + pad(token, 1);
     this.scroller.end(ctx);
 
+    this.tooltips.handle(lui, !this.scroller.isScrolling);
+    this.tooltips.draw(ctx, ui);
+
     handleHeader(header, ui);
+  }
+
+  /** Painted ⓘ beside the radar explaining what its five axes mean. */
+  private drawRadarInfo(
+    ctx: CanvasRenderingContext2D,
+    chartRightX: number,
+    chartY: number,
+    ui: UiContext,
+    origin: { x: number; y: number },
+  ): void {
+    const { token } = ui;
+    const r = infoIconRadius(token);
+    const cx = chartRightX + r + pad(token, 0.5);
+    const cy = chartY + r + pad(token, 0.25);
+    drawInfoIcon(ctx, cx, cy, r, ui, false);
+    this.tooltips.register(
+      { x: cx - r * 1.6, y: cy - r * 1.6, w: r * 3.2, h: r * 3.2 },
+      {
+        title: 'Performance',
+        body: 'Ratings come from your part tiers. Top Speed & Accel set straight-line pace; Braking stops later; Grip holds corners; Downforce pins the car in its slot.',
+      },
+      origin,
+    );
   }
 }

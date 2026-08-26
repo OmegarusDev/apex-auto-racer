@@ -17,6 +17,8 @@ export interface RaceChromeLayout {
   gas: ChromeRect;
   shift: ChromeRect;
   pause: ChromeRect;
+  /** Racing-lines toggle — stacked under Pause, above Zoom. */
+  lines: ChromeRect;
   minimap: ChromeRect;
   /** Race tabletop zoom slider (draw + hit). */
   zoomSlider: ChromeRect;
@@ -81,11 +83,20 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     h: pauseSize,
   };
 
-  // Zoom under pause/minimap — same chrome column, fat enough for a thumb.
+  // Show-Lines toggle under pause — part of the layout so the zoom slider
+  // stacks BELOW it instead of sharing its hit zone.
+  const lines: ChromeRect = {
+    x: pause.x,
+    y: pause.y + pause.h + pad(token, 0.5),
+    w: pause.w,
+    h: pauseSize,
+  };
+
+  // Zoom under show-lines — same chrome column, fat enough for a thumb.
   const zoomH = ensureMinTouch(pad(token, 4.25), token);
   const zoomSlider: ChromeRect = {
     x: mmX,
-    y: pause.y + pause.h + pad(token, 0.65),
+    y: lines.y + lines.h + pad(token, 0.65),
     w: mmSize,
     h: zoomH,
   };
@@ -109,6 +120,7 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     gas,
     shift,
     pause,
+    lines,
     minimap,
     zoomSlider,
     deadZones: [trZone],

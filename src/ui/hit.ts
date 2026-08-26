@@ -8,3 +8,4 @@ export {
   layoutHintBox,
   drawHintBox,
 } from './components.impl';
+export { fmtCash, ctaHeight } from './components.impl';

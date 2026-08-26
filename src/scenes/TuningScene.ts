@@ -1,27 +1,25 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
-import { BALANCE } from '../data/balance';
-import { PARTS, partCost } from '../data/parts';
-import type { PartCategory } from '../data/parts';
-import type { DisciplineId } from '../data/disciplines';
+import { PARTS, type PartCategory } from '../data/parts';
+import { getDiscipline, type DisciplineId } from '../data/disciplines';
 import {
-  drawButton,
-  handleButton,
   drawHeader,
   handleHeader,
-  drawStatBar,
   drawRadarChart,
   drawSectionTitle,
-  drawRow,
+  drawInfoIcon,
+  infoIconRadius,
   layoutShell,
   ContentScroller,
+  TooltipManager,
+  drawUpgradePanel,
+  handleUpgradePanel,
+  upgradePanelHeight,
+  upgradePanelRowsTop,
+  upgradePanelRowHeight,
   pad,
-  ensureMinTouch,
-  statBarHeight,
   isPortrait,
   ToastManager,
-  truncateText,
-  type ButtonDef,
 } from '../ui/components';
 import {
   buildUi,
@@ -31,17 +29,30 @@ import {
 } from './sceneChrome';
 import { drawTopDownCar } from './titleArt';
 import { disciplineAccent, disciplineLabel } from '../career/disciplinesUi';
-import { buyPartTier, repairVehicle, vehicleRadarValues } from '../career/garage';
+import {
+  buyPartWithDelta,
+  partInfoText,
+  repairVehicle,
+  vehicleRadarValues,
+} from '../career/garage';
 import { carSetupFromParts, tuningSpeedReadout } from '../engine/vehicle/CarSetup';
 import { effectiveStats } from '../engine/stats';
-import { getDiscipline } from '../data/disciplines';
+
+/** One labeled pace row: caption left, value right, ⓘ at the edge. */
+interface PaceRow {
+  label: string;
+  value: string;
+  info: { title: string; body: string };
+}
 
 export class TuningScene implements Scene {
   private readonly discipline: DisciplineId;
   private toasts = new ToastManager();
+  private tooltips = new TooltipManager();
   private scroller = new ContentScroller();
   private detachWheel: (() => void) | null = null;
   private previewPart: PartCategory | null = null;
+  private upgradeCollapsed = false;
 
   constructor(discipline: DisciplineId) {
     this.discipline = discipline;
@@ -49,13 +60,16 @@ export class TuningScene implements Scene {
 
   enter(): void {
     onSceneEnter();
+    this.previewPart = null;
     this.scroller.scroll.offset = 0;
+    this.scroller.onUserScroll = () => this.tooltips.close();
     this.detachWheel = this.scroller.attachWheel(getGameContext().canvas);
   }
 
   exit(): void {
     this.detachWheel?.();
     this.detachWheel = null;
+    this.previewPart = null;
   }
 
   onResize(w: number, h: number): void {
@@ -69,6 +83,57 @@ export class TuningScene implements Scene {
 
   update(dt: number): void {
     this.toasts.update(dt);
+  }
+
+  private paceRows(): PaceRow[] {
+    const state = getGameContext().state!;
+    const vehicle = state.vehicles[this.discipline];
+    const setup = carSetupFromParts(vehicle.partTiers, this.discipline);
+    const stats = effectiveStats(this.discipline, vehicle.partTiers, vehicle.condition);
+    const mu = getDiscipline(this.discipline).muSurface;
+    const readout = tuningSpeedReadout(setup, mu, stats.aAccel, stats.D);
+    return [
+      {
+        label: 'Corner peg',
+        value: `~${readout.vDeslot.toFixed(1)} m/s`,
+        info: {
+          title: 'Corner peg',
+          body: 'Predicted speed through a typical tight corner at the very edge of grip — the anchor your braking points hang off.',
+        },
+      },
+      {
+        label: 'Aero limit',
+        value: `~${readout.vMax.toFixed(1)} m/s`,
+        info: {
+          title: 'Aero limit',
+          body: 'Straight-line top speed after paying the drag bill — wings add corner grip but bleed straight-line pace.',
+        },
+      },
+      {
+        label: 'Mass',
+        value: `${setup.massKg.toFixed(0)} kg`,
+        info: {
+          title: 'Mass',
+          body: 'Powertrain parts add weight; suspension sheds it. Heavier cars carry momentum but stop and turn harder.',
+        },
+      },
+      {
+        label: 'Brake bias',
+        value: `${(setup.brakeBiasFront * 100).toFixed(0)}% F`,
+        info: {
+          title: 'Brake bias',
+          body: 'Share of braking force at the front. Brake upgrades push it forward — stabler stops, less rear stability under power.',
+        },
+      },
+      {
+        label: 'Wing CL / CD',
+        value: `×${setup.clScale.toFixed(2)} / ×${setup.cdScale.toFixed(2)}`,
+        info: {
+          title: 'Wing CL / CD',
+          body: 'Spoiler effect on downforce vs drag. Both rise with spoiler tiers: more grip in fast corners, lower aero limit.',
+        },
+      },
+    ];
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -97,32 +162,65 @@ export class TuningScene implements Scene {
     drawHeader(ctx, header, ui);
 
     const view = shell.contentRect;
-    const btnH = ensureMinTouch(pad(token, 4.5), token);
-    const rowH = Math.max(btnH + pad(token, 0.5), pad(token, 5.5));
     const radarR = portrait
       ? Math.min((view.w - pad(token, 5)) * 0.32, pad(token, 9))
       : pad(token, 7.5);
+    // Hotspots are registered in scroller-local space; tooltips draw in screen space.
+    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
 
-    // ════════════════════════════════════════════
-    // PRIMARY CTA — REPAIR (if needed) / PARTS CTA
-    // ════════════════════════════════════════════
-    const repairBtnHCondition = Math.max(btnH + pad(token, 1), pad(token, 6));
+    // Loadout preview box — tall enough that the rotated mesh (which overflows
+    // a square footprint by ~10% each way) and its caption both stay inside.
+    const previewH = pad(token, 12);
+    const paceRows = this.paceRows();
+    const paceRowH = token.fontCaption * 1.7;
 
+    const panel = {
+      x: 0,
+      y: 0,
+      w: view.w,
+      partTiers: vehicle.partTiers,
+      condition: vehicle.condition,
+      cash: state.cash,
+      collapsed: this.upgradeCollapsed,
+      activePart: this.previewPart,
+      onBuy: (part: PartCategory) => {
+        const result = buyPartWithDelta(state, this.discipline, part);
+        if (result.bought) {
+          this.toasts.push(result.summary, accent, 3);
+          g.autosave();
+        }
+      },
+      onRepair: () => {
+        if (repairVehicle(state, this.discipline)) {
+          this.toasts.push('Vehicle repaired', accent);
+        }
+      },
+      onToggleCollapse: () => {
+        this.tooltips.close();
+        this.upgradeCollapsed = !this.upgradeCollapsed;
+      },
+      infoForPart: (part: PartCategory) => ({ title: part, body: partInfoText(part) }),
+      registerInfo: (rect: { x: number; y: number; w: number; h: number }, info: { title: string; body: string }) => {
+        this.tooltips.register(rect, info, tooltipOrigin);
+      },
+    };
+
+    // Content height — mirrors the draw chain below exactly.
     const contentH =
       // Performance radar
       token.fontCaption + pad(token, 0.75) + radarR * 2 + pad(token, 2.5) + pad(token, 1) +
       // Loadout preview
-      pad(token, 9) + pad(token, 1.5) +
+      token.fontCaption + pad(token, 0.75) + previewH + pad(token, 1.5) +
       // Predicted pace
-      token.fontCaption + pad(token, 0.75) + token.fontCaption * 2 + pad(token, 1.5) +
-      // Condition + Repair CTA
-      statBarHeight(token) + pad(token, 0.75) + ensureMinTouch(pad(token, 6), token) + pad(token, 1.5) +
-      // Parts list
-      pad(token, 0.75) + PARTS.length * rowH + pad(token, 2);
+      token.fontCaption + pad(token, 0.75) + paceRows.length * paceRowH + pad(token, 1.5) +
+      // Condition + repair + parts (shared panel)
+      upgradePanelHeight(panel, token) +
+      pad(token, 1);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
+    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
@@ -137,166 +235,100 @@ export class TuningScene implements Scene {
       { x: radarX, y: radarY, radius: radarR, viewW: view.w, values: vehicleRadarValues(this.discipline, vehicle) },
       lui,
     );
+    {
+      const r = infoIconRadius(token);
+      const icx = radarX + radarR * 2 + r + pad(token, 0.6);
+      const icy = radarY + r + pad(token, 0.25);
+      drawInfoIcon(ctx, icx, icy, r, lui, false);
+      this.tooltips.register(
+        { x: icx - r * 1.6, y: icy - r * 1.6, w: r * 3.2, h: r * 3.2 },
+        {
+          title: 'Performance',
+          body: 'Ratings come from part tiers. Top Speed & Accel set straight-line pace; Braking stops later; Grip holds corners; Downforce pins the car in its slot.',
+        },
+        tooltipOrigin,
+      );
+    }
     y += radarR * 2 + pad(token, 2.5) + pad(token, 1);
 
     // ════════════════════════════════════════════
     // LOADOUT PREVIEW (large, central)
     // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Loadout preview', lui);
-    const previewH = pad(token, 10);
-    const previewCx = view.w * 0.5;
-    const previewCy = y + previewH * 0.5;
-    drawTopDownCar(ctx, previewCx, previewCy, pad(token, 14), previewH, accent, this.discipline, {
+    const previewCy = y + previewH * 0.55;
+    drawTopDownCar(ctx, view.w * 0.5, previewCy, pad(token, 14), previewH, accent, this.discipline, {
       partTiers: vehicle.partTiers,
       condition: vehicle.condition,
       highlightPart: this.previewPart ?? undefined,
     });
-    if (this.previewPart) {
+    if (this.previewPart !== null) {
       ctx.save();
       ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
       ctx.fillStyle = accent;
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillText(`Preview: next ${this.previewPart} tier`, previewCx, y + previewH - token.fontCaption);
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(
+        `Preview: next ${this.previewPart} tier`,
+        view.w * 0.5,
+        y + previewH - pad(token, 0.4),
+      );
       ctx.restore();
     }
     y += previewH + pad(token, 1.5);
 
-    // Predicted pace
-    const setup = carSetupFromParts(vehicle.partTiers, this.discipline);
-    const stats = effectiveStats(this.discipline, vehicle.partTiers, vehicle.condition);
-    const mu = getDiscipline(this.discipline).muSurface;
-    const readout = tuningSpeedReadout(setup, mu, stats.aAccel, stats.D, 0.08);
-    y += drawSectionTitle(ctx, 0, y, 'Predicted pace', lui);
-    ctx.save();
-    ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(
-      `Corner peg ~${readout.vDeslot.toFixed(1)} m/s · Aero limit ~${readout.vMax.toFixed(1)} m/s`,
-      pad(token, 0.5),
-      y,
-    );
-    ctx.fillStyle = token.textDim;
-    ctx.fillText(
-      `Mass ${carSetupFromParts(vehicle.partTiers, this.discipline).massKg.toFixed(0)} kg · Bias ${(carSetupFromParts(vehicle.partTiers, this.discipline).brakeBiasFront * 100).toFixed(0)}%F · CL×${carSetupFromParts(vehicle.partTiers, this.discipline).clScale.toFixed(2)} / CD×${carSetupFromParts(vehicle.partTiers, this.discipline).cdScale.toFixed(2)}`,
-      pad(token, 0.5),
-      y + token.fontCaption + pad(token, 0.5),
-    );
-    ctx.restore();
-    y += token.fontCaption * 2 + pad(token, 1.5);
-
-    // ═══════════════════════════════════════════
-    // CONDITION + REPAIR (prominent CTA if needed)
     // ════════════════════════════════════════════
-    y += drawSectionTitle(ctx, 0, y, 'Condition', lui);
-    drawStatBar(
-      ctx,
-      {
-        x: pad(token, 1),
-        y,
-        w: view.w - pad(token, 2),
-        label: 'Condition',
-        value: vehicle.condition * 100,
-        color: vehicle.condition < BALANCE.conditionMin + 0.05 ? token.danger : accent,
-      },
-      lui,
-    );
-    y += statBarHeight(token) + pad(token, 0.75);
+    // PREDICTED PACE (aligned label/value rows)
+    // ════════════════════════════════════════════
+    y += drawSectionTitle(ctx, 0, y, 'Predicted pace', lui);
+    {
+      const r = infoIconRadius(token);
+      for (const row of paceRows) {
+        ctx.save();
+        ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
+        ctx.fillStyle = token.textMuted;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(row.label, pad(token, 0.5), y + paceRowH * 0.5);
+        ctx.fillStyle = token.text;
+        ctx.fillText(row.value, view.w - pad(token, 1) - r * 3, y + paceRowH * 0.5);
+        ctx.restore();
 
-    const repairPts = Math.max(0, Math.ceil((BALANCE.conditionMax - vehicle.condition) * 100));
-    const repairCost = repairPts * BALANCE.repairCostPerPoint;
-    const repairBtnH = repairBtnHCondition;
-    const repairBtn: ButtonDef = {
-      x: pad(token, 1.5),
-      y,
-      w: view.w - pad(token, 3),
-      h: repairBtnH,
-      label: repairPts > 0 ? `Repair ($${repairCost})` : 'Fully Repaired',
-      disabled: repairPts <= 0 || state.cash < repairCost,
-      primary: repairPts > 0 && state.cash >= repairCost,
-      fontSize: token.fontDisplay,
-      onClick: () => {
-        if (repairVehicle(state, this.discipline)) {
-          this.toasts.push('Vehicle repaired', accent);
-        }
-      },
-    };
-    drawButton(ctx, repairBtn, lui);
-    handleButton(repairBtn, lui);
-    y += repairBtnH + pad(token, 1.5);
-
-    // Parts list
-    y += drawSectionTitle(ctx, 0, y, 'Parts', lui);
-
-    for (const part of PARTS) {
-      const tier = vehicle.partTiers[part.id] ?? 0;
-      const nextTier = tier + 1;
-      const cost = partCost(part.baseCost, nextTier);
-      const atMax = tier >= BALANCE.maxPartTier;
-
-      drawRow(ctx, { x: 0, y, w: view.w, h: rowH }, lui);
-      if (
-        lui.pointerX >= 0 &&
-        lui.pointerX <= view.w &&
-        lui.pointerY >= y &&
-        lui.pointerY <= y + rowH
-      ) {
-        this.previewPart = part.id;
+        const icx = view.w - pad(token, 1) - r;
+        const icy = y + paceRowH * 0.5;
+        drawInfoIcon(ctx, icx, icy, r, lui, false);
+        this.tooltips.register(
+          { x: icx - r * 1.8, y: icy - r * 1.8, w: r * 3.6, h: r * 3.6 },
+          row.info,
+          tooltipOrigin,
+        );
+        y += paceRowH;
       }
-
-      ctx.save();
-      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-      ctx.fillStyle = this.previewPart === part.id ? accent : token.text;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      const buyW = Math.min(pad(token, 10), view.w * 0.28);
-      const nameMax = view.w - buyW - pad(token, 8);
-      ctx.fillText(
-        truncateText(ctx, part.name, Math.max(pad(token, 6), nameMax)),
-        pad(token, 0.5),
-        y + rowH * 0.5,
-      );
-
-      const pipR = pad(token, 0.4);
-      let pipX =
-        pad(token, 0.5) +
-        ctx.measureText(truncateText(ctx, part.name, Math.max(pad(token, 6), nameMax))).width +
-        pad(token, 1);
-      const pipMax = view.w - buyW - pad(token, 1.5);
-      for (let p = 0; p <= BALANCE.maxPartTier; p++) {
-        if (pipX + pipR > pipMax) break;
-        ctx.beginPath();
-        ctx.arc(pipX, y + rowH * 0.5, pipR, 0, Math.PI * 2);
-        ctx.fillStyle = p <= tier ? accent : token.bgElevated;
-        ctx.fill();
-        ctx.strokeStyle = token.cardStroke;
-        ctx.stroke();
-        pipX += pipR * 2 + pad(token, 0.5);
-      }
-      ctx.restore();
-
-      const buyBtn: ButtonDef = {
-        x: view.w - buyW,
-        y: y + (rowH - btnH) * 0.5,
-        w: buyW,
-        h: btnH,
-        label: atMax ? 'MAX' : `$${cost}`,
-        disabled: atMax || state.cash < cost,
-        primary: !atMax && state.cash >= cost,
-        onClick: () => {
-          if (buyPartTier(state, this.discipline, part.id as PartCategory)) {
-            this.toasts.push(`${part.name} upgraded`, accent);
-          }
-        },
-      };
-      drawButton(ctx, buyBtn, lui);
-      handleButton(buyBtn, lui);
-      y += rowH;
     }
+    y += pad(token, 1.5);
+
+    // ════════════════════════════════════════════
+    // CONDITION + REPAIR + PARTS (shared UpgradePanel)
+    // ════════════════════════════════════════════
+    // Hover a part row to preview its effect on the car above.
+    const rowsTop = upgradePanelRowsTop({ ...panel, y }, token);
+    const rowHp = upgradePanelRowHeight(token);
+    let hoveredPart: PartCategory | null = null;
+    if (!panel.collapsed && lui.pointerY >= rowsTop && lui.pointerX >= 0 && lui.pointerX <= view.w) {
+      const idx = Math.floor((lui.pointerY - rowsTop) / rowHp);
+      const part = PARTS[idx];
+      if (part !== undefined) hoveredPart = part.id;
+    }
+    this.previewPart = hoveredPart;
+
+    drawUpgradePanel(ctx, panel, ui);
+    handleUpgradePanel(panel, ui);
+    y += upgradePanelHeight(panel, token);
 
     this.scroller.end(ctx);
+
+    this.tooltips.handle(lui, !this.scroller.isScrolling);
+    this.tooltips.draw(ctx, ui);
+
     handleHeader(header, ui);
     this.toasts.draw(ctx, ui);
   }

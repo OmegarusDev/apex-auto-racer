@@ -1,14 +1,13 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
-import { createNewGame } from '../engine/SaveManager';
 import { mulberry32, pick } from '../engine/rng';
-import type { GameState } from '../engine/types';
 import {
   drawButton,
   handleButton,
   drawModal,
   handleModal,
   layoutModalButtons,
+  hitRect,
   pad,
   ToastManager,
   type ButtonDef,
@@ -28,27 +27,16 @@ import {
   drawTitleAtmosphere,
   drawTitleLogo,
   freshTitlePreviewSeed,
+  titleMenuStackHeight,
   type TitlePreviewTrack,
 } from './titleArt';
 import { DISCIPLINE_ORDER } from '../career/disciplinesUi';
+import { ensureQuickRaceState } from '../career/quickPlayState';
 import { GarageScene } from './GarageScene';
 import { OptionsScene } from './OptionsScene';
 import { QuickRaceSetupScene } from './QuickRaceSetupScene';
 import { makeTimeTrialConfig } from '../career/launchRace';
 import { launchRace } from '../career/launchRace';
-
-/** Load save if present; otherwise create an in-memory roster without persisting. */
-function ensureQuickRaceState(): GameState {
-  const g = getGameContext();
-  if (g.state !== null) return g.state;
-  const loaded = g.bootstrap();
-  if (loaded !== null) return loaded;
-  const seed = Date.now() >>> 0;
-  const state = createNewGame(mulberry32(seed), seed);
-  g.state = state; // setState only — does not autosave / wipe storage
-  g.audio.setVolumes(state.options.volumes);
-  return state;
-}
 
 export class TitleScene implements Scene {
   private time = 0;
@@ -133,7 +121,7 @@ export class TitleScene implements Scene {
       ctx.restore();
     }
 
-const hasSave = g.save.hasSave();
+    const hasSave = g.save.hasSave();
     const btnFont = layout.btnFont;
 
     // ═══════════════════════════════════════════
@@ -141,12 +129,14 @@ const hasSave = g.save.hasSave();
     // ═══════════════════════════════════════════
     let btnY = layout.menuY;
 
+    const quickRaceH = Math.max(layout.btnH + pad(token, 2), pad(token, 8));
+
     const quickRaceBtn: ButtonDef = {
       x: layout.menuX,
       y: layout.menuY,
       w: layout.menuW,
-      h: Math.max(layout.btnH + pad(token, 2), pad(token, 8)),
-      label: '▶  Quick Race',
+      h: quickRaceH,
+      label: 'Quick Race',
       cta: true,
       fontSize: Math.max(layout.btnFont, token.fontDisplay),
       onClick: () => {
@@ -161,7 +151,7 @@ const hasSave = g.save.hasSave();
     drawButton(ctx, quickRaceBtn, { ...ui, accent: BRAND_SIGNAL });
     handleButton(quickRaceBtn, ui);
 
-btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad(token, 2);
+    btnY = layout.menuY + quickRaceH + pad(token, 2);
 
     // ═══════════════════════════════════════════
     // SECONDARY ACTIONS — Quick play modes
@@ -174,7 +164,7 @@ btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad
       y: btnY,
       w: Math.floor((layout.menuW - secondaryGap) * 0.5),
       h: secondaryH,
-      label: '⏱  Time Trial',
+      label: 'Time Trial',
       cta: false,
       fontSize: btnFont,
       onClick: () => {
@@ -191,7 +181,7 @@ btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad
       y: btnY,
       w: Math.floor((layout.menuW - secondaryGap) * 0.5),
       h: secondaryH,
-      label: hasSave ? '↻  Continue' : 'Continue',
+      label: 'Continue',
       disabled: !hasSave,
       fontSize: btnFont,
       onClick: () => {
@@ -204,7 +194,10 @@ btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad
     drawButton(ctx, timeTrialBtn, ui);
     drawButton(ctx, continueBtn, ui);
     handleButton(timeTrialBtn, ui);
-    handleButton(continueBtn, ui);
+    // Disabled buttons never fire — explain why on tap.
+    if (!hasSave && ui.pointerClicked && hitRect(ui.pointerX, ui.pointerY, continueBtn.x, continueBtn.y, continueBtn.w, continueBtn.h)) {
+      this.toasts.push('No save found — start a New Game first', BRAND_SIGNAL);
+    }
 
     btnY += secondaryH + pad(token, 2);
 
@@ -212,7 +205,7 @@ btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad
     // TERTIARY ACTIONS — Account / Settings
     // ════════════════════════════════════════════
     const tertiaryGap = pad(token, 1);
-    const tertiaryH = Math.max(layout.btnH - pad(token, 1), pad(token, 5));
+    const tertiaryH = Math.max(layout.btnH, pad(token, 5));
 
     const newGameBtn: ButtonDef = {
       x: layout.menuX,
@@ -264,26 +257,13 @@ btnY = layout.menuY + Math.max(layout.btnH + pad(token, 2), pad(token, 8)) + pad
     handleButton(newGameBtn, ui);
     handleButton(optionsBtn, ui);
 
-    // Draw primary button (already handled above)
-    drawButton(ctx, quickRaceBtn, { ...ui, accent: BRAND_SIGNAL });
-    handleButton(quickRaceBtn, ui);
-
-    // Draw secondary buttons
-    drawButton(ctx, timeTrialBtn, ui);
-    drawButton(ctx, continueBtn, ui);
-    handleButton(timeTrialBtn, ui);
-    handleButton(continueBtn, ui);
-
-    // Draw tertiary buttons
-    drawButton(ctx, newGameBtn, ui);
-    drawButton(ctx, optionsBtn, ui);
-    handleButton(newGameBtn, ui);
-    handleButton(optionsBtn, ui);
-
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);
     handleModal(this.modal, ui);
 
-    this.toasts.draw(ctx, ui);
+    // Keep toasts clear of the menu stack they'd otherwise cover.
+    this.toasts.draw(ctx, ui, {
+      avoidBottomPx: titleMenuStackHeight(token, layout.btnH) + pad(token, 2),
+    });
   }
 }

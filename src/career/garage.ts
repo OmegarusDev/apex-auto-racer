@@ -49,6 +49,7 @@ export function driverSpendData(driver: Driver) {
   return {
     name: driver.name,
     trait: trait.name,
+    traitDescription: trait.description,
     skill: driver.skill,
     bravery: driver.bravery,
     focus: driver.focus,
@@ -57,5 +58,63 @@ export function driverSpendData(driver: Driver) {
     level: driver.level,
     xp: driver.xp,
     xpToNext: xpToNextLevel(driver.level),
+  };
+}
+
+/** Human-readable per-tier effect list for a part, e.g. "+5 Top Speed · +1 Accel / tier". */
+export function partInfoText(part: PartCategory): string {
+  const def = PARTS.find((p) => p.id === part);
+  if (def === undefined) return '';
+  const bits: string[] = [];
+  if (def.perTier.topSpeed !== undefined) {
+    bits.push(`${signed(def.perTier.topSpeed)} Top Speed`);
+  }
+  if (def.perTier.acceleration !== undefined) {
+    bits.push(`${signed(def.perTier.acceleration)} Accel`);
+  }
+  if (def.perTier.braking !== undefined) {
+    bits.push(`${signed(def.perTier.braking)} Braking`);
+  }
+  if (def.perTier.grip !== undefined) {
+    bits.push(`${signed(def.perTier.grip)} Grip`);
+  }
+  if (def.perTier.downforce !== undefined) {
+    bits.push(`${signed(def.perTier.downforce)} Downforce`);
+  }
+  return `${bits.join(' · ')} per tier.`;
+}
+
+function signed(n: number): string {
+  return n >= 0 ? `+${n}` : `${n}`;
+}
+
+/**
+ * Buy a tier and report what changed. Single source of truth for purchase
+ * feedback across Tuning and Results.
+ */
+export function buyPartWithDelta(
+  state: GameState,
+  discipline: DisciplineId,
+  part: PartCategory,
+): { bought: boolean; summary: string } {
+  const vehicle = state.vehicles[discipline];
+  const before = effectiveStats(discipline, vehicle.partTiers, vehicle.condition);
+  const name = PARTS.find((p) => p.id === part)?.name ?? 'Part';
+  if (!buyPartTier(state, discipline, part)) {
+    return { bought: false, summary: '' };
+  }
+  const after = effectiveStats(discipline, vehicle.partTiers, vehicle.condition);
+  const dGrip = after.gripFactor - before.gripFactor;
+  const dV = after.vMax - before.vMax;
+  const bits: string[] = [];
+  if (Math.abs(dGrip) >= 0.001) {
+    bits.push(`grip ${dGrip >= 0 ? '+' : ''}${dGrip.toFixed(3)}`);
+  }
+  if (Math.abs(dV) >= 0.05) {
+    bits.push(`vMax ${dV >= 0 ? '+' : ''}${dV.toFixed(1)}`);
+  }
+  return {
+    bought: true,
+    summary: bits.length > 0 ? `${name}: ${bits.join(' · ')}` : `${name} upgraded`,
   };
 }

@@ -99,8 +99,10 @@ function runLaunchProbe(seed: number) {
     director.update(PHYSICS.dt);
     t += PHYSICS.dt;
 
-    // Pure-hold window: columns must keep opposite signs / spread.
-    if (t <= PHYSICS.gridHoldSec * PHYSICS.gridHoldPureFrac) {
+    // Launch blend window: the driver blends grid column → personal line over
+    // PHYSICS.idealLine.gridAnchorDist (50 m). Through the first ~2 s cars are
+    // still mostly on their columns — measure the real spread there.
+    if (t <= 2.0) {
       const ls = entries.map((e) => e.car.l);
       const spread = Math.max(...ls) - Math.min(...ls);
       latSpreadSum += spread;

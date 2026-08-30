@@ -5,7 +5,8 @@ import type { TraitId } from '../data/traits';
 import type { RankId } from '../data/balance';
 import { randInt, pick, shuffleInPlace } from './rng';
 import type { Rng } from './rng';
-import type { Driver } from './types';
+import type { DisciplineId, Driver } from './types';
+import { DRIVER_COLORS } from '../ui/brand';
 
 let nextDriverId = 1;
 
@@ -91,6 +92,7 @@ export function generateDriver(
   budgetMin: number,
   budgetMax: number,
   usedNames: Set<string>,
+  discipline: DisciplineId = 'track',
 ): Driver {
   const total = randInt(rng, budgetMin, budgetMax);
   // Per-stat floor scales with band — no skill-11 "dead" cars in mid budgets.
@@ -124,6 +126,8 @@ export function generateDriver(
     id: makeDriverId(),
     name: pickUniqueName(rng, usedNames),
     trait,
+    discipline,
+    color: DRIVER_COLORS[randInt(rng, 0, DRIVER_COLORS.length - 1)]!,
     skill,
     bravery,
     focus,

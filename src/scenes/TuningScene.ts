@@ -320,8 +320,8 @@ export class TuningScene implements Scene {
     }
     this.previewPart = hoveredPart;
 
-    drawUpgradePanel(ctx, panel, ui);
-    handleUpgradePanel(panel, ui);
+    drawUpgradePanel(ctx, { ...panel, y }, ui);
+    handleUpgradePanel({ ...panel, y }, ui);
     y += upgradePanelHeight(panel, token);
 
     this.scroller.end(ctx);

@@ -1,8 +1,9 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
+import { activeDriver } from '../engine/SaveManager';
 import { BALANCE } from '../data/balance';
 import { hireCost } from '../engine/DriverGenerator';
-import type { Driver } from '../engine/types';
+import type { DisciplineId, Driver } from '../engine/types';
 import type { DriverStatKey } from '../ui/components';
 import {
   drawButton,
@@ -36,6 +37,7 @@ import {
 import { generateFreeAgents } from '../career/roster';
 import { driverSpendData } from '../career/garage';
 import { spendStatPoint } from '../career/xp';
+import { disciplineLabel } from '../career/disciplinesUi';
 
 interface PanelRect {
   x: number;
@@ -61,12 +63,18 @@ export class TeamManagementScene implements Scene {
     onSceneEnter();
     const g = getGameContext();
     if (g.state !== null) {
-      this.freeAgents = generateFreeAgents(g.state, this.rerollCount);
+      this.freeAgents = generateFreeAgents(g.state, this.activeDiscipline(), this.rerollCount);
     }
     this.modal.open = false;
     this.scroller.scroll.offset = 0;
     this.scroller.onUserScroll = () => this.tooltips.close();
     this.detachWheel = this.scroller.attachWheel(g.canvas, () => !this.modal.open);
+  }
+
+  /** Career is discipline-locked — the team view only shows that discipline. */
+  private activeDiscipline(): DisciplineId {
+    const g = getGameContext();
+    return (g.state !== null ? activeDriver(g.state)?.discipline : undefined) ?? 'track';
   }
 
   exit(): void {
@@ -167,7 +175,7 @@ export class TeamManagementScene implements Scene {
     }
     g.state.cash -= BALANCE.freeAgentRerollCost;
     this.rerollCount += 1;
-    this.freeAgents = generateFreeAgents(g.state, this.rerollCount);
+    this.freeAgents = generateFreeAgents(g.state, this.activeDiscipline(), this.rerollCount);
     g.autosave();
     this.tooltips.close();
     this.toasts.push('Free agents refreshed', ACCENT_TRACK);
@@ -177,6 +185,10 @@ export class TeamManagementScene implements Scene {
     const g = getGameContext();
     const state = g.state;
     if (state === null) return;
+
+    // Career is discipline-locked — only that discipline's team is shown.
+    const discipline = this.activeDiscipline();
+    const roster = state.roster.filter((d) => d.discipline === discipline);
 
     const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
     const shell = layoutShell(w, h, token);
@@ -188,7 +200,7 @@ export class TeamManagementScene implements Scene {
       y: shell.headerRect.y,
       w: shell.headerRect.w,
       h: shell.headerRect.h,
-      title: 'Team',
+      title: `Team · ${disciplineLabel(discipline).toUpperCase()}`,
       back: true,
       cash: state.cash,
       onBack: () => this.handleBack(),
@@ -208,13 +220,13 @@ export class TeamManagementScene implements Scene {
 
     // Panel definitions are built once and reused by measure + draw + handle,
     // so the three can never drift apart again.
-    const rosterDefs = state.roster.map((driver) => ({
+    const rosterDefs = roster.map((driver) => ({
       x: 0,
       y: 0,
       w: view.w,
       driver: driverSpendData(driver),
       onSpend: (stat: DriverStatKey) => {
-        const d = state.roster.find((r) => r.id === driver.id);
+        const d = roster.find((r) => r.id === driver.id);
         if (d !== undefined && spendStatPoint(d, stat)) g.autosave();
       },
       actions: [
@@ -224,7 +236,7 @@ export class TeamManagementScene implements Scene {
     }));
     const agentDefs = this.freeAgents.map((agent) => {
       const cost = hireCost(agent);
-      const full = state.roster.length >= BALANCE.rosterCap;
+      const full = roster.length >= BALANCE.rosterCap;
       return {
         x: 0,
         y: 0,
@@ -266,7 +278,7 @@ export class TeamManagementScene implements Scene {
       ctx,
       0,
       y,
-      `Roster (${state.roster.length}/${BALANCE.rosterCap})`,
+      `Roster (${roster.length}/${BALANCE.rosterCap})`,
       lui,
     );
 

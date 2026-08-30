@@ -419,10 +419,34 @@ export class CampaignScene implements Scene {
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
     const state = g.state;
-    if (state === null) return;
-
     const accent = disciplineAccent(this.discipline);
     const { ui, token } = buildUi(w, h, 0, accent);
+    if (state === null) {
+      drawBackground(ctx, w, h, token);
+      const shell = layoutShell(w, h, token);
+      drawHeader(
+        ctx,
+        {
+          x: shell.headerRect.x,
+          y: shell.headerRect.y,
+          w: shell.headerRect.w,
+          h: shell.headerRect.h,
+          title: 'Campaign',
+          back: true,
+          onBack: () => this.handleBack(),
+        },
+        ui,
+      );
+      ctx.save();
+      ctx.fillStyle = token.textMuted;
+      ctx.font = `500 ${token.fontBody}px ${token.fontFamily}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('No career loaded.', w * 0.5, h * 0.5);
+      ctx.restore();
+      return;
+    }
+
     const shell = layoutShell(w, h, token);
 
     drawBackground(ctx, w, h, token);

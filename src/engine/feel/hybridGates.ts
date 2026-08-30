@@ -37,7 +37,8 @@ function makeProbe(staticFront = 0.48) {
 
 function driverFor() {
   return {
-    id: 'd', name: 'd', trait: 'grinder' as const, skill: 60, bravery: 50, focus: 60,
+    id: 'd', name: 'd', trait: 'grinder' as const, discipline: 'track' as const,
+    color: '#f0c41a', skill: 60, bravery: 50, focus: 60,
     determination: 50, xp: 0, level: 1, unspentPoints: 0,
   };
 }

@@ -56,6 +56,8 @@ function makeDriver(id: string, skill = 40): Driver {
     id,
     name: id,
     trait: 'grinder',
+    discipline: 'track',
+    color: '#f0c41a',
     skill,
     bravery: 45,
     focus: 50,

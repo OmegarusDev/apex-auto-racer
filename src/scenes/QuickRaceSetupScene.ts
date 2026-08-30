@@ -239,13 +239,15 @@ export class QuickRaceSetupScene implements Scene {
       ctx.restore();
 
       // ⓘ — what the driver stat shorthand actually does in a race.
+      let infoRect: { x: number; y: number; w: number; h: number } | null = null;
       if (stats) {
         const r = infoIconRadius(token);
         const icx = view.w - pad(token, 2.5);
         const icy = statsY + token.fontCaption * 0.45;
         drawInfoIcon(ctx, icx, icy, r, lui, false);
+        infoRect = { x: icx - r * 1.8, y: icy - r * 1.8, w: r * 3.6, h: r * 3.6 };
         this.tooltips.register(
-          { x: icx - r * 1.8, y: icy - r * 1.8, w: r * 3.6, h: r * 3.6 },
+          infoRect,
           {
             title: 'Driver Ratings',
             body: 'Sk Skill drives precisely and saves slides · Br Bravery carries speed through corners · Fo Focus avoids mistakes (rain matters) · Det Determination pushes harder when running behind.',
@@ -254,7 +256,10 @@ export class QuickRaceSetupScene implements Scene {
         );
       }
 
-      if (lui.pointerClicked && hovered) {
+      // Don't reselect the preset when the tap was on the (i) hotspot.
+      const onInfo =
+        infoRect !== null && hitRect(lui.pointerX, lui.pointerY, infoRect.x, infoRect.y, infoRect.w, infoRect.h);
+      if (lui.pointerClicked && hovered && !onInfo) {
         this.presetId = preset.id;
       }
       y += rowH;

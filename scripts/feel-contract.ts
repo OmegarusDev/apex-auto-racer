@@ -44,6 +44,7 @@ async function main() {
     runSuite('SUITE_FIELD', 'scripts/field-validate.ts'),
     runSuite('SUITE_SMOKE', 'scripts/smoke.ts'),
     runSuite('SUITE_STACK', 'scripts/stack-smoke.ts'),
+    runSuite('DRIVER_FOLLOWS_TIGHT', 'scripts/driver-follow-validate.ts'),
     runSuite('STORY_INTENT_DENSITY', 'scripts/intent-validate.ts'),
     runSuite('META_TOURNAMENT_TEAMS', 'scripts/meta-validate.ts'),
   ];

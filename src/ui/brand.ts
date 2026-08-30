@@ -20,6 +20,22 @@ export const BRAND_BODY_FONT =
 /** Default product accent when no discipline is active (title / splash). */
 export const BRAND_SIGNAL = '#f0c41a';
 
+/** Driver livery swatches offered at creation (kept clear of the discipline accents). */
+export const DRIVER_COLORS: readonly string[] = [
+  '#f0c41a', // signal amber
+  '#e8533f', // ember red
+  '#4fd1c5', // teal
+  '#7c9cf0', // periwinkle
+  '#b07cf0', // violet
+  '#5fd06a', // racing green
+  '#f08fc0', // magenta
+  '#d9a441', // bronze
+];
+
+export function driverColorOrDefault(color: string | undefined): string {
+  return typeof color === 'string' && color.length > 0 ? color : DRIVER_COLORS[0]!;
+}
+
 function hexToRgba(hex: string, alpha: number): string {
   const h = hex.replace('#', '');
   const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;

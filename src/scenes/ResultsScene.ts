@@ -25,6 +25,7 @@ import {
   pad,
   ensureMinTouch,
   ToastManager,
+  TooltipManager,
   truncateText,
   type ButtonDef,
   type UiContext,
@@ -36,7 +37,7 @@ import {
   onSceneResize,
 } from './sceneChrome';
 import { disciplineAccent } from '../career/disciplinesUi';
-import { buyPartWithDelta, driverSpendData, repairVehicle } from '../career/garage';
+import { buyPartWithDelta, driverSpendData, partInfoText, repairVehicle } from '../career/garage';
 import { grantXp, spendStatPoint } from '../career/xp';
 import { findDriver } from '../career/roster';
 import { launchRace, makeQuickRaceConfig, makeTimeTrialConfig } from '../career/launchRace';
@@ -47,6 +48,7 @@ export class ResultsScene implements Scene {
   private readonly payload: ResultsPayload;
   private readonly tournamentMode: boolean;
   private toasts = new ToastManager();
+  private tooltips = new TooltipManager();
   private upgradeCollapsed = false;
   private selectedDriverIdx = 0;
   private applied = false;
@@ -326,6 +328,8 @@ export class ResultsScene implements Scene {
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
+    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
+    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
@@ -337,8 +341,11 @@ export class ResultsScene implements Scene {
     y += pad(token, 0.75);
     y += drawSectionTitle(ctx, 0, y, 'Invest', lui);
     y += pad(token, 0.25);
-    y = this.drawXpSection(ctx, 0, y, view.w, lui, state);
+    y = this.drawXpSection(ctx, 0, y, view.w, lui, state, tooltipOrigin);
     this.scroller.end(ctx);
+
+    this.tooltips.handle(lui, !this.scroller.isScrolling);
+    this.tooltips.draw(ctx, ui);
 
     const hasSeriesNext = this.payload.nextRaceConfig !== undefined;
     const isQuick = this.payload.config.mode === 'quick';
@@ -582,6 +589,7 @@ export class ResultsScene implements Scene {
     w: number,
     ui: UiContext,
     state: NonNullable<ReturnType<typeof getGameContext>['state']>,
+    tooltipOrigin: { x: number; y: number },
   ): number {
     const grants = this.payload.driverXp;
     if (grants.length === 0) return y;
@@ -644,6 +652,9 @@ export class ResultsScene implements Scene {
       onSpend: (stat: DriverStatKey) => {
         if (spendStatPoint(driver, stat)) getGameContext().autosave();
       },
+      registerInfo: (rect: { x: number; y: number; w: number; h: number }, info: { title: string; body: string }) => {
+        this.tooltips.register(rect, info, tooltipOrigin);
+      },
     };
     drawDriverSpendPanel(ctx, spendPanel, ui);
     handleDriverSpendPanel(spendPanel, ui);
@@ -658,6 +669,10 @@ export class ResultsScene implements Scene {
       condition: vehicle.condition,
       cash: state.cash,
       collapsed: this.upgradeCollapsed,
+      infoForPart: (part: import('../data/parts').PartCategory) => ({ title: part, body: partInfoText(part) }),
+      registerInfo: (rect: { x: number; y: number; w: number; h: number }, info: { title: string; body: string }) => {
+        this.tooltips.register(rect, info, tooltipOrigin);
+      },
       onToggleCollapse: () => {
         this.upgradeCollapsed = !this.upgradeCollapsed;
       },

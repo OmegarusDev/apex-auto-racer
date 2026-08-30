@@ -1,6 +1,6 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
-import type { DisciplineId } from '../data/disciplines';
+import { activeDriver } from '../engine/SaveManager';
 import {
   drawButton,
   handleButton,
@@ -31,7 +31,6 @@ import {
 } from './sceneChrome';
 import { drawTopDownCar } from './titleArt';
 import {
-  DISCIPLINE_ORDER,
   disciplineAccent,
   disciplineLabel,
 } from '../career/disciplinesUi';
@@ -40,20 +39,14 @@ import { CampaignScene } from './CampaignScene';
 import { TuningScene } from './TuningScene';
 import { TeamManagementScene } from './TeamManagementScene';
 import { OptionsScene } from './OptionsScene';
-import { TitleScene } from './TitleScene';
 
 export class GarageScene implements Scene {
-  private disciplineIndex = 0;
   private scroller = new ContentScroller();
   private tooltips = new TooltipManager();
   private detachWheel: (() => void) | null = null;
-  private swipeStartX: number | null = null;
-  private swipeStartY: number | null = null;
-  private swipeArmed = false;
 
   enter(): void {
     onSceneEnter();
-    this.disciplineIndex = 0;
     this.scroller.scroll.offset = 0;
     this.scroller.onUserScroll = () => this.tooltips.close();
     this.detachWheel = this.scroller.attachWheel(getGameContext().canvas);
@@ -69,59 +62,21 @@ export class GarageScene implements Scene {
   }
 
   handleBack(): boolean {
-    getGameContext().scenes.replace(new TitleScene());
+    getGameContext().scenes.back();
     return true;
   }
 
   update(_dt: number): void {}
-
-  private currentDiscipline(): DisciplineId {
-    return DISCIPLINE_ORDER[this.disciplineIndex] ?? 'track';
-  }
-
-  private prevDiscipline(): void {
-    this.disciplineIndex = (this.disciplineIndex - 1 + DISCIPLINE_ORDER.length) % DISCIPLINE_ORDER.length;
-  }
-
-  private nextDiscipline(): void {
-    this.disciplineIndex = (this.disciplineIndex + 1) % DISCIPLINE_ORDER.length;
-  }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
     const state = g.state;
     if (state === null) return;
 
-    let discipline = this.currentDiscipline();
-    let accent = disciplineAccent(discipline);
+    // Career is discipline-locked: the garage always reflects the active driver.
+    const discipline = activeDriver(state)?.discipline ?? 'track';
+    const accent = disciplineAccent(discipline);
     const { ui, token } = buildUi(w, h, 0, accent);
-    let swipeHandled = false;
-    // Horizontal swipe — track press→release (same-frame dx was always ~0).
-    if (ui.pointerDown) {
-      if (this.swipeStartX === null) {
-        this.swipeStartX = ui.pointerX;
-        this.swipeStartY = ui.pointerY;
-        this.swipeArmed = true;
-      }
-    } else if (this.swipeArmed && this.swipeStartX !== null && this.swipeStartY !== null) {
-      const dx = ui.pointerX - this.swipeStartX;
-      const dy = ui.pointerY - this.swipeStartY;
-      if (
-        Math.abs(dx) > Math.max(48, token.touchMin) &&
-        Math.abs(dx) > Math.abs(dy) * 1.25 &&
-        !this.scroller.isScrolling
-      ) {
-        if (dx < 0) this.nextDiscipline();
-        else this.prevDiscipline();
-        swipeHandled = true;
-        discipline = this.currentDiscipline();
-        accent = disciplineAccent(discipline);
-        ui.accent = accent;
-      }
-      this.swipeStartX = null;
-      this.swipeStartY = null;
-      this.swipeArmed = false;
-    }
 
     const vehicle = state.vehicles[discipline];
     const shell = layoutShell(w, h, token);
@@ -184,41 +139,16 @@ export class GarageScene implements Scene {
     this.scroller.begin(ctx, view);
     let y = pad(token, 0.25);
 
-    // Discipline nav — labeled prev/next instead of bare chevrons
-    const discLabel = disciplineLabel(discipline).toUpperCase();
-    const prevBtn: ButtonDef = {
-      x: 0,
-      y,
-      w: navSize,
-      h: navSize,
-      label: '‹',
-      onClick: () => this.prevDiscipline(),
-    };
-    const nextBtn: ButtonDef = {
-      x: view.w - navSize,
-      y,
-      w: navSize,
-      h: navSize,
-      label: '›',
-      onClick: () => this.nextDiscipline(),
-    };
-    drawButton(ctx, prevBtn, lui);
-    drawButton(ctx, nextBtn, lui);
+    // Discipline chip — the career is discipline-locked, so just show which one.
     ctx.save();
     ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = accent;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const titleMax = view.w - navSize * 2 - pad(token, 1);
-    ctx.fillText(truncateText(ctx, discLabel, titleMax), view.w * 0.5, y + navSize * 0.42);
-    ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    ctx.fillText('Swipe or tap arrows', view.w * 0.5, y + navSize * 0.78);
+    const discLabel = disciplineLabel(discipline).toUpperCase();
+    const titleMax = view.w - pad(token, 2);
+    ctx.fillText(truncateText(ctx, discLabel, titleMax), view.w * 0.5, y + navSize * 0.5);
     ctx.restore();
-    if (!swipeHandled && !this.scroller.isScrolling) {
-      handleButton(prevBtn, lui);
-      handleButton(nextBtn, lui);
-    }
     y += navSize + pad(token, 1);
 
     if (portrait) {
@@ -297,7 +227,7 @@ export class GarageScene implements Scene {
       onClick: () => g.scenes.push(new CampaignScene(discipline)),
     };
     drawButton(ctx, campaignBtn, { ...lui, accent });
-    if (!swipeHandled && !this.scroller.isScrolling) handleButton(campaignBtn, lui);
+    if (!this.scroller.isScrolling) handleButton(campaignBtn, lui);
     y += campaignBtnH + pad(token, 1.5);
 
     // ════════════════════════════════════════════
@@ -325,10 +255,8 @@ export class GarageScene implements Scene {
 
     drawButton(ctx, tuningBtn, lui);
     drawButton(ctx, teamBtn, lui);
-    if (!swipeHandled) {
-      handleButton(tuningBtn, lui);
-      handleButton(teamBtn, lui);
-    }
+    handleButton(tuningBtn, lui);
+    handleButton(teamBtn, lui);
     y += btnH + btnGap + pad(token, 0.25);
 
     // Condition bar

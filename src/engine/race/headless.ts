@@ -81,6 +81,8 @@ export function runDeterminismCheck(): boolean {
         id: 'p1',
         name: 'Test Alpha',
         trait: 'grinder',
+        discipline: 'track',
+        color: '#f0c41a',
         skill: 50,
         bravery: 50,
         focus: 50,

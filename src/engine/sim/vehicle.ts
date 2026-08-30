@@ -36,7 +36,7 @@ const nodeScratch: InterpolatedNode = {
  * the driver has lost control (a full 180° is a rare extreme this two-axle
  * model self-arrests before reaching; 49°+ is already a lost car).
  */
-const SPIN_BETA = 0.85;
+const SPIN_BETA = 0.92;
 /** Slide/lost = body slip past this (off the "slot"). */
 const SLIDE_BETA = 0.4;
 const LOAD_SENS_N = 0.88;

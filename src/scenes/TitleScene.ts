@@ -1,19 +1,20 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
 import { mulberry32, pick } from '../engine/rng';
+import { activeDriver, createDriver } from '../engine/SaveManager';
 import {
   drawButton,
   handleButton,
   drawModal,
   handleModal,
   layoutModalButtons,
-  hitRect,
   pad,
   ToastManager,
   type ButtonDef,
   type ModalDef,
 } from '../ui/components';
 import { BRAND_SIGNAL } from '../ui/brand';
+import { DRIVER_COLORS } from '../ui/brand';
 import {
   buildUi,
   drawBackground,
@@ -32,11 +33,15 @@ import {
 } from './titleArt';
 import { DISCIPLINE_ORDER } from '../career/disciplinesUi';
 import { ensureQuickRaceState } from '../career/quickPlayState';
-import { GarageScene } from './GarageScene';
 import { OptionsScene } from './OptionsScene';
-import { QuickRaceSetupScene } from './QuickRaceSetupScene';
-import { makeTimeTrialConfig } from '../career/launchRace';
-import { launchRace } from '../career/launchRace';
+import { makeTimeTrialConfig, launchRace } from '../career/launchRace';
+import { DisciplineSelectScene } from './DisciplineSelectScene';
+import { CareerHubScene } from './CareerHubScene';
+
+const HOW_TO =
+  'Steer: ← →  /  A D\nBrake: ↓ Space  /  S\nThrottle: ↑  /  W\n' +
+  'Shift up: E  ·  Shift down: Q\nDrift (Street): hold Shift\n\n' +
+  'Win series to climb the ranks. Build your car, hire your team,\nand chase the championship in your chosen discipline.';
 
 export class TitleScene implements Scene {
   private time = 0;
@@ -49,7 +54,6 @@ export class TitleScene implements Scene {
     onSceneEnter();
     this.time = 0;
     this.modal.open = false;
-    // Cosmetic-only RNG: new circuit each visit; does not touch race seeds.
     const seed = freshTitlePreviewSeed();
     const discipline = pick(mulberry32(seed), DISCIPLINE_ORDER);
     this.preview = createTitlePreviewTrack(seed ^ 0x9e3779b9, discipline);
@@ -69,10 +73,6 @@ export class TitleScene implements Scene {
     onSceneResize(w, h);
   }
 
-  handleBack(): boolean {
-    return false;
-  }
-
   update(dt: number): void {
     this.time += dt;
     this.toasts.update(dt);
@@ -83,8 +83,28 @@ export class TitleScene implements Scene {
     }
   }
 
+  handleBack(): boolean {
+    return false;
+  }
+
+  private launchQuickRace(): void {
+    const state = ensureQuickRaceState();
+    if (state.roster.length < 1) {
+      const rng = mulberry32((Date.now() >>> 0) ^ 0x1234);
+      const used = new Set(state.roster.map((d) => d.name));
+      const discipline = activeDriver(state)?.discipline ?? 'track';
+      const driver = createDriver(rng, used, discipline, DRIVER_COLORS[0]!);
+      state.roster.push(driver);
+      getGameContext().state = state;
+    }
+    const discipline = activeDriver(state)?.discipline ?? 'track';
+    launchRace(makeTimeTrialConfig(state, discipline, 'title'), this.toasts);
+  }
+
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
+    const state = g.state;
+    const active = state !== null ? activeDriver(state) : null;
     const { ui, token } = buildUi(w, h, 0, BRAND_SIGNAL);
     const layout = computeTitleLayout(w, h, token);
 
@@ -121,149 +141,73 @@ export class TitleScene implements Scene {
       ctx.restore();
     }
 
-    const hasSave = g.save.hasSave();
     const btnFont = layout.btnFont;
+    const btnH = Math.max(layout.btnH, pad(token, 5));
+    const gap = pad(token, 1);
+    let y = layout.menuY;
 
-    // ═══════════════════════════════════════════
-    // PRIMARY CTA — QUICK RACE (large, prominent, top)
-    // ═══════════════════════════════════════════
-    let btnY = layout.menuY;
-
-    const quickRaceH = Math.max(layout.btnH + pad(token, 2), pad(token, 8));
-
-    const quickRaceBtn: ButtonDef = {
-      x: layout.menuX,
-      y: layout.menuY,
-      w: layout.menuW,
-      h: quickRaceH,
-      label: 'Quick Race',
-      cta: true,
-      fontSize: Math.max(layout.btnFont, token.fontDisplay),
-      onClick: () => {
-        const state = ensureQuickRaceState();
-        if (state.roster.length < 1) {
-          this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
-          return;
-        }
-        getGameContext().scenes.push(new QuickRaceSetupScene({ returnTo: 'title' }));
-      },
-    };
-    drawButton(ctx, quickRaceBtn, { ...ui, accent: BRAND_SIGNAL });
-    handleButton(quickRaceBtn, ui);
-
-    btnY = layout.menuY + quickRaceH + pad(token, 2);
-
-    // ═══════════════════════════════════════════
-    // SECONDARY ACTIONS — Quick play modes
-    // ═══════════════════════════════════════════
-    const secondaryGap = pad(token, 1);
-    const secondaryH = Math.max(layout.btnH, pad(token, 5.5));
-
-    const timeTrialBtn: ButtonDef = {
-      x: layout.menuX,
-      y: btnY,
-      w: Math.floor((layout.menuW - secondaryGap) * 0.5),
-      h: secondaryH,
-      label: 'Time Trial',
-      cta: false,
-      fontSize: btnFont,
-      onClick: () => {
-        const state = ensureQuickRaceState();
-        if (state.roster.length < 1) {
-          this.toasts.push('Need a driver on the roster', BRAND_SIGNAL);
-          return;
-        }
-        launchRace(makeTimeTrialConfig(state, 'track', 'title'), this.toasts);
-      },
-    };
-    const continueBtn: ButtonDef = {
-      x: layout.menuX + Math.floor((layout.menuW - secondaryGap) * 0.5) + secondaryGap,
-      y: btnY,
-      w: Math.floor((layout.menuW - secondaryGap) * 0.5),
-      h: secondaryH,
-      label: 'Continue',
-      disabled: !hasSave,
-      fontSize: btnFont,
-      onClick: () => {
-        if (!hasSave) return;
-        g.bootstrap();
-        g.scenes.replace(new GarageScene());
-      },
-    };
-
-    drawButton(ctx, timeTrialBtn, ui);
-    drawButton(ctx, continueBtn, ui);
-    handleButton(timeTrialBtn, ui);
-    // Disabled buttons never fire — explain why on tap.
-    if (!hasSave && ui.pointerClicked && hitRect(ui.pointerX, ui.pointerY, continueBtn.x, continueBtn.y, continueBtn.w, continueBtn.h)) {
-      this.toasts.push('No save found — start a New Game first', BRAND_SIGNAL);
+    const buttons: Omit<ButtonDef, 'x' | 'y' | 'w' | 'h'>[] = [];
+    if (active !== null) {
+      buttons.push({
+        label: 'Continue',
+        primary: true,
+        onClick: () => g.scenes.replace(new CareerHubScene()),
+      });
     }
-
-    btnY += secondaryH + pad(token, 2);
-
-    // ════════════════════════════════════════════
-    // TERTIARY ACTIONS — Account / Settings
-    // ════════════════════════════════════════════
-    const tertiaryGap = pad(token, 1);
-    const tertiaryH = Math.max(layout.btnH, pad(token, 5));
-
-    const newGameBtn: ButtonDef = {
-      x: layout.menuX,
-      y: btnY,
-      w: Math.floor((layout.menuW - tertiaryGap) * 0.5),
-      h: tertiaryH,
-      label: 'New Game',
-      fontSize: btnFont,
+    buttons.push({
+      label: 'New Career',
+      primary: active === null,
       onClick: () => {
-        if (hasSave) {
-          this.modal = {
-            open: true,
-            title: 'Overwrite Save?',
-            body: 'Starting a new game will replace\nyour current progress.',
-            buttons: [
-              {
-                x: 0, y: 0, w: 0, h: 0, label: 'Cancel',
-                onClick: () => { this.modal.open = false; },
-              },
-              {
-                x: 0, y: 0, w: 0, h: 0, label: 'New Game',
-                primary: true,
-                onClick: () => {
-                  this.modal.open = false;
-                  g.startNewGame();
-                  g.scenes.replace(new GarageScene());
-                },
-              },
-            ],
-          };
-        } else {
+        if (!g.save.hasSave() || g.state === null) {
           g.startNewGame();
-          g.scenes.replace(new GarageScene());
         }
+        g.scenes.push(new DisciplineSelectScene());
       },
-    };
-    const optionsBtn: ButtonDef = {
-      x: layout.menuX + Math.floor((layout.menuW - tertiaryGap) * 0.5) + tertiaryGap,
-      y: btnY,
-      w: Math.floor((layout.menuW - tertiaryGap) * 0.5),
-      h: tertiaryH,
+    });
+    buttons.push({
+      label: 'Quick Race',
+      onClick: () => this.launchQuickRace(),
+    });
+    buttons.push({
       label: 'Options',
-      fontSize: btnFont,
       onClick: () => g.scenes.push(new OptionsScene()),
-    };
+    });
+    buttons.push({
+      label: 'How to Play',
+      onClick: () => {
+        this.modal = {
+          open: true,
+          title: 'How to Play',
+          body: HOW_TO,
+          buttons: [
+            { x: 0, y: 0, w: 0, h: 0, label: 'Got it', primary: true, onClick: () => { this.modal.open = false; } },
+          ],
+        };
+      },
+    });
 
-    drawButton(ctx, newGameBtn, ui);
-    drawButton(ctx, optionsBtn, ui);
-    handleButton(newGameBtn, ui);
-    handleButton(optionsBtn, ui);
+    for (const def of buttons) {
+      const btn: ButtonDef = {
+        x: layout.menuX,
+        y,
+        w: layout.menuW,
+        h: btnH,
+        label: def.label,
+        primary: def.primary,
+        fontSize: def.primary ? Math.max(btnFont, token.fontBody) : btnFont,
+        onClick: def.onClick,
+      };
+      drawButton(ctx, btn, ui);
+      handleButton(btn, ui);
+      y += btnH + gap;
+    }
 
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);
     handleModal(this.modal, ui);
 
-    // Keep toasts clear of the menu stack they'd otherwise cover.
     this.toasts.draw(ctx, ui, {
-      avoidBottomPx: titleMenuStackHeight(token, layout.btnH) + pad(token, 2),
+      avoidBottomPx: titleMenuStackHeight(token, btnH) + pad(token, 2),
     });
   }
 }

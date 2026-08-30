@@ -2,6 +2,7 @@ import type { TraitId } from '../data/traits';
 import type { Driver, VehicleSave } from '../engine/types';
 import { emptyVehicleParts } from '../engine/types';
 import type { PaceBand } from '../engine/race/paceTrackScale';
+import { DRIVER_COLORS } from '../ui/brand';
 
 export type QuickRacePresetId =
   | 'garage'
@@ -48,6 +49,8 @@ const PRESETS: QuickRacePreset[] = [
       {
         name: 'Kit Novak',
         trait: 'grinder' as TraitId,
+        discipline: 'track',
+        color: DRIVER_COLORS[0]!,
         skill: 28,
         bravery: 30,
         focus: 26,
@@ -67,6 +70,8 @@ const PRESETS: QuickRacePreset[] = [
       {
         name: 'Mara Quinn',
         trait: 'iceCold' as TraitId,
+        discipline: 'track',
+        color: DRIVER_COLORS[1]!,
         skill: 46,
         bravery: 42,
         focus: 48,
@@ -86,6 +91,8 @@ const PRESETS: QuickRacePreset[] = [
       {
         name: 'Jules Haro',
         trait: 'slipstreamer' as TraitId,
+        discipline: 'track',
+        color: DRIVER_COLORS[2]!,
         skill: 62,
         bravery: 58,
         focus: 60,
@@ -105,6 +112,8 @@ const PRESETS: QuickRacePreset[] = [
       {
         name: 'Rex Calder',
         trait: 'hothead' as TraitId,
+        discipline: 'track',
+        color: DRIVER_COLORS[3]!,
         skill: 80,
         bravery: 82,
         focus: 74,
@@ -124,6 +133,8 @@ const PRESETS: QuickRacePreset[] = [
       {
         name: 'Ava Sterling',
         trait: 'showboat' as TraitId,
+        discipline: 'track',
+        color: DRIVER_COLORS[4]!,
         skill: 94,
         bravery: 90,
         focus: 93,
@@ -148,6 +159,8 @@ export function materializePresetDrivers(preset: QuickRacePreset): Driver[] {
     id: `qr-${preset.id}-${i}`,
     name: d.name,
     trait: d.trait,
+    discipline: 'track',
+    color: DRIVER_COLORS[i % DRIVER_COLORS.length]!,
     skill: d.skill,
     bravery: d.bravery,
     focus: d.focus,

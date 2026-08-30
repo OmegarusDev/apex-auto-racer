@@ -120,7 +120,9 @@ export class GameContext {
 
   startNewGame(seed?: number): GameState {
     const gameSeed = seed ?? (Date.now() >>> 0);
-    const state = this.save.createNew(mulberry32(gameSeed));
+    // Empty roster — the New Career flow creates the player's discipline-locked
+    // driver via createDriver(); we never auto-seed a roster for a real save.
+    const state = this.save.createNew(mulberry32(gameSeed), false);
     this._state = state;
     this.audio.setVolumes(state.options.volumes);
     return state;

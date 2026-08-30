@@ -22,8 +22,10 @@ import {
 } from './types';
 import type { VehicleParts } from './types';
 import { makeDriverId, syncDriverIdCounter, syncDriverIdsFrom } from './DriverGenerator';
+import { DRIVER_COLORS } from '../ui/brand';
 
 const STORAGE_KEY = 'apex-save-v1';
+const SAVE_INDEX_KEY = 'apex-save-index-v1';
 
 export type SaveWarning = 'storage_unavailable' | 'corrupt_reset';
 
@@ -31,6 +33,60 @@ export interface SaveLoadResult {
   state: GameState | null;
   warning?: SaveWarning;
 }
+
+/**
+ * One career per save slot. A save slot holds exactly one active driver and its
+ * progress; the index tracks every slot so the title can offer multiple careers.
+ */
+export interface SaveSlot {
+  id: string;
+  name: string;
+  discipline: DisciplineId;
+  createdAt: number;
+  savedAt: number;
+}
+
+interface SaveIndex {
+  currentId: string | null;
+  slots: SaveSlot[];
+}
+
+function slotKey(id: string): string {
+  return `apex-save-v2-${id}`;
+}
+
+function makeSlotId(): string {
+  return `s${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+function readSaveIndex(): SaveIndex {
+  if (typeof localStorage === 'undefined') return { currentId: null, slots: [] };
+  try {
+    const raw = localStorage.getItem(SAVE_INDEX_KEY);
+    if (raw === null) return { currentId: null, slots: [] };
+    const parsed = JSON.parse(raw) as Partial<SaveIndex>;
+    if (!Array.isArray(parsed.slots)) return { currentId: null, slots: [] };
+    const slots: SaveSlot[] = parsed.slots.filter(
+      (s): s is SaveSlot => typeof s?.id === 'string' && typeof s.name === 'string',
+    );
+    const currentId =
+      typeof parsed.currentId === 'string' && slots.some((s) => s.id === parsed.currentId)
+        ? parsed.currentId
+        : (slots[0]?.id ?? null);
+    return { currentId, slots };
+  } catch {
+    return { currentId: null, slots: [] };
+  }
+}
+
+function writeSaveIndex(idx: SaveIndex): void {
+  try {
+    localStorage.setItem(SAVE_INDEX_KEY, JSON.stringify(idx));
+  } catch {
+    /* storage may be unavailable — non-fatal for the scaffold */
+  }
+}
+
 
 const DISCIPLINES: DisciplineId[] = ['track', 'street', 'rally'];
 const PART_KEYS = [
@@ -57,6 +113,9 @@ function isDriver(v: unknown): boolean {
     typeof v.id === 'string' &&
     typeof v.name === 'string' &&
     typeof v.trait === 'string' &&
+    typeof v.discipline === 'string' &&
+    (v.discipline === 'track' || v.discipline === 'street' || v.discipline === 'rally') &&
+    typeof v.color === 'string' &&
     isFiniteNumber(v.skill) &&
     isFiniteNumber(v.bravery) &&
     isFiniteNumber(v.focus) &&
@@ -150,12 +209,19 @@ function rollStat(rng: Rng): number {
   return randInt(rng, BALANCE.startingDriverStatMin, BALANCE.startingDriverStatMax);
 }
 
-function createDriver(rng: Rng, usedNames: Set<string>): Driver {
+export function createDriver(
+  rng: Rng,
+  usedNames: Set<string>,
+  discipline: DisciplineId = 'track',
+  color?: string,
+): Driver {
   const trait = pick(rng, TRAITS).id as TraitId;
   return {
     id: makeDriverId(),
     name: pickUniqueName(rng, usedNames),
     trait,
+    discipline,
+    color: color ?? DRIVER_COLORS[usedNames.size % DRIVER_COLORS.length]!,
     skill: rollStat(rng),
     bravery: rollStat(rng),
     focus: rollStat(rng),
@@ -240,14 +306,20 @@ function createDisciplineVehicles() {
   } as GameState['vehicles'];
 }
 
-export function createNewGame(rng: Rng, seed: number): GameState {
-  const usedNames = new Set<string>();
+export function createNewGame(rng: Rng, seed: number, seedRoster = true): GameState {
+  // When seedRoster is true we pre-build a starter roster (one driver per
+  // discipline) — this keeps validators and any launch code that assumes
+  // roster[0] exists happy. The live New Career flow passes seedRoster=false
+  // and lets the player create their own discipline-locked driver instead.
   const roster: Driver[] = [];
-  for (let i = 0; i < BALANCE.startingRosterSize; i++) {
-    roster.push(createDriver(rng, usedNames));
+  if (seedRoster) {
+    const usedNames = new Set<string>();
+    const disciplines: DisciplineId[] = ['track', 'street', 'rally'];
+    for (let i = 0; i < BALANCE.startingRosterSize; i++) {
+      roster.push(createDriver(rng, usedNames, disciplines[i % 3]!));
+    }
+    syncDriverIdsFrom(roster);
   }
-  // Field generation shares this counter — keep it above roster ids.
-  syncDriverIdsFrom(roster);
 
   return {
     version: SAVE_VERSION,
@@ -256,6 +328,7 @@ export function createNewGame(rng: Rng, seed: number): GameState {
     cash: BALANCE.startingCash,
     vehicles: createDisciplineVehicles(),
     roster,
+    activeDriverId: null,
     rankUnlocked: defaultRankUnlocked(),
     inProgressTournaments: defaultTournaments(),
     careerStats: { races: 0, wins: 0, earnings: 0 },
@@ -281,6 +354,22 @@ export function createNewGame(rng: Rng, seed: number): GameState {
   };
 }
 
+/** The driver currently "playing" this save (their discipline scopes the career). */
+export function activeDriver(state: GameState): Driver | null {
+  if (state.activeDriverId !== null) {
+    const d = state.roster.find((x) => x.id === state.activeDriverId);
+    if (d !== undefined) return d;
+  }
+  return state.roster[0] ?? null;
+}
+
+/** Set the active driver; ignored if the id isn't on the roster. */
+export function setActiveDriver(state: GameState, id: string): void {
+  if (state.roster.some((d) => d.id === id)) {
+    state.activeDriverId = id;
+  }
+}
+
 function migrate(raw: unknown): GameState | null {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
@@ -290,6 +379,7 @@ function migrate(raw: unknown): GameState | null {
 
   if (version < SAVE_VERSION) {
     obj.version = SAVE_VERSION;
+    backfillDriverFields(obj);
   }
 
   if (typeof obj.quickRaceNonce !== 'number' || !Number.isFinite(obj.quickRaceNonce)) {
@@ -340,10 +430,31 @@ function migrate(raw: unknown): GameState | null {
   return obj as unknown as GameState;
 }
 
+/** Assign discipline + livery to drivers saved before those fields existed. */
+function backfillDriverFields(raw: Record<string, unknown>): void {
+  if (!Array.isArray(raw.roster)) return;
+  const disciplines: DisciplineId[] = ['track', 'street', 'rally'];
+  raw.roster.forEach((d, i) => {
+    if (d === null || typeof d !== 'object' || Array.isArray(d)) return;
+    const drv = d as Record<string, unknown>;
+    if (drv.discipline !== 'track' && drv.discipline !== 'street' && drv.discipline !== 'rally') {
+      drv.discipline = disciplines[i % 3]!;
+    }
+    if (typeof drv.color !== 'string' || drv.color.length === 0) {
+      drv.color = DRIVER_COLORS[i % DRIVER_COLORS.length]!;
+    }
+  });
+  if (typeof raw.activeDriverId !== 'string' && raw.roster.length > 0) {
+    const first = raw.roster[0] as Record<string, unknown>;
+    raw.activeDriverId = typeof first.id === 'string' ? first.id : null;
+  }
+}
+
 export class SaveManager {
   private state: GameState | null = null;
   private storageAvailable = true;
   private warning: SaveWarning | undefined;
+  private currentSlotId: string | null = null;
 
   get warningFlag(): SaveWarning | undefined {
     return this.warning;
@@ -367,7 +478,8 @@ export class SaveManager {
   hasSave(): boolean {
     if (this.state !== null) return true;
     if (!this.canUseStorage()) return false;
-    return localStorage.getItem(STORAGE_KEY) !== null;
+    const idx = readSaveIndex();
+    return idx.slots.length > 0 || localStorage.getItem(STORAGE_KEY) !== null;
   }
 
   load(): SaveLoadResult {
@@ -376,30 +488,71 @@ export class SaveManager {
       return { state: this.state, warning: this.warning };
     }
 
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const idx = readSaveIndex();
+    let id = idx.currentId;
+
+    // First run with a legacy single-save: fold it into a slot.
+    if (id === null) {
+      const legacy = localStorage.getItem(STORAGE_KEY);
+      if (legacy !== null) {
+        try {
+          const parsed = migrate(JSON.parse(legacy));
+          if (parsed !== null) {
+            const newId = makeSlotId();
+            const slot: SaveSlot = {
+              id: newId,
+              name: activeDriver(parsed)?.name ?? 'Career',
+              discipline: activeDriver(parsed)?.discipline ?? 'track',
+              createdAt: parsed.lastSaveTimestamp ?? Date.now(),
+              savedAt: parsed.lastSaveTimestamp ?? Date.now(),
+            };
+            localStorage.setItem(slotKey(newId), legacy);
+            writeSaveIndex({ currentId: newId, slots: [slot] });
+            localStorage.removeItem(STORAGE_KEY);
+            this.currentSlotId = newId;
+            this.state = parsed;
+            this.warning = undefined;
+            this.syncDriverIdCounter(parsed);
+            return { state: parsed };
+          }
+        } catch {
+          /* fall through to fresh */
+        }
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      return { state: null };
+    }
+
+    const raw = localStorage.getItem(slotKey(id));
     if (raw === null) {
+      // Slot vanished — drop it and report no save.
+      const slots = idx.slots.filter((s) => s.id !== id);
+      writeSaveIndex({ currentId: slots[0]?.id ?? null, slots });
+      this.currentSlotId = slots[0]?.id ?? null;
       return { state: null };
     }
 
     try {
       const parsed = migrate(JSON.parse(raw));
       if (parsed === null) {
-        // Corrupt / partial save — wipe and start fresh (caller shows toast).
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(slotKey(id));
         this.warning = 'corrupt_reset';
         const fresh = createNewGame(mulberry32(Date.now() >>> 0), Date.now() >>> 0);
+        this.currentSlotId = id;
         this.state = fresh;
         this.persist(fresh);
         return { state: fresh, warning: this.warning };
       }
+      this.currentSlotId = id;
       this.state = parsed;
       this.warning = undefined;
       this.syncDriverIdCounter(parsed);
       return { state: parsed };
     } catch {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(slotKey(id));
       this.warning = 'corrupt_reset';
       const fresh = createNewGame(mulberry32(Date.now() >>> 0), Date.now() >>> 0);
+      this.currentSlotId = id;
       this.state = fresh;
       this.persist(fresh);
       return { state: fresh, warning: this.warning };
@@ -419,19 +572,54 @@ export class SaveManager {
   }
 
   reset(): void {
-    this.state = null;
-    if (this.canUseStorage()) {
-      localStorage.removeItem(STORAGE_KEY);
+    if (this.currentSlotId !== null && this.canUseStorage()) {
+      localStorage.removeItem(slotKey(this.currentSlotId));
+      const idx = readSaveIndex();
+      const slots = idx.slots.filter((s) => s.id !== this.currentSlotId);
+      writeSaveIndex({ currentId: slots[0]?.id ?? null, slots });
     }
+    this.state = null;
+    this.currentSlotId = null;
   }
 
-  createNew(rng?: Rng): GameState {
+  createNew(rng?: Rng, seedRoster = true): GameState {
     const seed = rng !== undefined ? randInt(rng, 1, 0x7fffffff) : Date.now() >>> 0;
     const gameRng = rng ?? mulberry32(seed);
-    const state = createNewGame(gameRng, seed);
+    const state = createNewGame(gameRng, seed, seedRoster);
     this.state = state;
+    // A fresh career gets its own slot on first persist.
+    this.currentSlotId = null;
     this.autosave();
     return state;
+  }
+
+  /** All save slots, newest first — drives the multi-career title UI later. */
+  listSaves(): SaveSlot[] {
+    return readSaveIndex()
+      .slots.slice()
+      .sort((a, b) => b.savedAt - a.savedAt);
+  }
+
+  currentSlot(): SaveSlot | null {
+    const idx = readSaveIndex();
+    return idx.slots.find((s) => s.id === idx.currentId) ?? null;
+  }
+
+  selectSlot(id: string): SaveLoadResult {
+    const idx = readSaveIndex();
+    if (!idx.slots.some((s) => s.id === id)) return { state: null };
+    this.currentSlotId = id;
+    writeSaveIndex({ ...idx, currentId: id });
+    return this.load();
+  }
+
+  deleteSlot(id: string): void {
+    if (this.canUseStorage()) localStorage.removeItem(slotKey(id));
+    const idx = readSaveIndex();
+    const slots = idx.slots.filter((s) => s.id !== id);
+    const currentId = idx.currentId === id ? (slots[0]?.id ?? null) : idx.currentId;
+    writeSaveIndex({ currentId, slots });
+    if (this.currentSlotId === id) this.currentSlotId = currentId;
   }
 
   private persist(state: GameState): boolean {
@@ -441,8 +629,26 @@ export class SaveManager {
       return false;
     }
 
+    let id = this.currentSlotId;
+    const idx = readSaveIndex();
+    if (id === null || !idx.slots.some((s) => s.id === id)) {
+      id = makeSlotId();
+      this.currentSlotId = id;
+    }
+    const driver = activeDriver(state);
+    const slot: SaveSlot = {
+      id,
+      name: driver?.name ?? 'New Career',
+      discipline: driver?.discipline ?? 'track',
+      createdAt: idx.slots.find((s) => s.id === id)?.createdAt ?? Date.now(),
+      savedAt: Date.now(),
+    };
+    const slots = idx.slots.map((s) => (s.id === id ? slot : s));
+    if (!slots.some((s) => s.id === id)) slots.push(slot);
+    writeSaveIndex({ currentId: id, slots });
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(slotKey(id), JSON.stringify(state));
       this.warning = undefined;
       return true;
     } catch {

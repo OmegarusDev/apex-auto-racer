@@ -344,3 +344,43 @@ amendment). Each phase compiles and passes the existing gates before the next.
   STOPS the car (momentum gone) and the marshal re-slots it in ~0.3 s (was
   ~12 s grinding).
 
+
+---
+
+## 12. Future realism roadmap (deferred ideas)
+
+These are aspirational, captured for later — none are needed for the current
+career-mode game, but each would raise sim fidelity if/when we want it.
+
+- **Endurance / NASCAR-style mode.** Races are currently too short for fuel
+  weight to matter, so there is no fuel-load model today. A long-format mode
+  (multi-stint, tyre/brake/fuel degradation over time) is what would make fuel
+  weight, tyre falloff and brake fade genuinely strategic. A NASCAR-style
+  "constant looping" mode (just watching the car circulate) could be a relaxing
+  incremental layer.
+- **Visual tyre marks / track rubber.** Cosmetic skid marks are a nice touch and
+  do NOT need to feed back into the surface-sim (rubber build-up affecting grip
+  is a deeper change; cosmetic-only is fine and cheaper).
+- **Thermal brake model.** Brake fade from heat is currently absent (only brake
+  bias exists). A brake-temperature state with fade would add a real endurance
+  dimension.
+- **Per-wheel (four-wheel independent) simulation.** The current model is a
+  lumped 2-axle bicycle (front/rear loads only). Per-wheel tyre forces, left/right
+  load transfer as independent tyres, and wheel-individual slip would be the
+  biggest single realism leap (and is what makes diff behaviour emergent).
+- **Differential slip / locked-diff dynamics.** `diffLock` today is a scalar on
+  drive bias, not true per-wheel slip control. Real open/limited-slip/locked
+  behaviour (inside-wheel spin, yaw from diff torque) follows naturally from the
+  per-wheel model above.
+- **Engine inertia + turbo lag (with turbos).** Torque-curve is band-based today;
+  rotational inertia and turbo spool lag (with a turbo part) would add throttle
+  realism, especially out of slow corners.
+- **Suspension kinematics + visual body roll.** Suspension stiffness currently
+  only scales roll load-transfer; there is no camber gain, anti-roll, or damper
+  model, and no visual body roll. Kinematic suspension + matching visual roll is
+  the headline "feel" upgrade — the chassis should visibly lean into corners.
+
+Note: brake-while-steering is already physically penalised by the tyre
+friction circle (`tyre.ts` `axleForces`), so trail-braking emerges naturally;
+the driver brain only models the *preference* to ease brake while steering
+(rookies reluctant, elites trail-brake freely) — it never suppresses steering.

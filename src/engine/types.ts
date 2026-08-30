@@ -22,6 +22,10 @@ export interface Driver {
   id: string;
   name: string;
   trait: TraitId;
+  /** The single discipline this driver competes in (set at creation, never changes). */
+  discipline: DisciplineId;
+  /** Player-chosen livery colour (hex string) shown in standings/HUD. */
+  color: string;
   skill: number;
   bravery: number;
   focus: number;
@@ -195,6 +199,8 @@ export interface GameState {
   cash: number;
   vehicles: DisciplineVehicles;
   roster: Driver[];
+  /** The driver currently "playing" this save — their discipline scopes the whole career. */
+  activeDriverId: string | null;
   rankUnlocked: RankUnlocked;
   inProgressTournaments: InProgressTournaments;
   careerStats: CareerStats;
@@ -210,7 +216,7 @@ export interface GameState {
   options: GameOptions;
 }
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export const DEFAULT_VOLUMES: VolumeOptions = {
   master: 0.8,

@@ -15,6 +15,7 @@ import {
   truncateText,
   type ButtonDef,
   type HeaderDef,
+  ToastManager,
 } from '../ui/components';
 import {
   buildUi,
@@ -27,12 +28,14 @@ import { TeamManagementScene } from './TeamManagementScene';
 import { CampaignScene } from './CampaignScene';
 import { OptionsScene } from './OptionsScene';
 import { DisciplineSelectScene } from './DisciplineSelectScene';
+import { launchRace, makeTimeTrialConfig } from '../career/launchRace';
 import { TitleScene } from './TitleScene';
 
 type HubTab = 'garage' | 'team' | 'calendar' | 'standings' | 'unlocks';
 
 export class CareerHubScene implements Scene {
   private tab: HubTab = 'garage';
+  private toasts = new ToastManager();
 
   enter(): void {
     onSceneEnter();
@@ -44,7 +47,9 @@ export class CareerHubScene implements Scene {
     onSceneResize(w, h);
   }
 
-  update(_dt: number): void {}
+  update(dt: number): void {
+    this.toasts.update(dt);
+  }
 
   handleBack(): boolean {
     const s = getGameContext().scenes;
@@ -164,6 +169,8 @@ export class CareerHubScene implements Scene {
         this.renderUnlocks(ctx, ui, token, w, contentY, state, discipline);
         break;
     }
+
+    this.toasts.draw(ctx, ui);
   }
 
   private renderGarage(
@@ -191,10 +198,12 @@ export class CareerHubScene implements Scene {
     ctx.fillText(`Average part tier: T${avg}`, pad(token, 4), y + pad(token, 6));
     ctx.fillText(`Condition: ${cond}%`, pad(token, 4), y + pad(token, 9));
     ctx.restore();
+    const btnW = (w - pad(token, 8) - pad(token, 1)) / 2;
+    const btnY = y + pad(token, 12) - pad(token, 7);
     const open: ButtonDef = {
       x: pad(token, 4),
-      y: y + pad(token, 12) - pad(token, 7),
-      w: w - pad(token, 8),
+      y: btnY,
+      w: btnW,
       h: pad(token, 5.5),
       label: 'Open Garage  →',
       primary: true,
@@ -202,6 +211,21 @@ export class CareerHubScene implements Scene {
     };
     drawButton(ctx, open, ui);
     handleButton(open, ui);
+    const practice: ButtonDef = {
+      x: pad(token, 4) + btnW + pad(token, 1),
+      y: btnY,
+      w: btnW,
+      h: pad(token, 5.5),
+      label: 'Practice Lap',
+      onClick: () => {
+        const st = getGameContext().state;
+        if (!st) return;
+        const lead = activeDriver(st)?.id;
+        launchRace(makeTimeTrialConfig(st, discipline, 'campaign', lead), this.toasts);
+      },
+    };
+    drawButton(ctx, practice, ui);
+    handleButton(practice, ui);
   }
 
   private renderTeam(

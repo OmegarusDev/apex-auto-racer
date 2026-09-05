@@ -83,6 +83,7 @@ export function makeTimeTrialConfig(
   state: GameState,
   discipline: DisciplineId,
   returnTo: 'title' | 'campaign' = 'title',
+  leadDriverId?: string,
 ): RaceLaunchConfig {
   state.quickRaceNonce = ((state.quickRaceNonce >>> 0) + 1) >>> 0;
   try {
@@ -102,7 +103,8 @@ export function makeTimeTrialConfig(
   const trackSeed = randInt(rng, 1, 0x7fffffff);
 
   const roster = [...state.roster];
-  const leadDriverId = roster.length > 0 ? pick(rng, roster).id : '';
+  const hasLead = leadDriverId !== undefined && roster.some((d) => d.id === leadDriverId);
+  const chosenLead = hasLead ? leadDriverId : roster.length > 0 ? pick(rng, roster).id : '';
 
   const paceBand = paceBandFromState(state, discipline);
   const lapCap = maxLapsForPaceBand(paceBand);
@@ -114,8 +116,8 @@ export function makeTimeTrialConfig(
     raceSeed,
     laps,
     formatId: 'tt',
-    playerLineup: leadDriverId ? [leadDriverId] : [],
-    leadDriverId,
+    playerLineup: chosenLead ? [chosenLead] : [],
+    leadDriverId: chosenLead,
     mode: 'quick',
     session: 'timeTrial',
     returnTo,

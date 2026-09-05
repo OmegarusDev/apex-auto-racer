@@ -6,7 +6,6 @@ import { buildPersonalLineFromIdeal } from '../RacingLine';
 import { effectiveStats } from '../stats';
 import type { Modifier } from '../modifiers';
 import type { Rng } from '../rng';
-import { shuffleInPlace } from '../rng';
 import type { TrackData } from '../TrackGenerator';
 import type { Driver, VehicleParts } from '../types';
 import {
@@ -37,6 +36,20 @@ export interface FieldSetupResult {
   entries: RaceCarEntry[];
   carsView: CarSimState[];
   ghostTrace: GhostTrace;
+}
+
+/** Qualifying score (0..1) used to order the grid: driver ability blended
+ * with car pace. Higher = better grid slot. */
+export function qualiScore(
+  plan: { driver: Driver; parts: VehicleParts },
+  budgetLo: number,
+  budgetHi: number,
+): number {
+  const driver = driverStrength01(plan.driver, budgetLo, budgetHi);
+  const tiers = Object.values(plan.parts);
+  const avgTier = tiers.length ? tiers.reduce((s, t) => s + t, 0) / tiers.length : 0;
+  const carPace = Math.max(0, Math.min(1, avgTier / 6));
+  return 0.65 * driver + 0.35 * carPace;
 }
 
 export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
@@ -101,7 +114,15 @@ export function setupRaceField(input: FieldSetupInput): FieldSetupResult {
     }
   }
 
-  shuffleInPlace(rng, carPlans);
+  // Skill-based qualifying: order the grid by a qualifying score (driver
+  // ability blended with car pace) instead of a random shuffle, so the grid
+  // reflects competence rather than luck.
+  const [qLo, qHi] = opponentBudget;
+  carPlans.sort((a, b) => {
+    const diff = qualiScore(b, qLo, qHi) - qualiScore(a, qLo, qHi);
+    if (Math.abs(diff) < 1e-6) return a.driver.id < b.driver.id ? -1 : 1;
+    return diff;
+  });
 
   const entries: RaceCarEntry[] = carPlans.map((plan, i) => {
     const row = Math.floor(i / 2);

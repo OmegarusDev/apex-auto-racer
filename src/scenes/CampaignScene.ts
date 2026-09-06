@@ -475,6 +475,7 @@ export class CampaignScene implements Scene {
     );
     const cardH = pad(token, 10);
     const lockedH = cardH * 0.55;
+    const schedRowH = token.fontCaption + pad(token, 1.4);
     const objCount = Math.min(state.objectives.active.length, BALANCE.activeObjectives);
     const tournaments = this.tournamentsForDiscipline();
     const progress = this.inProgress();
@@ -489,7 +490,7 @@ export class CampaignScene implements Scene {
       const unlocked = state.rankUnlocked[this.discipline] >= t.rank;
       const isActive = progress?.defId === t.id;
       const locked = !unlocked && !isActive;
-      contentH += (locked ? lockedH : cardH) + objGap;
+      contentH += (locked ? lockedH : isActive && progress ? cardH + schedRowH : cardH) + objGap;
     }
     contentH += pad(token);
 
@@ -630,7 +631,8 @@ export class CampaignScene implements Scene {
         continue;
       }
 
-      drawCard(ctx, { x: 0, y, w: view.w, h: cardH }, lui);
+      const ch = isActive && progress ? cardH + schedRowH : cardH;
+      drawCard(ctx, { x: 0, y, w: view.w, h: ch }, lui);
       ctx.save();
       ctx.font = `700 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
@@ -662,7 +664,31 @@ export class CampaignScene implements Scene {
       }
       ctx.restore();
 
-      const actionY = y + cardH - pad(token, 1) - btnH;
+      if (isActive && progress !== null) {
+        const sy = y + pad(token, 1) + token.fontBody + token.fontCaption + pad(token, 0.7);
+        const chipH = token.fontCaption + pad(token, 0.7);
+        const chipGap = pad(token, 0.4);
+        const chipW = pad(token, 4.5);
+        let cx = pad(token, 1.5);
+        ctx.save();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+        for (let i = 0; i < t.races.length; i++) {
+          const done = i < progress.raceIndex;
+          const next = i === progress.raceIndex;
+          ctx.fillStyle = done ? 'rgba(255,255,255,0.08)' : next ? accent : 'rgba(255,255,255,0.04)';
+          ctx.beginPath();
+          ctx.roundRect(cx, sy, chipW, chipH, chipH * 0.3);
+          ctx.fill();
+          ctx.fillStyle = done ? token.textMuted : next ? '#0b0f0e' : token.textMuted;
+          ctx.fillText(`R${i + 1}`, cx + chipW / 2, sy + chipH / 2);
+          cx += chipW + chipGap;
+        }
+        ctx.restore();
+      }
+
+      const actionY = y + ch - pad(token, 1) - btnH;
       if (isActive && progress !== null) {
         // Even split with a real gap — two adjacent primaries were 2-3px apart.
         const availW = view.w - pad(token, 3);
@@ -724,7 +750,7 @@ export class CampaignScene implements Scene {
         ctx.restore();
       }
 
-      y += cardH + objGap;
+      y += ch + objGap;
     }
 
     this.scroller.end(ctx);

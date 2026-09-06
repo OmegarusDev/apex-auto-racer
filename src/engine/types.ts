@@ -22,6 +22,8 @@ export interface Driver {
   id: string;
   name: string;
   trait: TraitId;
+  /** Personality archetype id (rivals only) — shapes on-track behaviour. */
+  archetype?: string;
   /** The single discipline this driver competes in (set at creation, never changes). */
   discipline: DisciplineId;
   /** Player-chosen livery colour (hex string) shown in standings/HUD. */

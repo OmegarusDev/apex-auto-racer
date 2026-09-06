@@ -7,6 +7,7 @@ import { randInt, pick, shuffleInPlace } from './rng';
 import type { Rng } from './rng';
 import type { DisciplineId, Driver } from './types';
 import { DRIVER_COLORS } from '../ui/brand';
+import { applyArchetype, pickRivalArchetype } from './rivals';
 
 let nextDriverId = 1;
 
@@ -170,6 +171,7 @@ export function generateFieldDrivers(
     const hi = Math.round(Math.min(budgetMax, center + jitter));
     const driver = generateDriver(rng, Math.min(lo, hi), Math.max(lo, hi), used);
     driver.trait = traitOrder[i % traitOrder.length]!.id as TraitId;
+    applyArchetype(driver, pickRivalArchetype(rng));
     drivers.push(driver);
   }
   shuffleInPlace(rng, drivers);

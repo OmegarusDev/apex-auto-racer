@@ -10,7 +10,7 @@ export type InputMode = 'menu' | 'race';
 const THROTTLE_KEYS = new Set(['Enter', 'ArrowRight', 'ArrowUp', 'KeyW']);
 /** Space = brake (primary). */
 const BRAKE_KEYS = new Set(['Space', 'ArrowLeft', 'ArrowDown', 'KeyS']);
-/** Shift = manual upshift (auto downshift when off throttle). */
+/** Shift = clutch pedal (hold in, dump in the bite). Auto downshift when off throttle. */
 const UPSHIFT_KEYS = new Set(['ShiftLeft', 'ShiftRight']);
 
 export interface PointerSample {
@@ -220,7 +220,7 @@ export class InputController {
     return v;
   }
 
-  /** True while Shift key or SHIFT pad is held (Street clutch-kick). */
+  /** True while Shift key or CLUTCH pad is held. */
   isShiftHeld(): boolean {
     return this.shiftKeysHeld.size > 0 || this.touchShiftHeld;
   }
@@ -280,8 +280,8 @@ export class InputController {
   }
 
   /**
-   * Bottom deck: left = brake, right = gas, center = SHIFT.
-   * Falls back to bottom-band halves if chrome layout not set yet.
+   * Bottom deck: clutch · brake · gas (left to right).
+   * Falls back to bottom-band thirds if chrome layout not set yet.
    */
   private sideForPoint(x: number, y: number): 'left' | 'right' | 'shift' | 'none' {
     if (!this.canvas) return 'none';
@@ -296,11 +296,10 @@ export class InputController {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
     if (w <= 0 || h <= 0) return 'none';
-    const inShiftY = y > h * 0.78;
-    const inShiftX = x > w * 0.36 && x < w * 0.64;
-    if (inShiftY && inShiftX) return 'shift';
     if (y < h * 0.72) return 'none';
-    return x < w * 0.5 ? 'left' : 'right';
+    if (x < w / 3) return 'shift';
+    if (x < (w * 2) / 3) return 'left';
+    return 'right';
   }
 
   private syncPedalTargets(): void {

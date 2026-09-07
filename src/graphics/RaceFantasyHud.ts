@@ -24,9 +24,8 @@ export function wantsShiftCue(car: CarSimState, discipline: DisciplineId): boole
   const box = gearboxFor(discipline);
   if (car.gear >= box.gearCount) return false;
   const band = playerGearBand(car, discipline);
-  // Manual upshift reminder once the band will accept Shift — gas or not.
-  // Pin-throttle players also get the cue so they know a Shift is the fast path.
-  return band >= box.earlyUpshiftBand && car.v > 1;
+  // Manual clutch reminder once the band will accept an upshift.
+  return band >= box.earlyUpshiftBand && car.v > 1 && !car.clutchIn;
 }
 
 /** Draw compact v / v_deslot peg bar under speed. Returns height used. */
@@ -142,7 +141,7 @@ export function drawPreRaceCard(
   const bits = [opts.traitName];
   if (opts.rain) bits.push('Rain');
   if (opts.night) bits.push('Night');
-  bits.push('SHIFT up · lift down');
+  bits.push('clutch in · dump the bite');
   let footer = bits.join(' · ');
   if (ctx.measureText(footer).width > maxW) {
     footer = bits.slice(0, Math.min(3, bits.length)).join(' · ');

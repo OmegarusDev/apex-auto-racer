@@ -23,20 +23,9 @@ import type { Driver } from '../types';
 import type { CarSimState } from '../Vehicle';
 import { resolveDriveBias, type CarSetup } from '../vehicle/CarSetup';
 import type { ModifierContext } from '../modifiers';
+import { planPackCraft } from './packCraft';
 
 const nodeScratch: InterpolatedNode = {
-  pos: { x: 0, y: 0 },
-  tangent: { x: 1, y: 0 },
-  normal: { x: 0, y: 1 },
-  width: 0,
-  runoffWidth: 0,
-  kappa: 0,
-  kappaLine: 0,
-  o: 0,
-  s: 0,
-};
-
-const lookScratch: InterpolatedNode = {
   pos: { x: 0, y: 0 },
   tangent: { x: 1, y: 0 },
   normal: { x: 0, y: 1 },
@@ -55,6 +44,7 @@ export interface RivalSnapshot {
   s: number;
   l: number;
   deslotted: boolean;
+  finished: boolean;
 }
 
 export interface BrainTickContext {
@@ -95,14 +85,17 @@ export interface BrainState {
   lastIntentTag: BrainIntentTag | null;
   /** Time spent in a draft tow (for draft-pass credit). */
   draftHoldTime: number;
+  /** Committed overtake side: -1 left, 1 right, 0 none. */
+  overtakeSide: -1 | 0 | 1;
+  /** Race time when the pull-out expires. */
+  overtakeUntil: number;
+  /** Race time until a defensive cover fades. */
+  blockUntil: number;
   /** Last time the driver applied countersteer (reaction gating). */
   lastSlideReact: number;
   /**
-   * Mistake caution 0..1 — the driver's racing LINE morphs toward the safe
-   * centerline after a wide run / spin and recovers as they regain confidence.
-   * The line is the driver's own drawing of the corner, so it moving IS the
-   * "morphing racing line" — safer through the corner, then back to the fast
-   * line once composed.
+   * Caution 0..1 after a wide run / spin — the driver carries a little less
+   * corner speed until they compose. The racing line stays the groove.
    */
   shaken: number;
 }
@@ -149,6 +142,9 @@ export function createBrainState(): BrainState {
     conf: 0.5,
     lastIntentTag: null,
     draftHoldTime: 0,
+    overtakeSide: 0,
+    overtakeUntil: 0,
+    blockUntil: 0,
     lastSlideReact: -99,
     shaken: 0,
   };
@@ -213,32 +209,81 @@ function steerForKappa(wb: number, pathK: number, v: number, aGrip: number): num
   return ack + 0.075 * (aYCmd / G);
 }
 
-/** Preview κ: turn in on the upcoming bend, hold the current one through the apex. */
-function previewKappa(now: number, ahead: number): number {
-  if (now === 0) return ahead;
-  if (ahead === 0) return now;
-  if (Math.sign(now) !== Math.sign(ahead)) return now;
+const KAPPA_CORNER = 0.008;
+/** Real opposite-way corner — not centreline wiggles that used to chop the look. */
+const KAPPA_REVERSE = 0.02;
+
+/**
+ * Command curvature: at speed, turn in on this bend's peak; at crawl, wait
+ * until the road has actually started. Never take an opposite-sign peak
+ * (that's the following S-apex).
+ */
+function previewKappa(now: number, ahead: number, v: number): number {
+  if (Math.abs(now) < KAPPA_CORNER) {
+    const t = Math.max(0, Math.min(1, (v - 6) / 10));
+    const w = t * t * (3 - 2 * t);
+    return ahead * w;
+  }
+  if (Math.sign(now) !== Math.sign(ahead) && Math.abs(ahead) > KAPPA_REVERSE) return now;
   return Math.abs(ahead) >= Math.abs(now) ? ahead : now;
 }
 
-function trafficBrake(car: CarSimState, rivals: readonly RivalSnapshot[], aBrake: number): number {
-  let brake = 0;
-  for (const r of rivals) {
-    // Only rivals AHEAD matter — a car behind you (its rear behind your nose)
-    // must not trigger the traffic brake (this stalled every grid launch).
-    const centerGap = r.arcGap + PHYSICS.carLength;
-    if (centerGap <= 0) continue;
-    if (Math.abs(r.lateralSep) > 2.4) continue;
-    if (centerGap > 30) continue;
-    const gap = r.arcGap;
-    if (gap <= 2.6) {
-      brake = Math.max(brake, 1);
-    } else if (gap < 9) {
-      const closing = car.v - r.speed;
-      if (closing > 0.5) brake = Math.max(brake, Math.min(1, closing / Math.max(aBrake, 4)));
+/** How far ahead the driver aims (m). Long enough to be smooth; short at crawl so a hairpin isn't skipped. */
+function desiredLookaheadM(v: number, skill01: number): number {
+  const tLook = 0.58 + 0.32 * skill01;
+  const floor = Math.max(4.5, Math.min(16, 3.2 + v * 0.38));
+  const ceiling = 20 + 24 * skill01;
+  return Math.max(floor, Math.min(ceiling, v * tLook));
+}
+
+function nodeAtLook(
+  track: TrackData,
+  s0: number,
+  dd: number,
+  nodeStep: number,
+): TrackData['nodes'][number] {
+  const s = ((s0 + dd) % track.length + track.length) % track.length;
+  const n = track.nodes.length;
+  return track.nodes[Math.round(s / nodeStep) % n]!;
+}
+
+/**
+ * Look along THIS corner: keep a race-speed horizon, stop only at a real
+ * curvature reversal. Feedforward uses the peak same-sign κ in that window
+ * (stable) instead of the κ at a jumping look-point (drunk weave).
+ */
+function lookAlongRoad(
+  track: TrackData,
+  s0: number,
+  desired: number,
+  nodeStep: number,
+  startKappa: number,
+): { lookM: number; kappaPeak: number } {
+  let lookM = desired;
+  let cornerSign = Math.abs(startKappa) > KAPPA_CORNER ? Math.sign(startKappa) : 0;
+  let peak = startKappa;
+
+  for (let dd = nodeStep; dd < desired; dd += nodeStep) {
+    const sample = nodeAtLook(track, s0, dd, nodeStep);
+    const mag = Math.abs(sample.kappa);
+    const kSign = Math.sign(sample.kappa);
+
+    if (cornerSign === 0) {
+      if (mag > KAPPA_CORNER) {
+        cornerSign = kSign;
+        peak = sample.kappa;
+      }
+      continue;
     }
+
+    if (mag > KAPPA_REVERSE && kSign !== 0 && kSign !== cornerSign) {
+      lookM = Math.max(nodeStep * 2, dd);
+      break;
+    }
+    if (kSign === cornerSign && mag > Math.abs(peak)) peak = sample.kappa;
   }
-  return brake;
+
+  return { lookM, kappaPeak: peak };
 }
 
 function rollMistake(
@@ -250,20 +295,14 @@ function rollMistake(
   overdriving: boolean,
 ): void {
   // Competent drivers don't randomly melt down on a calm lap — mistakes only
-  // surface when already past the grip limit (over-driving), so going off is a
-  // physics consequence, not a brain glitch.
+  // surface when already past the grip limit. A brief lift, never a line yank
+  // off the groove.
   if (!overdriving) return;
   const focus01 = clamp01(driver.focus / 100);
   let rate = ((1 - focus01) * PHYSICS.mistakeBasePerSec * 0.2) * (rain ? BALANCE.rainMistakeMult : 1);
   rate = Math.min(rate, 0.03);
   if (rng() >= rate / 30) return;
-  if (rng() < 0.5) {
-    // A brief lift — carries a touch too much speed, not a brake cut that throws you wide.
-    state.suppressBrakeUntil = raceTime + PHYSICS.mistakeBrakeSuppress * 0.4;
-  } else {
-    state.mistakeLShift = (rng() < 0.5 ? -1 : 1) * PHYSICS.mistakeLateralShift * 0.4;
-    state.mistakeLUntil = raceTime + PHYSICS.mistakeLateralDuration * 0.6;
-  }
+  state.suppressBrakeUntil = raceTime + PHYSICS.mistakeBrakeSuppress * 0.4;
 }
 
 /**
@@ -283,9 +322,9 @@ export function tickDriverBrain(
   // Draft tow accumulation (draft-pass credit + tow commitment).
   state.draftHoldTime = ctx.draft > 0.25 ? state.draftHoldTime + PHYSICS.dt * 4 : Math.max(0, state.draftHoldTime - PHYSICS.dt * 2);
 
-  // --- Mistake caution: the racing line morphs after a mistake and recovers ---
-  // A wide run / spin shakes the driver: their line draws toward the safe
-  // centerline and they lift the corner target a touch, then compose over ~8s.
+  // --- Mistake caution: compose after a moment, keep pointing at the groove ---
+  // A wide run / spin shakes the driver: they carry a little less corner speed
+  // until confidence returns. The line itself stays the personal groove.
   if (state.prevSlotMode === 'groove' && car.slotMode === 'deslot') {
     state.shaken = Math.min(1, state.shaken + 0.85);
   } else if (car.spinRemaining > 0) {
@@ -332,8 +371,9 @@ export function tickDriverBrain(
     const errNow = home - car.l;
     const wbR = car.setup?.wheelbase ?? 2.7;
     const gain = comeHome ? 0.95 : 0.4;
+    const look = Math.max(2.4, Math.min(10, v * 0.65 + 2.2));
     const steerRaw =
-      Math.atan((gain * errNow) / Math.max(v, 6)) - 0.18 * (car.dl / Math.max(v, 6));
+      Math.atan((gain * errNow) / look) - 0.18 * (car.dl / Math.max(v, 2.2));
     const cap = comeHome ? 0.42 : Math.atan((G * wbR) / Math.max(v * v, 18));
     let steer = Math.max(-cap, Math.min(cap, steerRaw));
     const speedBoost = v < 15 ? 1.5 : 1;
@@ -367,9 +407,9 @@ export function tickDriverBrain(
   const turnInIdx = car.turnInPoint?.[nodeIdx] ?? -1;
   // const apexIdx = car.apexNode?.[nodeIdx] ?? -1; // unused for now
 
-  // Target speed from ideal line with skill-scaled perception error.
-  const percepErr = (1 - skill01) * 0.12; // slightly reduced from 0.15
-  const vEst = idealVTarget * (1 + (rng() - 0.5) * percepErr);
+  // Target speed from ideal line with skill-scaled perception (stable, not noisy).
+  const percepErr = (1 - skill01) * 0.08;
+  const vEst = idealVTarget * (1 - percepErr);
   // Discipline-aware commitment: Rally's loose surface and Street's close
   // walls demand a more cautious margin than Track's open circuit.
   const discMargin = disc === 'rally' ? 0.86 : disc === 'street' ? 0.90 : 0.94;
@@ -381,7 +421,7 @@ export function tickDriverBrain(
     0.78,
     Math.min(0.95, 0.78 + 0.17 * skill01 + 0.04 * bravery01 + state.conf * 0.03),
   ) * discMargin - driveCaution;
-  const vTarget = Math.min(vEst * margin, idealVTarget);
+  const vTarget = Math.min(vEst * margin * (1 - 0.05 * state.shaken), idealVTarget);
 
   // --- Braking using ideal line brake zones ---
   let desiredBrake = 0;
@@ -426,29 +466,29 @@ export function tickDriverBrain(
   // while still correcting from the grid column caused launch spins).
   if (raceTime < PHYSICS.aiLaunchSec) desiredBrake = Math.min(desiredBrake, 0.15);
 
-  const traffic = trafficBrake(car, ctx.rivals, car.stats.aBrake);
-  // During launch the pack is packed tight — scale traffic braking way down so
-  // the grid can clear instead of locking itself against the field.
+  const pack = planPackCraft(state, car, ctx.rivals, {
+    draft: ctx.draft,
+    skill01,
+    bravery01,
+    raceTime,
+    halfW,
+    kappaAbs: Math.abs(node.kappaLine),
+    aBrake: car.stats.aBrake,
+    contactBlocked: ctx.contactBlocked,
+  });
   const launching = raceTime < PHYSICS.aiLaunchSec;
-  desiredBrake = Math.max(desiredBrake, launching ? traffic * 0.15 : traffic);
-  // Contact-block braking only after the grid clears — during launch it just
-  // pins the pack against each other (start stalls).
-  if (ctx.contactBlocked && car.v < 14 && raceTime > PHYSICS.aiLaunchSec) {
+  desiredBrake = Math.max(desiredBrake, launching ? pack.trafficBrake * 0.15 : pack.trafficBrake);
+  // Contact-block braking only after the grid clears — and not while already
+  // committed to a pull-out (that's the go-around, not a park-in-the-wake).
+  if (ctx.contactBlocked && car.v < 14 && raceTime > PHYSICS.aiLaunchSec && !pack.pullingOut) {
     desiredBrake = Math.max(desiredBrake, 0.4);
   }
 
-  // Target line (personal racing line + mistake wobble).
-  const shaken = state.shaken;
-  const mistakeShift = raceTime < state.mistakeLUntil ? state.mistakeLShift : 0;
-  // Grid anchor: hold starting column for first gridAnchorDist, then ease to
-  // the personal line. Distance-based (not time-based) so it works at any
-  // launch speed. Shared by BOTH the position target and the steering
-  // lookahead — otherwise the steering aims at the raw personal line (often the
-  // opposite side of the track) while the car is still pinned to its grid
-  // column, yanking the wheel hard and spinning the car out of the gate.
+  // Groove target: personal racing line + pack offset. Grid-anchor holds the
+  // starting column for the first stretch so launch doesn't yank across the pack.
   const anchorDist = PHYSICS.idealLine.gridAnchorDist;
   const blendedLineAt = (s: number): number => {
-    const base = personalLineAt(car, track, s) + mistakeShift;
+    const base = personalLineAt(car, track, s);
     const dsFromGrid = s - car.gridS;
     const dsNormalized = dsFromGrid < 0 ? dsFromGrid + track.length : dsFromGrid;
     let t = base;
@@ -457,8 +497,7 @@ export function tickDriverBrain(
       const blend = w * w * (3 - 2 * w); // smoothstep
       t = car.gridL * blend + base * (1 - blend);
     }
-    // While shaken the line morphs toward centerline (safer), not grid column.
-    t = t * (1 - 0.7 * shaken);
+    t += pack.lineOffset;
     return Math.max(-lineClamp, Math.min(lineClamp, t));
   };
 
@@ -522,10 +561,21 @@ export function tickDriverBrain(
     }
     // Hard slide → lift (the driver reads its own over-rotation).
     if (Math.abs(car.slipAngle) > 0.55 || car.gripUsage > 1.05) desiredThrottle = Math.min(desiredThrottle, 0.4);
-    // Draft tow: commit in the wake.
-    if (ctx.draft > 0.35) desiredThrottle = 1;
-    // Never stall: a car crawling commits full power (no grid stutters).
-    if (car.v < 3) desiredThrottle = 1;
+    // Draft tow: commit in the wake — but if we're still in-lane on a slower
+    // car, don't floor it into their gearbox. Pull-out keeps the power on.
+    if (ctx.draft > 0.35) {
+      if (pack.pullingOut || pack.trafficBrake < 0.22) desiredThrottle = 1;
+      else desiredThrottle = Math.min(desiredThrottle, 0.72);
+    }
+    // Never stall: a crawl still commits enough power to roll. Do not wipe
+    // the grip-budget at 2.9 m/s in a hairpin (that used to floor a U-turn).
+    if (car.v < 1.6) desiredThrottle = Math.max(desiredThrottle, 0.55);
+    // Hold the planned corner speed: zones brake for the approach, but once
+    // in the bend don't keep accelerating past vTarget (that's how a crawl
+    // entry still ran wide — grip-budget lagged the envelope).
+    if (Math.abs(node.kappaLine) > KAPPA_CORNER && v > vTarget) {
+      desiredThrottle = Math.min(desiredThrottle, 0.12);
+    }
   }
 
   // Point at the groove: Ackermann for the path curvature (feedforward) plus
@@ -534,74 +584,48 @@ export function tickDriverBrain(
   // tyres then generate no aY, so the ribbon rotates under a world-straight
   // velocity. The tyres still accept or refuse the turn.
   const wb = car.setup?.wheelbase ?? 2.7;
-  // Anticipatory corner setup: drivers KNOW the track (turnInPoint/apex are
-  // precomputed). Skill sets how early they begin rotating — an elite leads far
-  // and nails the apex; a rookie still leads enough to turn in BEFORE the corner
-  // (never drives straight off). This is the "skill = lead + smoothness" model.
-  const MIN_LEAD = 22;
-  const MAX_LEAD = 45;
-  const leadDistance = MIN_LEAD + (MAX_LEAD - MIN_LEAD) * skill01;
-  const baseLook = Math.max(20, Math.min(80, v * (0.55 + 0.9 * skill01) + 12));
-  // Adaptive lookahead: aiming PAST the corner exit makes the target flip to the
-  // far side of the track, so the car steers the WRONG way out of the bend. If
-  // the path curvature reverses within the lookahead, stop at that point (the
-  // corner exit / S-crest) so we track the current bend, not the next one.
+  // Anticipatory corner setup: drivers KNOW the track. Skill lengthens the
+  // time-horizon; speed sets the metres. A 16–20 m floor at crawl looks PAST
+  // a hairpin; a 4 m look at race speed hunts like a drunk.
   const nodeStep = track.nodes[1]!.s - track.nodes[0]!.s;
-  // Lead with the skill-scaled distance so the wheel starts rotating toward the
-  // apex before entry; the curvature-reversal check below still caps it on S/chicanes.
-  let laDist = Math.max(baseLook * 0.6, leadDistance);
-  // Only shorten when the path genuinely REVERSES curvature (a real left-right
-  // switch, e.g. an S or chicane). A sweeping corner keeps the full lookahead;
-  // aiming the full distance there is correct and stable. Aiming the full
-  // distance across a reversal lands the target on the far side of the track,
-  // which is what made the car steer the WRONG way out of tight bends. We only
-  // cut on substantial curvature (both sides) so small centreline wiggles don't
-  // trigger it, and never below 15m (a too-short lookahead goes unstable).
-  let prevK = Math.sign(node.kappaLine);
-  let prevMag = Math.abs(node.kappaLine);
-  for (let dd = nodeStep; dd < laDist; dd += nodeStep) {
-    const n =
-      track.nodes[
-        Math.round(((car.s + dd) % track.length) / nodeStep) % track.nodes.length
-      ]!;
-    const k = n.kappaLine;
-    const mag = Math.abs(k);
-    if (mag > 0.008 && prevMag > 0.008 && prevK !== 0 && Math.sign(k) !== prevK) {
-      laDist = Math.max(15, dd);
-      break;
-    }
-    if (mag > 0.008) {
-      prevK = Math.sign(k);
-      prevMag = mag;
-    }
-  }
-  const lookS = (car.s + laDist) % track.length;
-  interpolateAtSInto(track.nodes, track.length, lookS, lookScratch);
-  const kappaCmd = previewKappa(node.kappaLine, lookScratch.kappaLine);
-  const pathK = kappaCmd / Math.max(0.45, 1 - kappaCmd * car.l);
-  // While the nose is only a few degrees off the path, unwind that attitude
-  // into extra/less curvature. Past ~12° this is a slide — leave it to the
-  // recovery block so a held drift isn't countersteered away.
-  const unwind =
-    Math.abs(car.slipAngle) < 0.22 ? (1.6 * car.slipAngle) / Math.max(v, 5) : 0;
-  const steerFF = steerForKappa(wb, pathK - unwind, v, aGrip);
-  // Same grid-anchored blend as the position target (see blendedLineAt above).
-  const lineTAhead = Math.max(-lineClamp, Math.min(lineClamp, blendedLineAt(lookS)));
-  const errLat = lineTAhead - (car.l + laDist * Math.sin(car.slipAngle));
-  const lam = Math.max(laDist, 19);
-  const steerPursuit = Math.atan((2 * errLat * wb) / (lam * lam));
-  const errNow = lineT - car.l;
-  const ffBlend = Math.max(0.45, 1 - Math.abs(errNow) / 7);
-  const steerYaw = -0.15 * car.slipAngle;
-  const steerDamp = -0.18 * (car.dl / Math.max(v, 6));
-  const steerCap = Math.atan((1.5 * aGrip * wb) / Math.max(v * v, 18));
-  // Budget-cap the curvature command only. Clipping the sum starved turn-in
-  // (pursuit is ~0 on the line, so a grip cap on the total killed the FF).
-  const steerFFCapped = Math.max(-steerCap, Math.min(steerCap, steerFF));
-  let steer = Math.max(
-    -0.7,
-    Math.min(0.7, ffBlend * steerFFCapped + steerPursuit + steerYaw + steerDamp),
+  const { lookM, kappaPeak } = lookAlongRoad(
+    track,
+    car.s,
+    desiredLookaheadM(v, skill01),
+    nodeStep,
+    node.kappa,
   );
+  // Road curvature, not the racing-line's swing (that can reverse at track-out).
+  const kappaCmd = previewKappa(node.kappa, kappaPeak, v);
+  // Mild offset-path correction only. Full 1/(1−κl) turns a 1 m sway into a
+  // wheel fight — that's the drunk weave on an otherwise good line.
+  const lFF = Math.max(-2.5, Math.min(2.5, car.l));
+  const pathK = kappaCmd / Math.max(0.7, 1 - kappaCmd * lFF * 0.28);
+  const steerFF = steerForKappa(wb, pathK, v, aGrip);
+  const inBend = Math.abs(node.kappa) > KAPPA_CORNER;
+  const pursueS = (car.s + lookM) % track.length;
+  const lineTAhead = Math.max(-lineClamp, Math.min(lineClamp, blendedLineAt(pursueS)));
+  const errLat = lineTAhead - car.l;
+  // Long λ on the groove (low gain, no weave). Shorter only when packed/offline
+  // so a pull-out still happens.
+  const lam = Math.abs(errLat) > 1.35 ? Math.max(10, lookM * 0.5) : Math.max(lookM, 16);
+  let steerPursuit = Math.atan((1.35 * errLat * wb) / (lam * lam));
+  const steerCap = Math.atan((1.5 * aGrip * wb) / Math.max(v * v, 12));
+  const steerFFCapped = Math.max(-steerCap, Math.min(steerCap, steerFF));
+  // Soften line-chase that fights the road while we're ON the groove. Don't
+  // hard-zero it — that step is another weave. Packed cars 2 m offline keep
+  // the pull-out.
+  if (
+    inBend &&
+    Math.abs(errLat) < 1.25 &&
+    Math.sign(steerPursuit) !== 0 &&
+    Math.sign(steerFFCapped) !== 0 &&
+    Math.sign(steerPursuit) !== Math.sign(steerFFCapped)
+  ) {
+    steerPursuit *= 0.22;
+  }
+  const steerDamp = -0.16 * (car.dl / Math.max(v, 6));
+  let steer = Math.max(-0.7, Math.min(0.7, steerFFCapped + steerPursuit + steerDamp));
   // Steering is NEVER suppressed by braking — the wheel stays full (grip-capped
   // above). Real drivers trail-brake (brake + steer together), and the friction
   // circle in tyre.ts axleForces naturally penalises over-brake-through-corner as
@@ -615,15 +639,14 @@ export function tickDriverBrain(
   );
   desiredBrake *= 1 - reluctance;
 
-  // Skill: rate limit (neuromuscular) + tracking noise.
-  // Low speed demands sharper turn-in — boost the rate for tight corners.
+  // Skill: rate limit (neuromuscular). No per-tick steer noise — that fights
+  // the groove feedforward every frame and looks like a drunk line.
   const speedBoost = v < 15 ? 1.5 : 1;
   const rate = (2.6 + 1.9 * skill01) * speedBoost;
   steer = Math.max(
     state.prevSteer - rate * PHYSICS.dt * 4,
     Math.min(state.prevSteer + rate * PHYSICS.dt * 4, steer),
   );
-  steer += (rng() - 0.5) * 0.015 * (1 - skill01);
   steer = Math.max(-0.7, Math.min(0.7, steer));
   state.prevSteer = steer;
 
@@ -657,7 +680,8 @@ export function tickDriverBrain(
 
   rollMistake(state, driver, raceTime, rng, rain, car.gripUsage > 0.9);
 
-  const tag: BrainIntentTag = car.spinRemaining > 0 ? 'SPIN_SCRUB' : braking ? 'BRAKE_FOR_CORNER' : 'FULL_SEND';
+  const tag: BrainIntentTag = pack.tag
+    ?? (car.spinRemaining > 0 ? 'SPIN_SCRUB' : braking ? 'BRAKE_FOR_CORNER' : 'FULL_SEND');
   state.lastIntentTag = tag;
   state.prevSlotMode = car.slotMode;
   state.prevAlphaRear = car.alphaRear;

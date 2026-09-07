@@ -101,6 +101,7 @@ export function carSetupFromParts(parts: VehicleParts, discipline?: DisciplineId
   const brakes = parts.brakes ?? 0;
   const susp = parts.suspension ?? 0;
   const spoiler = parts.spoiler ?? 0;
+  const gearbox = parts.gearbox ?? 0;
 
   // Powertrain / aero add mass; stiff susp sheds a little (lighter uprights story).
   const massKg = Math.max(
@@ -131,9 +132,10 @@ export function carSetupFromParts(parts: VehicleParts, discipline?: DisciplineId
   const suspStiffness = Math.max(0.55, Math.min(1.45, 0.78 + susp * 0.11));
   const compoundMu = Math.max(0.88, Math.min(1.22, 0.94 + tyres * 0.04));
   // Short final drive = punchier accel, lower gear tops (engine/intake vs exhaust).
+  // Gearbox upgrades lengthen the drive slightly (taller gears, more top).
   const finalDrive = Math.max(
     0.9,
-    Math.min(1.18, 1 + engine * 0.018 + intake * 0.012 - exhaust * 0.01),
+    Math.min(1.18, 1 + engine * 0.018 + intake * 0.012 - exhaust * 0.01 - gearbox * 0.01),
   );
   const iz = massKg * (2.1 + cgHeight * 0.3);
 

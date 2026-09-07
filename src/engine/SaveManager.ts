@@ -18,8 +18,10 @@ import {
   SAVE_VERSION,
   DEFAULT_VOLUMES,
   DEFAULT_RACE_ZOOM,
+  DEFAULT_SPEED_UNIT,
   emptyVehicleParts,
 } from './types';
+import { isSpeedUnit } from './units';
 import type { VehicleParts } from './types';
 import { makeDriverId, syncDriverIdCounter, syncDriverIdsFrom } from './DriverGenerator';
 import { DRIVER_COLORS } from '../ui/brand';
@@ -350,6 +352,7 @@ export function createNewGame(rng: Rng, seed: number, seedRoster = true): GameSt
     options: {
       volumes: { ...DEFAULT_VOLUMES },
       raceZoom: DEFAULT_RACE_ZOOM,
+      speedUnit: DEFAULT_SPEED_UNIT,
     },
   };
 }
@@ -424,6 +427,9 @@ function migrate(raw: unknown): GameState | null {
     } else {
       obj.options.raceZoom = Math.max(0, Math.min(1, obj.options.raceZoom));
     }
+    if (!isSpeedUnit(obj.options.speedUnit)) {
+      obj.options.speedUnit = DEFAULT_SPEED_UNIT;
+    }
   }
 
   if (!isValidGameState(obj)) return null;
@@ -476,10 +482,11 @@ export class SaveManager {
   }
 
   hasSave(): boolean {
-    if (this.state !== null) return true;
-    if (!this.canUseStorage()) return false;
-    const idx = readSaveIndex();
-    return idx.slots.length > 0 || localStorage.getItem(STORAGE_KEY) !== null;
+    if (this.canUseStorage()) {
+      const idx = readSaveIndex();
+      if (idx.slots.length > 0 || localStorage.getItem(STORAGE_KEY) !== null) return true;
+    }
+    return this.currentSlotId !== null && this.state !== null;
   }
 
   load(): SaveLoadResult {
@@ -520,6 +527,8 @@ export class SaveManager {
         }
         localStorage.removeItem(STORAGE_KEY);
       }
+      this.state = null;
+      this.currentSlotId = null;
       return { state: null };
     }
 
@@ -529,6 +538,7 @@ export class SaveManager {
       const slots = idx.slots.filter((s) => s.id !== id);
       writeSaveIndex({ currentId: slots[0]?.id ?? null, slots });
       this.currentSlotId = slots[0]?.id ?? null;
+      this.state = null;
       return { state: null };
     }
 
@@ -582,18 +592,20 @@ export class SaveManager {
     this.currentSlotId = null;
   }
 
+  /**
+   * Start an in-memory career. Nothing is written until the first persist, so
+   * backing out of New Career leaves existing slots untouched.
+   */
   createNew(rng?: Rng, seedRoster = true): GameState {
     const seed = rng !== undefined ? randInt(rng, 1, 0x7fffffff) : Date.now() >>> 0;
     const gameRng = rng ?? mulberry32(seed);
     const state = createNewGame(gameRng, seed, seedRoster);
     this.state = state;
-    // A fresh career gets its own slot on first persist.
     this.currentSlotId = null;
-    this.autosave();
     return state;
   }
 
-  /** All save slots, newest first — drives the multi-career title UI later. */
+  /** All save slots, newest first. */
   listSaves(): SaveSlot[] {
     return readSaveIndex()
       .slots.slice()
@@ -613,13 +625,20 @@ export class SaveManager {
     return this.load();
   }
 
-  deleteSlot(id: string): void {
+  deleteSlot(id: string): SaveLoadResult {
+    const wasCurrent = this.currentSlotId === id || readSaveIndex().currentId === id;
     if (this.canUseStorage()) localStorage.removeItem(slotKey(id));
     const idx = readSaveIndex();
     const slots = idx.slots.filter((s) => s.id !== id);
     const currentId = idx.currentId === id ? (slots[0]?.id ?? null) : idx.currentId;
     writeSaveIndex({ currentId, slots });
-    if (this.currentSlotId === id) this.currentSlotId = currentId;
+    if (!wasCurrent) {
+      return { state: this.state };
+    }
+    this.currentSlotId = currentId;
+    this.state = null;
+    if (currentId === null) return { state: null };
+    return this.load();
   }
 
   private persist(state: GameState): boolean {

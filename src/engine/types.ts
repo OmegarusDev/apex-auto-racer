@@ -3,6 +3,9 @@ import type { PartCategory } from '../data/parts';
 import type { TraitId } from '../data/traits';
 import type { RankId } from '../data/balance';
 import type { ObjectiveKind } from '../data/objectives';
+import type { SpeedUnit } from './units';
+export type { SpeedUnit } from './units';
+export { DEFAULT_SPEED_UNIT } from './units';
 
 export type { DisciplineId };
 
@@ -60,12 +63,19 @@ export interface EffectiveStats {
   lineNoise: number;
   condGrip: number;
   condTop: number;
-  /** Seconds to complete a shift (lower = faster). Clutch + gearbox. */
+  /** AI shift duration (s). Gearbox upgrades cut this. */
   shiftTime: number;
   /** Launch accel multiplier (<1 bogs a low clutch on the grid). */
   launchMul: number;
   /** Street clutch-kick impulse scale (≥1). */
   kickMul: number;
+  /** Player clutch bite-window width (s). Clutch upgrades widen this. */
+  clutchSweet: number;
+  /**
+   * Seconds after clutch-in before the bite opens. Stock is a slow clunk;
+   * upgrades (and live driver skill) shrink this toward a tap.
+   */
+  clutchBiteDelay: number;
 }
 
 export type SlotMode = 'groove' | 'deslot';
@@ -145,6 +155,8 @@ export interface GameOptions {
    * Default sits zoomed out so phones see the circuit.
    */
   raceZoom: number;
+  /** HUD / garage speed readout. Sim is always m/s. */
+  speedUnit: SpeedUnit;
 }
 
 export interface CareerStats {

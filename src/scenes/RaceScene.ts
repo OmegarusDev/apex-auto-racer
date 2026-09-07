@@ -58,7 +58,9 @@ import { PAUSE_HINT } from '../ui/howToPlay';
 import { toOrdinal } from '../utils/helpers';
 import { accentForDiscipline, createTheme, type ThemeTokens } from '../ui/theme';
 import { gearboxFor } from '../engine/Gearbox';
+import { clutchBiteWindow } from '../engine/vehicle/transmission';
 import { DEFAULT_RACE_ZOOM } from '../engine/types';
+import { DEFAULT_SPEED_UNIT, formatSpeed, speedUnitLabel } from '../engine/units';
 
 /** Avoid importing sceneUtils / ResultsScene here — that cycle breaks dynamic RaceScene load. */
 function disciplineAccent(id: import('../data/disciplines').DisciplineId): string {
@@ -371,20 +373,13 @@ export class RaceScene implements Scene {
 
     if (this.g.input.brake > 0.1) this.stats.playerBrakeUsed = true;
 
-    const upEdge = this.g.input.consumeUpshift();
-    const playerCar = director.cars.find((c) => c.isPlayerControlled);
-    const armed =
-      playerCar !== undefined &&
-      (playerCar.driftState ||
-        playerCar.driftArmed ||
-        playerCar.gripUsage > 0.85 ||
-        Math.abs(playerCar.slipAngle) > 0.1);
-    const clutchKick = this.launch.discipline === 'street' && upEdge && armed;
+    this.g.input.consumeUpshift();
     director.setPlayerPedals(
       this.g.input.throttle,
       this.g.input.brake,
-      clutchKick ? false : upEdge,
-      clutchKick,
+      false,
+      false,
+      this.g.input.isShiftHeld(),
     );
     director.update(dt);
 
@@ -809,13 +804,13 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
         this.showHint('Higher skill helps hold full gas through bends', 'shownAuthorityHint');
       }
 
-      this.shiftCueArmed = wantsShiftCue(player, this.launch.discipline);
+      this.shiftCueArmed = wantsShiftCue(player, this.launch.discipline) && !player.clutchIn;
       if (
         this.shiftCueArmed &&
         !this.g.state!.onboarding.shownShiftCue &&
         this.hintText === null
       ) {
-        this.showHint('Tap SHIFT to upshift — hold a gear until you need the next', 'shownShiftCue');
+        this.showHint('Hold the left pedal to clutch in — dump it when the left meter flashes BITE', 'shownShiftCue');
       }
 
       // Teach stack: trail brake → then Street kick (after shift cue seen).
@@ -840,7 +835,7 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
         (player.driftArmed || player.gripUsage > 0.88)
       ) {
         this.showHint(
-          'Street: SHIFT while sliding = clutch-kick — hold gas to keep it',
+          'Street: dump the clutch early in a slide to kick the rear out',
           'shownKickHint',
         );
       }
@@ -1010,12 +1005,12 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
 
     if (!state.onboarding.shownPedalControls) {
       this.showHint(
-        'Hold GAS — the car steers itself. Space = brake · SHIFT = upshift',
+        'Hold GAS — the car steers itself. Space = brake · hold CLUTCH, dump in the bite',
         'shownPedalControls',
       );
     } else if (!state.onboarding.shownTouchControls) {
       this.showHint(
-        'Touch: right = gas, left = brake · SHIFT = up · lift gas to downshift',
+        'Touch: clutch · brake · gas. Hold clutch, dump in the bite · lift gas to downshift',
         'shownTouchControls',
       );
     }
@@ -1114,14 +1109,15 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
       hudY += token.fontBody + pad(token, 0.45);
 
       if (player !== undefined) {
-        const speedKmh = Math.round(player.v * 3.6);
+        const unit = this.g.state?.options.speedUnit ?? DEFAULT_SPEED_UNIT;
+        const speed = formatSpeed(player.v, unit);
         ctx.fillStyle = token.text;
         ctx.font = `400 ${token.fontTitle}px ${token.fontDisplayFamily}`;
-        ctx.fillText(`${speedKmh}`, hudX, hudY);
-        const sw = ctx.measureText(`${speedKmh}`).width;
+        ctx.fillText(speed, hudX, hudY);
+        const sw = ctx.measureText(speed).width;
         ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
         ctx.fillStyle = accent;
-        ctx.fillText(' KM/H', hudX + sw + 4, hudY + token.fontTitle * 0.35);
+        ctx.fillText(` ${speedUnitLabel(unit)}`, hudX + sw + 4, hudY + token.fontTitle * 0.35);
         hudY += token.fontTitle + pad(token, 0.35);
         drawPegMeter(
           ctx,
@@ -1160,8 +1156,20 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
     h: number,
     token: ThemeTokens,
     accent: string,
-    player?: { rpm: number; gearBand: number; shiftWindow: import('../engine/Gearbox').ShiftWindowKind; gear: number } | null,
+    player?: {
+      rpm: number;
+      gearBand: number;
+      shiftWindow: import('../engine/Gearbox').ShiftWindowKind;
+      gear: number;
+      clutchIn: boolean;
+      clutchTimer: number;
+      stats: { clutchSweet: number; clutchBiteDelay: number };
+    } | null,
   ): void {
+    const skill01 = Math.max(0, Math.min(1, (this.resolveLeadDriver()?.skill ?? 40) / 100));
+    const bite = player
+      ? clutchBiteWindow(player, skill01)
+      : { delay: PHYSICS.clutchBiteDelay, sweet: 0.16 };
     const chrome = drawPedalDeckChrome({
       ctx,
       w,
@@ -1170,14 +1178,18 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
       accent,
       throttle: this.g.input.throttle,
       brake: this.g.input.brake,
-      shifting:
-        this.g.input.isKeyDown('ShiftLeft') || this.g.input.isKeyDown('ShiftRight'),
+      shifting: this.g.input.isShiftHeld() || (player?.clutchIn ?? false),
       shiftCueArmed: this.shiftCueArmed,
       animTime: this.animTime,
       gearBand: player?.gearBand ?? 0,
       shiftWindow: player?.shiftWindow ?? 'low',
       gear: player?.gear ?? 1,
       box: gearboxFor(this.launch.discipline),
+      clutchIn: player?.clutchIn ?? false,
+      clutchTimer: player?.clutchTimer ?? 0,
+      clutchSweet: bite.sweet,
+      clutchBiteDelay: bite.delay,
+      rpm: player?.rpm ?? 900,
     });
     this.chrome = chrome;
     this.g.input.setRaceChrome(chrome);

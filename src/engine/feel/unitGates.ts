@@ -6,8 +6,10 @@ import {
   createCarState,
 } from '../Vehicle';
 import { effectiveStats } from '../stats';
-import { defaultVehicleSave } from '../types';
+import { defaultVehicleSave, emptyVehicleParts } from '../types';
 import { generateTrack } from '../TrackGenerator';
+import { clutchBiteWindow } from '../vehicle/transmission';
+import { toOrdinal } from '../../utils/helpers';
 import type { FeelGateResult } from './types';
 
 export function runAuthorityGates(): FeelGateResult[] {
@@ -89,4 +91,36 @@ export function runTrackScaleGates(): FeelGateResult[] {
       detail: `lenRatio=${ratio.toFixed(3)} (want ~0.68) widthOk=${widthOk}`,
     },
   ];
+}
+
+/** Stock clutch is a held clunk; max clutch + skill is a tap-and-release. */
+export function runClutchFeelGates(): FeelGateResult[] {
+  const stock = effectiveStats('track', emptyVehicleParts(0), 1);
+  const elite = effectiveStats('track', emptyVehicleParts(5), 1);
+  const stockWin = clutchBiteWindow({ stats: stock }, 0);
+  const eliteWin = clutchBiteWindow({ stats: elite }, 1);
+  const tap = 0.07;
+  const stockTapDump = tap < stockWin.delay;
+  const eliteTapPerfect = tap >= eliteWin.delay && tap <= eliteWin.delay + eliteWin.sweet;
+  return [
+    {
+      id: 'CLUTCH_STOCK_CLUNK',
+      ok: stockWin.delay >= 0.24 && stockTapDump && stock.shiftTime >= 0.28,
+      detail: `stock delay=${stockWin.delay.toFixed(2)}s sweet=${stockWin.sweet.toFixed(2)}s shift=${stock.shiftTime.toFixed(2)}s tap=${stockTapDump ? 'dump' : 'hit'}`,
+    },
+    {
+      id: 'CLUTCH_ELITE_TAP',
+      ok: eliteWin.delay <= 0.05 && eliteTapPerfect && elite.shiftTime <= 0.12,
+      detail: `elite+skill delay=${eliteWin.delay.toFixed(3)}s sweet=${eliteWin.sweet.toFixed(2)}s shift=${elite.shiftTime.toFixed(2)}s tap=${eliteTapPerfect ? 'perfect' : 'miss'}`,
+    },
+  ];
+}
+
+/** Race HUD "4th" — JS remainder of (n-20) used to stringify as 4undefined. */
+export function runOrdinalGate(): FeelGateResult {
+  const samples = [1, 2, 3, 4, 11, 12, 13, 21, 22];
+  const want = ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd'];
+  const got = samples.map(toOrdinal);
+  const ok = got.every((s, i) => s === want[i]);
+  return { id: 'ORDINAL_HUD', ok, detail: got.join(', ') };
 }

@@ -55,12 +55,17 @@ function sumPartIncrements(partTiers: VehicleParts): DisplayStats {
 function toPhysicsParams(display: DisplayStats, suspTier: number, condition: number, partTiers: VehicleParts): EffectiveStats {
   const { topSpeed, acceleration, braking, grip, downforce } = display;
 
-  const vMax = 40 + 0.45 * topSpeed;
+  // Peak speed in world m/s (same metres as PHYSICS.carLength and the track).
+  // HUD km/h is v × 3.6 — do not rescale this when the mesh grows.
+  const vMax = 42 + 0.48 * topSpeed;
   // Acceleration must sit UNDER cornering grip or the pitch transfer unloads
   // the front and the car cannot corner while accelerating (real-car: no magnet
-  // holds the line). Starter ≈ 0.7g, elite ≈ 0.95g.
-  const aAccel = 4 + 0.065 * acceleration;
+  // holds the line). Starter ≈ 0.74g, elite ≈ 1.0g.
+  const aAccel = 4.35 + 0.07 * acceleration;
   const aBrake = 9 + 0.15 * braking;
+  // Display grip is TYRE adhesion (µ), not a kitchen-sink "handling" lump.
+  // Suspension plants the car (load transfer, CG, line noise) — it does not
+  // add rubber. Spoiler is extra Fz at speed via downforce, not µ.
   const gripFactor = 0.75 + 0.005 * grip;
   const D = 0.006 * downforce;
 
@@ -73,13 +78,16 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
 
   lineNoise *= 2 - normalized;
 
-  // Transmission metaprogression — a better clutch shifts faster and launches
-  // clean; a better gearbox shifts faster too. All control, never a fudge.
+  // Transmission: clutch is the bite (when drive reconnects); gearbox is how
+  // fast the cogs swap. Skill is applied live in stepTransmission — a maxed
+  // clutch + skilled driver is a tap; stock is a held clunk.
   const clutchTier = partTiers.clutch ?? 0;
   const gearboxTier = partTiers.gearbox ?? 0;
-  const shiftTime = Math.max(0.1, 0.24 - 0.018 * (clutchTier + gearboxTier));
+  const shiftTime = Math.max(0.085, 0.34 - 0.05 * gearboxTier);
   const launchMul = Math.min(1.0, 0.82 + 0.045 * clutchTier);
   const kickMul = 1.0 + 0.15 * clutchTier;
+  const clutchSweet = 0.16 + 0.04 * clutchTier;
+  const clutchBiteDelay = Math.max(0.04, 0.3 - 0.052 * clutchTier);
 
   return {
     topSpeed,
@@ -98,6 +106,8 @@ function toPhysicsParams(display: DisplayStats, suspTier: number, condition: num
     shiftTime,
     launchMul,
     kickMul,
+    clutchSweet,
+    clutchBiteDelay,
   };
 }
 

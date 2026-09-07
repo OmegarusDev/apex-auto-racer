@@ -26,10 +26,12 @@ export interface VehicleInputs {
   /** Player pedal 0-1 (eased externally or here). */
   throttle: number;
   brake: number;
-  /** Edge-triggered upshift request (player Shift / touch SHIFT). */
+  /** Edge: start an auto-timed clutch cycle (headless / redline helper). */
   upshift?: boolean;
   /** Street clutch-kick while Shift held near limit (advanced). */
   clutchKick?: boolean;
+  /** Player clutch pedal held (Shift key / CLUTCH pad). */
+  clutchHeld?: boolean;
 }
 
 export interface VehicleUpdateContext {
@@ -95,6 +97,24 @@ export interface CarSimState extends VehicleState {
   shiftWindow: ShiftWindowKind;
   /** Clutch-kick timer (s). */
   clutchKickRemaining: number;
+  /** True while the clutch pedal is in (drive disconnected). */
+  clutchIn: boolean;
+  /** Drive connect 0 = fully in, 1 = fully out. */
+  clutchEngage: number;
+  /** Time the current clutch-in has been held (s). */
+  clutchTimer: number;
+  /** Gear selected at clutch-in (0 = none). */
+  clutchToGear: number;
+  /** Safety-net / script auto-release in the bite. */
+  clutchAuto: boolean;
+  /** Auto-release time (s from clutch-in). */
+  clutchAutoRelease: number;
+  /** Last-frame player clutch pedal (rising-edge detect). */
+  clutchPedal: boolean;
+  /** Re-engage quality after the last dump. */
+  clutchQuality: 'perfect' | 'dump' | 'slip' | null;
+  /** Gear direction chosen at clutch-in. */
+  clutchDir: 'up' | 'down' | 'same';
   /** Live garage force-path setup (mass/CG/aero/bias/compound). */
   setup: CarSetup;
   /** Street/Rally: Shift may clutch-kick when armed. */

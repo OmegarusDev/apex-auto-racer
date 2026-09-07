@@ -135,8 +135,22 @@ export class FxOneShots {
   }
 
   playShift(kind: ShiftKind): void {
-    if (kind === 'miss') return; // assisted gearbox never emits miss
     const t = this.buses.ctx.currentTime;
+    if (kind === 'miss') {
+      const osc = this.buses.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140, t);
+      osc.frequency.exponentialRampToValueAtTime(70, t + 0.1);
+      const g = this.buses.ctx.createGain();
+      g.gain.setValueAtTime(0.16, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      osc.connect(g);
+      g.connect(this.buses.fx);
+      osc.start(t);
+      osc.stop(t + 0.13);
+      this.playNoiseBurst(80, 500, 0.2);
+      return;
+    }
     const f0 = kind === 'up' ? 220 : 160;
     const f1 = kind === 'up' ? 320 : 120;
     const osc = this.buses.ctx.createOscillator();

@@ -122,9 +122,37 @@ export class GameContext {
     const gameSeed = seed ?? (Date.now() >>> 0);
     // Empty roster — the New Career flow creates the player's discipline-locked
     // driver via createDriver(); we never auto-seed a roster for a real save.
+    // Existing slots stay on disk until this career is persisted.
     const state = this.save.createNew(mulberry32(gameSeed), false);
     this._state = state;
     this.audio.setVolumes(state.options.volumes);
+    return state;
+  }
+
+  /** Drop an unpersisted New Career draft and reload the previous slot, if any. */
+  cancelNewCareer(): void {
+    const { state } = this.save.load();
+    this._state = state;
+    if (state !== null) {
+      this.audio.setVolumes(state.options.volumes);
+    }
+  }
+
+  loadCareer(id: string): GameState | null {
+    const { state } = this.save.selectSlot(id);
+    this._state = state;
+    if (state !== null) {
+      this.audio.setVolumes(state.options.volumes);
+    }
+    return state;
+  }
+
+  deleteCareer(id: string): GameState | null {
+    const { state } = this.save.deleteSlot(id);
+    this._state = state;
+    if (state !== null) {
+      this.audio.setVolumes(state.options.volumes);
+    }
     return state;
   }
 

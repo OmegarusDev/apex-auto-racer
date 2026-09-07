@@ -3,7 +3,6 @@ import { getGameContext } from '../engine/GameContext';
 import { refillObjectives } from '../engine/SaveManager';
 import { RANK_NAMES } from '../data/balance';
 import type { ResultsPayload } from '../career/resultsPayload';
-import type { DriverStatKey } from '../ui/components';
 import {
   drawHeader,
   handleHeader,
@@ -11,21 +10,16 @@ import {
   drawSectionTitle,
   drawButton,
   handleButton,
-  drawDriverSpendPanel,
-  handleDriverSpendPanel,
-  drawUpgradePanel,
-  handleUpgradePanel,
-  driverSpendPanelHeight,
-  upgradePanelHeight,
   layoutShell,
   ContentScroller,
   drawFooterActions,
   handleFooterActions,
+  paintFooterDock,
   fmtCash,
   pad,
   ensureMinTouch,
+  ctaHeight,
   ToastManager,
-  TooltipManager,
   truncateText,
   type ButtonDef,
   type UiContext,
@@ -37,20 +31,18 @@ import {
   onSceneResize,
 } from './sceneChrome';
 import { disciplineAccent } from '../career/disciplinesUi';
-import { buyPartWithDelta, driverSpendData, partInfoText, repairVehicle } from '../career/garage';
-import { grantXp, spendStatPoint } from '../career/xp';
+import { grantXp } from '../career/xp';
 import { findDriver } from '../career/roster';
 import { launchRace, makeQuickRaceConfig, makeTimeTrialConfig } from '../career/launchRace';
 import { CampaignScene } from './CampaignScene';
+import { GarageScene } from './GarageScene';
+import { TeamManagementScene } from './TeamManagementScene';
 
 export class ResultsScene implements Scene {
   readonly raceLaunchReplace = true;
   private readonly payload: ResultsPayload;
   private readonly tournamentMode: boolean;
   private toasts = new ToastManager();
-  private tooltips = new TooltipManager();
-  private upgradeCollapsed = false;
-  private selectedDriverIdx = 0;
   private applied = false;
   private scroller = new ContentScroller();
   private detachWheel: (() => void) | null = null;
@@ -219,10 +211,7 @@ export class ResultsScene implements Scene {
     this.navigateBack();
   }
 
-  private measureDoneContentH(
-    ui: UiContext,
-    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
-  ): number {
+  private measureDoneContentH(ui: UiContext): number {
     const { token } = ui;
     let h = this.podiumH(token) + pad(token, 1.25);
     if (this.tournamentMode) {
@@ -230,9 +219,8 @@ export class ResultsScene implements Scene {
       h += this.payload.standings.length * pad(token, 4) + pad(token, 1.25);
     }
     h += this.payoutBlockH(token);
-    h += pad(token, 0.75);
-    h += token.fontCaption + pad(token, 0.75);
-    h += this.xpBlockH(ui, state);
+    h += pad(token, 1);
+    h += this.careerNavH(token);
     h += pad(token, 1.5);
     return h;
   }
@@ -256,7 +244,7 @@ export class ResultsScene implements Scene {
 
   private payoutBlockH(token: UiContext['token']): number {
     const p = this.payload.payout;
-    const lines = [p.base, p.placement, p.objective, p.handsOff, p.entertainment, p.tournament].filter(
+    const lines = [p.base, p.placement, p.objective, p.entertainment, p.tournament].filter(
       (v) => v > 0,
     ).length;
     const rowH = token.fontBody * 1.55;
@@ -270,38 +258,8 @@ export class ResultsScene implements Scene {
     );
   }
 
-  private xpBlockH(
-    ui: UiContext,
-    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
-  ): number {
-    const grants = this.payload.driverXp;
-    if (grants.length === 0) return 0;
-    const grant = grants[this.selectedDriverIdx % grants.length];
-    if (grant === undefined) return 0;
-    const driver = findDriver(state, grant.driverId);
-    if (driver === undefined) return 0;
-    const navH =
-      grants.length > 1
-        ? ensureMinTouch(pad(ui.token, 4.5), ui.token) + pad(ui.token, 0.75)
-        : 0;
-    const spendH = driverSpendPanelHeight(
-      { x: 0, y: 0, w: 100, driver: driverSpendData(driver) },
-      ui.token,
-    );
-    const vehicle = state.vehicles[this.payload.discipline];
-    const upgradeH = upgradePanelHeight(
-      {
-        x: 0,
-        y: 0,
-        w: 100,
-        partTiers: vehicle.partTiers,
-        condition: vehicle.condition,
-        cash: state.cash,
-        collapsed: this.upgradeCollapsed,
-      },
-      ui.token,
-    );
-    return navH + spendH + pad(ui.token, 1.5) + upgradeH;
+  private careerNavH(token: UiContext['token']): number {
+    return Math.max(ctaHeight(token), ensureMinTouch(pad(token, 8), token));
   }
 
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -328,12 +286,10 @@ export class ResultsScene implements Scene {
     drawHeader(ctx, header, ui);
 
     const view = shell.contentRect;
-    const contentH = this.measureDoneContentH(ui, state);
+    const contentH = this.measureDoneContentH(ui);
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
-    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
-    this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
@@ -342,14 +298,32 @@ export class ResultsScene implements Scene {
       y = this.drawStandings(ctx, 0, y, view.w, lui);
     }
     y = this.drawPayout(ctx, 0, y, view.w, lui);
-    y += pad(token, 0.75);
-    y += drawSectionTitle(ctx, 0, y, 'Invest', lui);
-    y += pad(token, 0.25);
-    y = this.drawXpSection(ctx, 0, y, view.w, lui, state, tooltipOrigin);
+    y += pad(token, 1);
+    const gap = pad(token, 1);
+    const navH = this.careerNavH(token);
+    const navW = (view.w - gap) / 2;
+    const trainingBtn: ButtonDef = {
+      x: 0,
+      y,
+      w: navW,
+      h: navH,
+      label: 'Training',
+      primary: true,
+      onClick: () => g.scenes.push(new TeamManagementScene()),
+    };
+    const garageBtn: ButtonDef = {
+      x: navW + gap,
+      y,
+      w: navW,
+      h: navH,
+      label: 'Garage',
+      onClick: () => g.scenes.push(new GarageScene()),
+    };
+    drawButton(ctx, trainingBtn, lui);
+    drawButton(ctx, garageBtn, lui);
+    handleButton(trainingBtn, lui);
+    handleButton(garageBtn, lui);
     this.scroller.end(ctx);
-
-    this.tooltips.handle(lui, !this.scroller.isScrolling);
-    this.tooltips.draw(ctx, ui);
 
     const hasSeriesNext = this.payload.nextRaceConfig !== undefined;
     const isQuick = this.payload.config.mode === 'quick';
@@ -389,6 +363,7 @@ export class ResultsScene implements Scene {
     });
 
     if (shell.footerRect !== null) {
+      paintFooterDock(ctx, w, h, shell.footerRect, token);
       drawFooterActions(ctx, shell.footerRect, footerBtns, ui);
       handleFooterActions(footerBtns, ui);
     }
@@ -484,14 +459,7 @@ export class ResultsScene implements Scene {
     const bonusY = barsBottom + pad(token, 0.9);
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
     ctx.textAlign = 'center';
-    if (this.payload.handsOffBonus > 0) {
-      ctx.fillStyle = token.success;
-      ctx.fillText(
-        `Hands-off bonus: +${fmtCash(this.payload.handsOffBonus)} (${Math.round(this.payload.handsOffRatio * 100)}% idle)`,
-        x + w * 0.5,
-        bonusY,
-      );
-    } else if (this.payload.entertainmentBonus > 0) {
+    if (this.payload.entertainmentBonus > 0) {
       ctx.fillStyle = token.success;
       ctx.fillText(`Crowd bonus: +${fmtCash(this.payload.entertainmentBonus)}`, x + w * 0.5, bonusY);
     }
@@ -551,7 +519,6 @@ export class ResultsScene implements Scene {
       { label: 'Base', value: p.base },
       { label: 'Placement', value: p.placement },
       { label: 'Objectives', value: p.objective },
-      { label: 'Hands-off', value: p.handsOff },
       { label: 'Crowd', value: p.entertainment },
       { label: 'Tournament', value: p.tournament },
     ].filter((row) => row.value > 0);
@@ -584,116 +551,6 @@ export class ResultsScene implements Scene {
     ctx.fillText(fmtCash(p.total), x + w - pad(token, 1), y + totalH * 0.5);
     ctx.restore();
     return y + totalH + pad(token, 1.25);
-  }
-
-  private drawXpSection(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    w: number,
-    ui: UiContext,
-    state: NonNullable<ReturnType<typeof getGameContext>['state']>,
-    tooltipOrigin: { x: number; y: number },
-  ): number {
-    const grants = this.payload.driverXp;
-    if (grants.length === 0) return y;
-    const grant = grants[this.selectedDriverIdx % grants.length];
-    if (grant === undefined) return y;
-    const driver = findDriver(state, grant.driverId);
-    if (driver === undefined) return y;
-
-    const { token } = ui;
-    if (grants.length > 1) {
-      // Compact centered pager — arrows hug the counter instead of the edges.
-      const navH = ensureMinTouch(pad(token, 4.5), token);
-      const navW = navH; // square arrows — full touch target both axes
-      const pagerW = Math.min(w, navW * 2 + pad(token, 8));
-      const pagerX = x + (w - pagerW) * 0.5;
-      const prevBtn: ButtonDef = {
-        x: pagerX,
-        y,
-        w: navW,
-        h: navH,
-        label: '‹',
-        onClick: () => {
-          this.selectedDriverIdx =
-            (this.selectedDriverIdx - 1 + grants.length) % grants.length;
-        },
-      };
-      const nextBtn: ButtonDef = {
-        x: pagerX + pagerW - navW,
-        y,
-        w: navW,
-        h: navH,
-        label: '›',
-        onClick: () => {
-          this.selectedDriverIdx = (this.selectedDriverIdx + 1) % grants.length;
-        },
-      };
-      ctx.save();
-      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = token.textMuted;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(
-        `${this.selectedDriverIdx + 1} / ${grants.length}`,
-        pagerX + pagerW * 0.5,
-        y + navH * 0.5,
-      );
-      ctx.restore();
-      drawButton(ctx, prevBtn, ui);
-      drawButton(ctx, nextBtn, ui);
-      handleButton(prevBtn, ui);
-      handleButton(nextBtn, ui);
-      y += navH + pad(token, 0.75);
-    }
-
-    const spendPanel = {
-      x,
-      y,
-      w,
-      driver: driverSpendData(driver),
-      onSpend: (stat: DriverStatKey) => {
-        if (spendStatPoint(driver, stat)) getGameContext().autosave();
-      },
-      registerInfo: (rect: { x: number; y: number; w: number; h: number }, info: { title: string; body: string }) => {
-        this.tooltips.register(rect, info, tooltipOrigin);
-      },
-    };
-    drawDriverSpendPanel(ctx, spendPanel, ui);
-    handleDriverSpendPanel(spendPanel, ui);
-    y += driverSpendPanelHeight(spendPanel, ui.token) + pad(ui.token, 1.5);
-
-    const vehicle = state.vehicles[this.payload.discipline];
-    const upgradePanel = {
-      x,
-      y,
-      w,
-      partTiers: vehicle.partTiers,
-      condition: vehicle.condition,
-      cash: state.cash,
-      collapsed: this.upgradeCollapsed,
-      infoForPart: (part: import('../data/parts').PartCategory) => ({ title: part, body: partInfoText(part) }),
-      registerInfo: (rect: { x: number; y: number; w: number; h: number }, info: { title: string; body: string }) => {
-        this.tooltips.register(rect, info, tooltipOrigin);
-      },
-      onToggleCollapse: () => {
-        this.upgradeCollapsed = !this.upgradeCollapsed;
-      },
-      onBuy: (part: import('../data/parts').PartCategory) => {
-        const result = buyPartWithDelta(state, this.payload.discipline, part);
-        if (result.bought) {
-          this.toasts.push(result.summary, disciplineAccent(this.payload.discipline), 3);
-          getGameContext().autosave();
-        }
-      },
-      onRepair: () => {
-        if (repairVehicle(state, this.payload.discipline)) getGameContext().autosave();
-      },
-    };
-    drawUpgradePanel(ctx, upgradePanel, ui);
-    handleUpgradePanel(upgradePanel, ui);
-    return y + upgradePanelHeight(upgradePanel, ui.token);
   }
 }
 

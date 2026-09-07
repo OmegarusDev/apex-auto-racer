@@ -118,6 +118,8 @@ export interface HeaderDef {
   back?: boolean;
   cash?: number;
   settings?: boolean;
+  /** Skip the dark bar — icon chrome over title art. */
+  ghost?: boolean;
   onBack?: () => void;
   onSettings?: () => void;
 }
@@ -1117,7 +1119,7 @@ export class TooltipManager {
   }
 
   /** Draw the open tooltip card, viewport-clamped near its hotspot. */
-  draw(ctx: CanvasRenderingContext2D, ui: UiContext): void {
+  draw(ctx: CanvasRenderingContext2D, ui: UiContext, opts: { avoidBottomPx?: number } = {}): void {
     const spot = this.hotspots[this.activeIndex];
     if (!spot) return;
     const { token } = ui;
@@ -1143,7 +1145,10 @@ export class TooltipManager {
     if (y < token.safe.top + pad(token, 1)) {
       y = hy + spot.rect.h + pad(token, 0.75);
     }
-    y = Math.min(y, ui.h - token.safe.bottom - pad(token, 1) - boxH);
+    y = Math.min(
+      y,
+      ui.h - (opts.avoidBottomPx ?? 0) - token.safe.bottom - pad(token, 1) - boxH,
+    );
 
     ctx.save();
     ctx.fillStyle = token.card;
@@ -1415,6 +1420,72 @@ export function ctaHeight(token: ThemeTokens): number {
   return ensureMinTouch(pad(token, 7), token);
 }
 
+/** Shell footer height that fits one hero CTA plus thumb / home-indicator padding. */
+export function ctaFooterH(token: ThemeTokens): number {
+  return ctaHeight(token) + pad(token, 2) + token.safe.bottom;
+}
+
+/** Geometry of a hero CTA sitting at the top of a `ctaFooterH` band. */
+export function footerCtaRect(footer: Rect, token: ThemeTokens): Rect {
+  return {
+    x: footer.x,
+    y: footer.y,
+    w: footer.w,
+    h: ctaHeight(token),
+  };
+}
+
+function tokenBgFade(token: ThemeTokens, alpha: number): string {
+  const raw = token.bg.replace('#', '');
+  const hex = raw.length === 3 ? raw.split('').map((c) => c + c).join('') : raw;
+  const n = parseInt(hex, 16);
+  if (!Number.isFinite(n)) return `rgba(11,13,12,${alpha})`;
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/**
+ * Fade + solid dock under a pinned footer so scrolling content never
+ * reads as sitting on the action row.
+ */
+export function paintFooterDock(
+  ctx: CanvasRenderingContext2D,
+  screenW: number,
+  screenH: number,
+  footer: Rect,
+  token: ThemeTokens,
+): void {
+  const fadeH = pad(token, 2.5);
+  const fadeTop = Math.max(0, footer.y - fadeH);
+  ctx.save();
+  const fade = ctx.createLinearGradient(0, fadeTop, 0, footer.y);
+  fade.addColorStop(0, tokenBgFade(token, 0));
+  fade.addColorStop(1, token.bg);
+  ctx.fillStyle = fade;
+  ctx.fillRect(0, fadeTop, screenW, footer.y - fadeTop);
+  ctx.fillStyle = token.bg;
+  ctx.fillRect(0, footer.y, screenW, Math.max(0, screenH - footer.y));
+  ctx.restore();
+}
+
+/** Fill a footer band with the standard hero CTA (Resume / Start Race / Tuning). */
+export function heroFooterButton(
+  footer: Rect,
+  token: ThemeTokens,
+  spec: Omit<ButtonDef, 'x' | 'y' | 'w' | 'h'>,
+): ButtonDef {
+  const r = footerCtaRect(footer, token);
+  return {
+    ...spec,
+    ...r,
+    cta: true,
+    primary: spec.danger === true ? spec.primary : spec.primary !== false,
+    fontSize: spec.fontSize ?? token.fontDisplay,
+  };
+}
+
 /** "$12,400" — the one currency format across HUD + menus. */
 export function fmtCash(n: number): string {
   return `$${Math.round(n).toLocaleString('en-US')}`;
@@ -1486,10 +1557,12 @@ export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui:
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
 
   ctx.save();
-  ctx.fillStyle = 'rgba(11,13,12,0.78)';
-  ctx.fillRect(header.x, header.y, header.w, header.h);
-  ctx.fillStyle = `${accent}99`;
-  ctx.fillRect(header.x, header.y + header.h - 1, header.w, 1);
+  if (header.ghost !== true) {
+    ctx.fillStyle = 'rgba(11,13,12,0.78)';
+    ctx.fillRect(header.x, header.y, header.w, header.h);
+    ctx.fillStyle = `${accent}99`;
+    ctx.fillRect(header.x, header.y + header.h - 1, header.w, 1);
+  }
 
   let left = header.x + pad(token, 0.5) + token.safe.left;
   let right = header.x + header.w - pad(token, 0.5) - token.safe.right;

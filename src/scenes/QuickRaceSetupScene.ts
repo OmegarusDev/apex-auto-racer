@@ -13,7 +13,9 @@ import {
   layoutShell,
   ContentScroller,
   TooltipManager,
-  ctaHeight,
+  ctaFooterH,
+  paintFooterDock,
+  heroFooterButton,
   pad,
   ensureMinTouch,
   hitRect,
@@ -104,7 +106,10 @@ export class QuickRaceSetupScene implements Scene {
     const { ui, token } = buildUi(w, h, 0, accent);
     drawBackground(ctx, w, h, token, accent);
 
-    const shell = layoutShell(w, h, token, { footer: false });
+    const shell = layoutShell(w, h, token, {
+      footer: true,
+      footerH: ctaFooterH(token),
+    });
     const header = {
       x: shell.headerRect.x,
       y: shell.headerRect.y,
@@ -128,9 +133,7 @@ export class QuickRaceSetupScene implements Scene {
     const blurbLines = wrapText(ctx, disciplineQrBlurb(this.discipline), view.w - pad(token), 2).length;
 
     // Content height — mirrors the draw chain below exactly.
-    const heroCtaH = ctaHeight(token);
     const contentH =
-      heroCtaH + pad(token, 1.5) +
       token.fontCaption + pad(token, 0.75) + discH + pad(token, 0.75) +
       blurbLines * token.fontCaption + pad(token, 1.5) +
       token.fontCaption + pad(token, 0.75) +
@@ -145,26 +148,6 @@ export class QuickRaceSetupScene implements Scene {
     this.scroller.begin(ctx, view);
     let y = 0;
 
-    // ════════════════════════════════════════════
-    // PRIMARY CTA - START RACE (top, prominent)
-    // ════════════════════════════════════════════
-    const ctaBtn: ButtonDef = {
-      x: pad(token, 1.5),
-      y,
-      w: view.w - pad(token, 3),
-      h: heroCtaH,
-      label: 'Start Race',
-      cta: true,
-      fontSize: token.fontDisplay,
-      onClick: () => this.startRace(),
-    };
-    drawButton(ctx, ctaBtn, { ...lui, accent });
-    handleButton(ctaBtn, lui);
-    y += heroCtaH + pad(token, 1.5);
-
-    // ════════════════════════════════════════════
-    // DISCIPLINE SELECTOR (compact row)
-    // ════════════════════════════════════════════
     y += drawSectionTitle(ctx, 0, y, 'Discipline', lui);
 
     const gap = pad(token, 1);
@@ -267,11 +250,22 @@ export class QuickRaceSetupScene implements Scene {
 
     this.scroller.end(ctx);
 
+    const footer = shell.footerRect;
+    if (footer !== null) {
+      paintFooterDock(ctx, w, h, footer, token);
+      const ctaBtn = heroFooterButton(footer, token, {
+        label: 'Start Race',
+        onClick: () => this.startRace(),
+      });
+      drawButton(ctx, ctaBtn, ui);
+      if (!this.scroller.isScrolling) handleButton(ctaBtn, ui);
+    }
+
     this.tooltips.handle(lui, !this.scroller.isScrolling);
-    this.tooltips.draw(ctx, ui);
+    this.tooltips.draw(ctx, ui, { avoidBottomPx: footer?.h ?? 0 });
 
     handleHeader(header, ui);
-    this.toasts.draw(ctx, ui);
+    this.toasts.draw(ctx, ui, { avoidBottomPx: footer?.h ?? 0 });
   }
 }
 

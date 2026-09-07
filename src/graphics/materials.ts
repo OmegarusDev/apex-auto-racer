@@ -137,7 +137,7 @@ export function disciplineFromDef(d: DisciplineDef): ShellAccent {
 
 /** One-line QR setup blurb per discipline fantasy. */
 export function disciplineQrBlurb(id: DisciplineId): string {
-  if (id === 'street') return 'Walls bite · SHIFT while sliding = clutch-kick · watch the rev strip';
+  if (id === 'street') return 'Walls bite · dump the clutch in a slide to kick · watch the bite window';
   if (id === 'rally') return 'Loose ground · brake-pulse to slide · hold a gear through the dirt';
   return 'High grip · one-finger gas · stay in the groove on bends';
 }

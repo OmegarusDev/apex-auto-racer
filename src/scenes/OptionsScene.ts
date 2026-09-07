@@ -1,6 +1,7 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
-import { DEFAULT_RACE_ZOOM, type VolumeOptions } from '../engine/types';
+import { DEFAULT_RACE_ZOOM, DEFAULT_SPEED_UNIT, type VolumeOptions } from '../engine/types';
+import type { SpeedUnit } from '../engine/units';
 import {
   drawButton,
   handleButton,
@@ -25,7 +26,8 @@ import {
 import { ACCENT_TRACK } from '../ui/theme';
 import { HOW_TO_PLAY } from '../ui/howToPlay';
 import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneChrome';
-import { DisciplineSelectScene } from './DisciplineSelectScene';
+import { activeDriver } from '../engine/SaveManager';
+import { getDiscipline } from '../data/disciplines';
 
 export class OptionsScene implements Scene {
   private toasts = new ToastManager();
@@ -35,6 +37,7 @@ export class OptionsScene implements Scene {
   /** Live fallback so sliders work before any save exists. */
   private localVols: VolumeOptions | null = null;
   private localZoom: number | null = null;
+  private localSpeedUnit: SpeedUnit | null = null;
 
   enter(): void {
     onSceneEnter();
@@ -105,6 +108,25 @@ export class OptionsScene implements Scene {
     }
   }
 
+  private speedUnit(): SpeedUnit {
+    const g = getGameContext();
+    if (g.state !== null) {
+      const u = g.state.options.speedUnit;
+      return u === 'mph' ? 'mph' : DEFAULT_SPEED_UNIT;
+    }
+    return this.localSpeedUnit ?? DEFAULT_SPEED_UNIT;
+  }
+
+  private setSpeedUnit(unit: SpeedUnit): void {
+    const g = getGameContext();
+    if (g.state !== null) {
+      g.state.options.speedUnit = unit;
+      g.autosave();
+    } else {
+      this.localSpeedUnit = unit;
+    }
+  }
+
   private openHowTo(): void {
     this.modal = {
       open: true,
@@ -126,11 +148,17 @@ export class OptionsScene implements Scene {
     };
   }
 
-  private openNewCareerConfirm(): void {
+  private openDeleteConfirm(): void {
+    const g = getGameContext();
+    const driver = g.state !== null ? activeDriver(g.state) : null;
+    const slot = g.save.currentSlot();
+    const name = driver?.name ?? slot?.name ?? 'this career';
+    const disc = driver !== null ? getDiscipline(driver.discipline).name : slot !== null ? getDiscipline(slot.discipline).name : '';
+    const who = disc !== '' ? `${name}'s ${disc} career` : name;
     this.modal = {
       open: true,
-      title: 'New Career?',
-      body: 'This replaces your current career.\nThere is no undo.',
+      title: 'Delete save data?',
+      body: `${who} will be gone.\nOther careers are kept.`,
       buttons: [
         {
           x: 0,
@@ -149,17 +177,17 @@ export class OptionsScene implements Scene {
           h: 0,
           label: 'Continue',
           primary: true,
-          onClick: () => this.openNewCareerConfirm2(),
+          onClick: () => this.openDeleteConfirm2(),
         },
       ],
     };
   }
 
-  private openNewCareerConfirm2(): void {
+  private openDeleteConfirm2(): void {
     this.modal = {
       open: true,
-      title: 'Are you absolutely sure?',
-      body: 'All progress will be lost.',
+      title: 'Are you sure?',
+      body: 'This cannot be undone.',
       buttons: [
         {
           x: 0,
@@ -176,13 +204,16 @@ export class OptionsScene implements Scene {
           y: 0,
           w: 0,
           h: 0,
-          label: 'Start New',
+          label: 'Delete',
           danger: true,
           onClick: () => {
             const g = getGameContext();
-            g.startNewGame();
+            const id = g.save.currentSlot()?.id;
             this.modal.open = false;
-            g.scenes.replaceRoot(new DisciplineSelectScene());
+            if (id !== undefined) g.deleteCareer(id);
+            void import('./TitleScene').then(({ TitleScene }) => {
+              g.scenes.replaceRoot(new TitleScene());
+            });
           },
         },
       ],
@@ -222,7 +253,10 @@ export class OptionsScene implements Scene {
       rowH * 5 +
       sectionGap +
       token.fontCaption + pad(token, 0.75) + pad(token, 1) +
-      rowH;
+      rowH +
+      sectionGap +
+      token.fontCaption + pad(token, 0.75) + pad(token, 1) +
+      btnH;
     if (hasSave) {
       contentH +=
         sectionGap +
@@ -238,12 +272,11 @@ export class OptionsScene implements Scene {
     let y = 0;
 
     const howBtn: ButtonDef = {
-      x: pad(token, 1.5),
+      x: 0,
       y,
-      w: view.w - pad(token, 3),
+      w: view.w,
       h: btnH,
       label: 'How to Play',
-      primary: true,
       onClick: () => this.openHowTo(),
     };
     drawButton(ctx, howBtn, lui);
@@ -292,17 +325,50 @@ export class OptionsScene implements Scene {
     if (!this.modal.open) handleSlider(zoomSlider, lui);
     y += rowH;
 
+    y += sectionGap;
+    y += drawSectionTitle(ctx, 0, y, 'Units', lui);
+    y += pad(token, 1);
+    const unit = this.speedUnit();
+    const gap = pad(token, 1);
+    const unitW = (view.w - gap) / 2;
+    const kmhBtn: ButtonDef = {
+      x: 0,
+      y,
+      w: unitW,
+      h: btnH,
+      label: 'KM/H',
+      primary: unit === 'kmh',
+      onClick: () => this.setSpeedUnit('kmh'),
+    };
+    const mphBtn: ButtonDef = {
+      x: unitW + gap,
+      y,
+      w: unitW,
+      h: btnH,
+      label: 'MPH',
+      primary: unit === 'mph',
+      onClick: () => this.setSpeedUnit('mph'),
+    };
+    drawButton(ctx, kmhBtn, lui);
+    drawButton(ctx, mphBtn, lui);
+    if (!this.modal.open) {
+      handleButton(kmhBtn, lui);
+      handleButton(mphBtn, lui);
+    }
+    y += btnH;
+
     if (hasSave) {
       y += sectionGap;
-      y += drawSectionTitle(ctx, 0, y, 'Career', lui);
+      y += drawSectionTitle(ctx, 0, y, 'Save data', lui);
       y += pad(token, 1);
       const newBtn: ButtonDef = {
-        x: pad(token, 1.5),
+        x: 0,
         y,
-        w: view.w - pad(token, 3),
+        w: view.w,
         h: resetH,
-        label: 'New Career',
-        onClick: () => this.openNewCareerConfirm(),
+        label: 'Delete save data',
+        danger: true,
+        onClick: () => this.openDeleteConfirm(),
       };
       drawButton(ctx, newBtn, lui);
       if (!this.modal.open) handleButton(newBtn, lui);

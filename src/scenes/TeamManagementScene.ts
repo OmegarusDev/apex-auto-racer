@@ -6,8 +6,6 @@ import { hireCost } from '../engine/DriverGenerator';
 import type { DisciplineId, Driver } from '../engine/types';
 import type { DriverStatKey } from '../ui/components';
 import {
-  drawButton,
-  handleButton,
   drawHeader,
   handleHeader,
   drawSectionTitle,
@@ -20,8 +18,10 @@ import {
   drawDriverSpendPanel,
   handleDriverSpendPanel,
   driverSpendPanelHeight,
+  drawFooterActions,
+  handleFooterActions,
+  paintFooterDock,
   pad,
-  ensureMinTouch,
   fmtCash,
   ToastManager,
   type ButtonDef,
@@ -191,7 +191,7 @@ export class TeamManagementScene implements Scene {
     const roster = state.roster.filter((d) => d.discipline === discipline);
 
     const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
-    const shell = layoutShell(w, h, token);
+    const shell = layoutShell(w, h, token, { footer: true });
 
     drawBackground(ctx, w, h, token);
 
@@ -209,7 +209,6 @@ export class TeamManagementScene implements Scene {
 
     const view = shell.contentRect;
     const gap = pad(token, 0.75);
-    const rerollBtnH = Math.max(ensureMinTouch(pad(token, 5.5), token), pad(token, 6));
     const interactive = !this.modal.open;
 
     // Hotspots are registered in scroller-local space; tooltips draw in screen space.
@@ -260,7 +259,6 @@ export class TeamManagementScene implements Scene {
       pad(token) +
       token.fontCaption + pad(token, 1.5) +
       agentDefs.reduce((sum, def) => sum + driverSpendPanelHeight(def, token) + gap, 0) +
-      rerollBtnH +
       pad(token, 2);
 
     this.scroller.layout(view, contentH);
@@ -302,28 +300,31 @@ export class TeamManagementScene implements Scene {
       y += driverSpendPanelHeight(def, token) + gap;
     }
 
-    // Single refresh entry point — labelled as what it actually does.
-    const rerollBtn: ButtonDef = {
-      x: 0,
-      y,
-      w: view.w,
-      h: rerollBtnH,
-      label: `Refresh Agents (${fmtCash(BALANCE.freeAgentRerollCost)})`,
-      disabled: state.cash < BALANCE.freeAgentRerollCost,
-      onClick: () => this.rerollAgents(),
-    };
-    drawButton(ctx, rerollBtn, lui);
-    if (interactive) handleButton(rerollBtn, lui);
-
     this.scroller.end(ctx);
 
+    const footer = shell.footerRect;
+    if (footer !== null) {
+      paintFooterDock(ctx, w, h, footer, token);
+      const rerollBtn: ButtonDef = {
+        x: 0,
+        y: 0,
+        w: 0,
+        h: 0,
+        label: `Refresh Agents (${fmtCash(BALANCE.freeAgentRerollCost)})`,
+        disabled: state.cash < BALANCE.freeAgentRerollCost,
+        onClick: () => this.rerollAgents(),
+      };
+      drawFooterActions(ctx, footer, [rerollBtn], ui);
+      if (interactive && !this.scroller.isScrolling) handleFooterActions([rerollBtn], ui);
+    }
+
     this.tooltips.handle(lui, interactive && !this.scroller.isScrolling);
-    this.tooltips.draw(ctx, ui);
+    this.tooltips.draw(ctx, ui, { avoidBottomPx: footer?.h ?? 0 });
 
     handleHeader(header, ui);
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);
     handleModal(this.modal, ui);
-    this.toasts.draw(ctx, ui);
+    this.toasts.draw(ctx, ui, { avoidBottomPx: footer?.h ?? 0 });
   }
 }

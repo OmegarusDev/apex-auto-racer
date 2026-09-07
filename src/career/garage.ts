@@ -61,8 +61,23 @@ export function driverSpendData(driver: Driver) {
   };
 }
 
-/** Human-readable per-tier effect list for a part, e.g. "+5 Top Speed · +1 Accel / tier". */
+/** Human-readable per-tier effect list for a part. */
 export function partInfoText(part: PartCategory): string {
+  if (part === 'clutch') {
+    return 'Slower clunk at stock · upgrades make a tap-and-release shift.';
+  }
+  if (part === 'gearbox') {
+    return 'Faster, cleaner gear changes per tier.';
+  }
+  if (part === 'differential') {
+    return 'Tighter limited-slip lock per tier.';
+  }
+  if (part === 'suspension') {
+    return 'Stiffer load transfer · lower CG · quieter line per tier.';
+  }
+  if (part === 'tyres') {
+    return '+5 Grip (tyre µ) per tier.';
+  }
   const def = PARTS.find((p) => p.id === part);
   if (def === undefined) return '';
   const bits: string[] = [];
@@ -81,7 +96,7 @@ export function partInfoText(part: PartCategory): string {
   if (def.perTier.downforce !== undefined) {
     bits.push(`${signed(def.perTier.downforce)} Downforce`);
   }
-  return `${bits.join(' · ')} per tier.`;
+  return bits.length > 0 ? `${bits.join(' · ')} per tier.` : '';
 }
 
 function signed(n: number): string {
@@ -106,12 +121,24 @@ export function buyPartWithDelta(
   const after = effectiveStats(discipline, vehicle.partTiers, vehicle.condition);
   const dGrip = after.gripFactor - before.gripFactor;
   const dV = after.vMax - before.vMax;
+  const dSweet = after.clutchSweet - before.clutchSweet;
+  const dDelay = after.clutchBiteDelay - before.clutchBiteDelay;
+  const dShift = after.shiftTime - before.shiftTime;
   const bits: string[] = [];
   if (Math.abs(dGrip) >= 0.001) {
     bits.push(`grip ${dGrip >= 0 ? '+' : ''}${dGrip.toFixed(3)}`);
   }
   if (Math.abs(dV) >= 0.05) {
     bits.push(`vMax ${dV >= 0 ? '+' : ''}${dV.toFixed(1)}`);
+  }
+  if (Math.abs(dDelay) >= 0.005) {
+    bits.push(`delay ${dDelay >= 0 ? '+' : ''}${Math.round(dDelay * 1000)}ms`);
+  }
+  if (Math.abs(dSweet) >= 0.005) {
+    bits.push(`bite ${dSweet >= 0 ? '+' : ''}${Math.round(dSweet * 1000)}ms`);
+  }
+  if (Math.abs(dShift) >= 0.005) {
+    bits.push(`shift ${dShift >= 0 ? '+' : ''}${dShift.toFixed(2)}s`);
   }
   return {
     bought: true,

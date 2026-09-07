@@ -13,13 +13,14 @@ import {
   layoutShell,
   ContentScroller,
   TooltipManager,
-  ctaHeight,
+  ctaFooterH,
+  paintFooterDock,
+  heroFooterButton,
   pad,
   ensureMinTouch,
   statBarHeight,
   isPortrait,
   truncateText,
-  type ButtonDef,
   type UiContext,
 } from '../ui/components';
 import {
@@ -76,7 +77,10 @@ export class GarageScene implements Scene {
     const { ui, token } = buildUi(w, h, 0, accent);
 
     const vehicle = state.vehicles[discipline];
-    const shell = layoutShell(w, h, token);
+    const shell = layoutShell(w, h, token, {
+      footer: true,
+      footerH: ctaFooterH(token),
+    });
     const portrait = isPortrait(w, h);
 
     drawBackground(ctx, w, h, token);
@@ -103,7 +107,6 @@ export class GarageScene implements Scene {
       ? Math.min(view.w * 0.2, pad(token, 7))
       : Math.min(view.w * 0.16, pad(token, 7.5));
     const radarInset = pad(token, 2.5) + token.fontCaption;
-    const tuneH = ctaHeight(token);
 
     let contentH = pad(token, 0.25) + navSize + pad(token, 1);
     if (portrait) {
@@ -111,7 +114,7 @@ export class GarageScene implements Scene {
     } else {
       contentH += Math.max(carH, radarR * 2 + pad(token, 2.5)) + pad(token, 1);
     }
-    contentH += tuneH + pad(token, 1.5) + statBarHeight(token) + pad(token, 1);
+    contentH += statBarHeight(token) + pad(token, 1);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
@@ -197,20 +200,6 @@ export class GarageScene implements Scene {
       y += blockH + pad(token, 1);
     }
 
-    const tuneBtn: ButtonDef = {
-      x: pad(token, 1.5),
-      y,
-      w: view.w - pad(token, 3),
-      h: tuneH,
-      label: 'Tuning',
-      cta: true,
-      fontSize: token.fontDisplay,
-      onClick: () => g.scenes.push(new TuningScene(discipline)),
-    };
-    drawButton(ctx, tuneBtn, { ...lui, accent });
-    if (!this.scroller.isScrolling) handleButton(tuneBtn, lui);
-    y += tuneH + pad(token, 1.5);
-
     // Condition bar
     const conditionBar = {
       x: 0,
@@ -230,8 +219,19 @@ export class GarageScene implements Scene {
     y += statBarHeight(token) + pad(token, 1);
     this.scroller.end(ctx);
 
+    const footer = shell.footerRect;
+    if (footer !== null) {
+      paintFooterDock(ctx, w, h, footer, token);
+      const tuneBtn = heroFooterButton(footer, token, {
+        label: 'Tuning',
+        onClick: () => g.scenes.push(new TuningScene(discipline)),
+      });
+      drawButton(ctx, tuneBtn, ui);
+      if (!this.scroller.isScrolling) handleButton(tuneBtn, ui);
+    }
+
     this.tooltips.handle(lui, !this.scroller.isScrolling);
-    this.tooltips.draw(ctx, ui);
+    this.tooltips.draw(ctx, ui, { avoidBottomPx: footer?.h ?? 0 });
 
     handleHeader(header, ui);
   }

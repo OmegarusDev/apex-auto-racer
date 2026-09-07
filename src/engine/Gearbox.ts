@@ -1,7 +1,7 @@
 /**
  * Assisted gearbox — Scalextric-light with real-ish RPM/torque curves.
- * AI: auto up/down. Player: manual upshift (Shift/tap); auto downshift when off throttle.
- * Clutch-kick is a Shift dual-use channel (Street) — not a fourth pedal.
+ * AI: auto up/down. Player: clutch pedal (hold in, dump in the bite).
+ * Street: an early dump while sliding is a clutch-kick.
  */
 import { PHYSICS } from '../data/physics';
 import type { DisciplineId } from '../data/disciplines';

@@ -23,9 +23,12 @@ for (const [w, h, label] of sizes) {
   const menuBottom = L.menuY + titleMenuStackHeight(t, L.btnH);
   const logoH = measureTitleLogoHeight(L.apexSize);
   const logoBottom = L.logoY + logoH;
+  const fromBottom = h - menuBottom;
+  const minLift = t.safe.bottom + (L.mode === 'landscape' && h < 520 ? 20 : 28);
   const fits = menuBottom <= h - t.safe.bottom + 2;
+  const lifted = fromBottom >= minLift - 1;
   const clear = L.mode === 'landscape' ? L.menuY >= logoBottom - 2 : L.menuY >= logoBottom - 4;
-  const ok = fits && clear;
+  const ok = fits && clear && lifted;
   if (!ok) bad += 1;
   console.log(
     label.padEnd(18),
@@ -33,6 +36,7 @@ for (const [w, h, label] of sizes) {
     L.mode.padEnd(10),
     `apex=${Math.round(L.apexSize)}`,
     `btn=${Math.round(L.btnH)}`,
+    `lift=${Math.round(fromBottom)}`,
     ok ? 'OK' : 'BAD',
   );
 }

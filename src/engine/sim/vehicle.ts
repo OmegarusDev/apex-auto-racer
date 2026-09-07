@@ -251,7 +251,6 @@ export function stepVehicle(
   const r = car.yawRate;
   // slipAngle is the VELOCITY relative to the path (drives position).
   const theta = car.slipAngle;
-  const guard = Math.max(0.4, v);
   // Body slip (velocity − heading) = theta − headingErr; this is what the
   // tyres see. Separating the two stops the yaw from spinning "in place"
   // (r runaway with no body-slip response).
@@ -325,10 +324,10 @@ export function stepVehicle(
   const fyR = -lateralMax(muLatR, loads.fzRear, fzRef, fxR, muLongR, loads.fzRear);
 
   // Accelerations (body frame).
-  // Lateral grip vanishes at (near-)standstill — the tyres cannot generate
-  // meaningful lateral force without forward speed. This also kills the 1/v
-  // body-slip instability without erasing a genuine stopped-backward car.
-  const latScale = Math.min(1, v / 2);
+  // Pacejka 1/v is numerically angry when parked — scale tyre aY in only
+  // until walking pace. Real tyres still steer a rolling car at 1 m/s;
+  // the old v/2 scale made post-brake hairpins undriveable.
+  const latScale = Math.min(1, v / 0.7);
   const aX = (fxF + fxR) / mass - drag;
 
   const aY = ((fyF + fyR) / mass) * latScale;
@@ -359,25 +358,24 @@ export function stepVehicle(
   // Integrate.
   const dsDt = (v * Math.cos(theta)) / Math.max(0.2, 1 - kappa * car.l);
   car.v = Math.max(0, car.v + aX * dt);
-  car.yawRate = r + rDot * dt;
-  // Kinematic low-speed regime: only at a near-standstill (below ~1.2 m/s) the
-  // car pivots via steering — it MUST stay that low or the velocity-angle glue
-  // forces the car onto the path (a slot) and kills low-speed drifts. Above it
-  // the velocity follows the forces, so a car can slide at any cornering speed.
-  let thetaNext: number;
-  if (v < 1.2) {
-    const yawKin = (v * Math.tan(delta)) / Math.max(wb, 0.5);
-    car.yawRate = yawKin * 0.7 + r * 0.3;
-    thetaNext = theta - kappa * dsDt * dt;
-  } else {
-    // Velocity-path angle: lateral accel (rotates the velocity) minus path rotation.
-    thetaNext = theta + ((aY / guard - kappa * dsDt) * dt);
-  }
+  const yawKin = (v * Math.tan(delta)) / Math.max(wb, 0.5);
+  const yawDyn = r + rDot * dt;
+  // Crawl: bicycle no-slip — the car goes where the wheels point. The old
+  // branch rotated the body via steer but left velocity-path angle as
+  // "ribbon spinning under a world-straight vel", so a hairpin after a
+  // brake or from a stop drove straight off. Keep Pacejka once there is
+  // enough speed (and whenever already sliding — don't glue a spin).
+  const alreadySliding = Math.abs(bodySlip) > 0.35 || Math.abs(theta) > 0.7;
+  const dynW = alreadySliding ? 1 : smooth01(1.15, 3.05, v);
+  const kinW = 1 - dynW;
+  car.yawRate = kinW * yawKin + dynW * yawDyn;
   // Heading-path angle: yaw rate (rotates the heading) minus path rotation.
   // Wrapped so a car that rotates a full turn (a spin) doesn't carry an
   // unbounded heading error — the tyres read body slip = theta − headingErr.
   car.headingErr = clampBeta(headingErr + (car.yawRate - kappa * dsDt) * dt);
-  car.slipAngle = clampBeta(thetaNext);
+  const thetaKin = car.headingErr;
+  const thetaDyn = theta + (aY / Math.max(v, 1.2) - kappa * dsDt) * dt;
+  car.slipAngle = clampBeta(kinW * thetaKin + dynW * thetaDyn);
   car.dl = v * Math.sin(theta);
   car.aLong = aX;
   car.lastLateralG = aY / g;
@@ -472,6 +470,11 @@ function clampBeta(b: number): number {
   while (x > max) x -= 2 * max;
   while (x < -max) x += 2 * max;
   return x;
+}
+
+function smooth01(e0: number, e1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - e0) / Math.max(1e-6, e1 - e0)));
+  return t * t * (3 - 2 * t);
 }
 
 /**

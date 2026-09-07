@@ -12,6 +12,11 @@ import {
   handleHeader,
   hitRect,
   pad,
+  layoutShell,
+  ctaFooterH,
+  paintFooterDock,
+  heroFooterButton,
+  ensureMinTouch,
   truncateText,
   type ButtonDef,
   type HeaderDef,
@@ -22,8 +27,7 @@ import {
   onSceneEnter,
   onSceneResize,
 } from './sceneChrome';
-import { CareerHubScene } from './CareerHubScene';
-import { TitleScene } from './TitleScene';
+import { careerHomeScene } from './careerHome';
 import { mulberry32 } from '../engine/rng';
 
 const NAME_MAX = 16;
@@ -34,7 +38,6 @@ export class DriverCreateScene implements Scene {
   private editing = true;
   private colorIndex = 0;
   private traitIndex = 0;
-  private colorSwatches: { x: number; y: number; r: number; idx: number }[] = [];
   private nameBox = { x: 0, y: 0, w: 0, h: 0 };
   private keyHandler = (ev: KeyboardEvent) => this.onKey(ev);
 
@@ -65,7 +68,11 @@ export class DriverCreateScene implements Scene {
   handleBack(): boolean {
     const s = getGameContext().scenes;
     if (s.depth > 1) s.back();
-    else s.replace(new TitleScene());
+    else {
+      void import('./TitleScene').then(({ TitleScene }) => {
+        getGameContext().scenes.replace(new TitleScene());
+      });
+    }
     return true;
   }
 
@@ -93,26 +100,45 @@ export class DriverCreateScene implements Scene {
     const { ui, token } = buildUi(w, h, 0, def.accent);
     drawBackground(ctx, w, h, token, def.accent);
 
+    const shell = layoutShell(w, h, token, {
+      footer: true,
+      footerH: ctaFooterH(token),
+    });
+
     const header: HeaderDef = {
-      x: pad(token, 2),
-      y: pad(token, 2),
-      w: w - pad(token, 4),
-      h: Math.max(token.fontDisplay * 2.2, pad(token, 9)),
-      title: `New ${def.name} Driver`,
+      x: shell.headerRect.x,
+      y: shell.headerRect.y,
+      w: shell.headerRect.w,
+      h: shell.headerRect.h,
+      title: def.name,
       back: true,
       onBack: () => this.handleBack(),
     };
     drawHeader(ctx, header, ui);
     handleHeader(header, ui);
 
-    const top = header.y + header.h + pad(token, 3);
-    const cx = w / 2;
-    const fieldW = Math.min(w - pad(token, 4), token.fontDisplay * 22);
+    const view = shell.contentRect;
+    const fieldW = view.w;
+    const cx = view.x + fieldW / 2;
 
-    // Name field
-    const nameY = top;
-    const nameH = Math.max(pad(token, 9), token.fontDisplay * 1.8);
-    this.nameBox = { x: cx - fieldW / 2, y: nameY, w: fieldW, h: nameH };
+    ctx.save();
+    ctx.fillStyle = token.textMuted;
+    ctx.font = `400 ${token.fontBody}px ${token.fontFamily}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Name your driver.', view.x, view.y);
+    ctx.restore();
+
+    const nameH = Math.max(pad(token, 7), token.fontDisplay * 1.7);
+    const rerollW = ensureMinTouch(pad(token, 8), token);
+    const nameY = view.y + token.fontBody + pad(token, 1.5);
+    this.nameBox = {
+      x: view.x,
+      y: nameY,
+      w: fieldW - rerollW - pad(token, 1),
+      h: nameH,
+    };
+
     ctx.save();
     ctx.fillStyle = this.editing ? 'rgba(240,196,26,0.10)' : 'rgba(255,255,255,0.04)';
     ctx.strokeStyle = this.editing ? def.accent : 'rgba(255,255,255,0.18)';
@@ -121,28 +147,34 @@ export class DriverCreateScene implements Scene {
     ctx.roundRect(this.nameBox.x, this.nameBox.y, this.nameBox.w, this.nameBox.h, pad(token, 0.5));
     ctx.fill();
     ctx.stroke();
-    ctx.fillStyle = this.nameBuf.length > 0 ? '#f2efe6' : 'rgba(242,239,230,0.4)';
-    ctx.font = `600 ${token.fontDisplay}px Inter, system-ui, sans-serif`;
+    ctx.fillStyle = this.nameBuf.length > 0 ? token.text : token.textDim;
+    ctx.font = `600 ${token.fontDisplay}px ${token.fontDisplayFamily}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     const display = this.nameBuf.length > 0 ? this.nameBuf : 'Type a name…';
-    ctx.fillText(display, this.nameBox.x + pad(token, 1.5), this.nameBox.y + nameH / 2);
+    ctx.fillText(
+      truncateText(ctx, display, this.nameBox.w - pad(token, 3)),
+      this.nameBox.x + pad(token, 1.5),
+      this.nameBox.y + nameH / 2,
+    );
     if (this.editing && Math.floor(performance.now() / 500) % 2 === 0) {
-      const tw = ctx.measureText(display).width;
-      ctx.fillRect(this.nameBox.x + pad(token, 1.5) + tw + 2, this.nameBox.y + nameH * 0.25, 2, nameH * 0.5);
+      const tw = ctx.measureText(truncateText(ctx, display, this.nameBox.w - pad(token, 3))).width;
+      ctx.fillStyle = def.accent;
+      ctx.fillRect(
+        this.nameBox.x + pad(token, 1.5) + tw + 2,
+        this.nameBox.y + nameH * 0.28,
+        2,
+        nameH * 0.44,
+      );
     }
-    ctx.fillStyle = 'rgba(242,239,230,0.5)';
-    ctx.font = `400 ${token.fontCaption}px Inter, system-ui, sans-serif`;
-    ctx.textAlign = 'right';
-    ctx.fillText(`${this.nameBuf.length}/${NAME_MAX}`, this.nameBox.x + this.nameBox.w - pad(token, 1), this.nameBox.y - pad(token, 0.6));
     ctx.restore();
 
     const reroll: ButtonDef = {
-      x: this.nameBox.x,
-      y: this.nameBox.y + this.nameBox.h + pad(token, 1),
-      w: this.nameBox.w,
-      h: Math.max(pad(token, 5), token.fontBody * 2.4),
-      label: 'Reroll Name',
+      x: this.nameBox.x + this.nameBox.w + pad(token, 1),
+      y: this.nameBox.y,
+      w: rerollW,
+      h: nameH,
+      label: 'Reroll',
       onClick: () => {
         this.randomName();
         this.editing = true;
@@ -150,29 +182,30 @@ export class DriverCreateScene implements Scene {
     };
     drawButton(ctx, reroll, ui);
     handleButton(reroll, ui);
+
     if (ui.pointerClicked && hitRect(ui.pointerX, ui.pointerY, this.nameBox.x, this.nameBox.y, this.nameBox.w, this.nameBox.h)) {
       this.editing = true;
-    } else if (ui.pointerClicked && !hitRect(ui.pointerX, ui.pointerY, reroll.x, reroll.y, reroll.w, reroll.h)) {
+    } else if (
+      ui.pointerClicked &&
+      !hitRect(ui.pointerX, ui.pointerY, reroll.x, reroll.y, reroll.w, reroll.h)
+    ) {
       this.editing = false;
     }
 
-    // Colour picker
-    const swatchY = reroll.y + reroll.h + pad(token, 3);
-    ctx.save();
-    ctx.fillStyle = 'rgba(242,239,230,0.7)';
-    ctx.font = `600 ${token.fontBody}px Inter, system-ui, sans-serif`;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.fillText('Helmet Colour', this.nameBox.x, swatchY - pad(token, 0.6));
-    ctx.restore();
-
     const sw = pad(token, 4);
     const gap = pad(token, 1);
+    const swatchY = this.nameBox.y + this.nameBox.h + pad(token, 3);
+    ctx.save();
+    ctx.fillStyle = token.textMuted;
+    ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('HELMET', view.x, swatchY - pad(token, 0.6));
+    ctx.restore();
+
     const totalW = DRIVER_COLORS.length * sw + (DRIVER_COLORS.length - 1) * gap;
     let sx = cx - totalW / 2;
-    this.colorSwatches = [];
     DRIVER_COLORS.forEach((col, i) => {
-      this.colorSwatches.push({ x: sx, y: swatchY, r: sw / 2, idx: i });
       ctx.save();
       ctx.fillStyle = col;
       ctx.beginPath();
@@ -192,53 +225,70 @@ export class DriverCreateScene implements Scene {
       sx += sw + gap;
     });
 
-    // Trait picker
     const traitY = swatchY + sw + pad(token, 3);
     const trait = TRAITS[this.traitIndex]!;
-    const traitBtn: ButtonDef = {
-      x: this.nameBox.x,
+    const chevW = ensureMinTouch(pad(token, 5.5), token);
+    const traitH = Math.max(pad(token, 9), token.fontBody * 3.4);
+    const prev: ButtonDef = {
+      x: view.x,
       y: traitY,
-      w: this.nameBox.w,
-      h: Math.max(pad(token, 7), token.fontBody * 3),
-      label: '',
+      w: chevW,
+      h: traitH,
+      label: '<',
+      onClick: () => {
+        this.traitIndex = (this.traitIndex + TRAITS.length - 1) % TRAITS.length;
+      },
+    };
+    const next: ButtonDef = {
+      x: view.x + fieldW - chevW,
+      y: traitY,
+      w: chevW,
+      h: traitH,
+      label: '>',
       onClick: () => {
         this.traitIndex = (this.traitIndex + 1) % TRAITS.length;
       },
     };
-    drawButton(ctx, traitBtn, ui);
-    handleButton(traitBtn, ui);
+    drawButton(ctx, prev, ui);
+    drawButton(ctx, next, ui);
+    handleButton(prev, ui);
+    handleButton(next, ui);
+
     ctx.save();
+    const bodyX = prev.x + prev.w + pad(token, 1);
+    const bodyW = next.x - bodyX - pad(token, 1);
+    ctx.fillStyle = token.card;
+    ctx.beginPath();
+    ctx.roundRect(bodyX, traitY, bodyW, traitH, pad(token, 0.4));
+    ctx.fill();
     ctx.fillStyle = def.accent;
-    ctx.font = `600 ${token.fontBody}px Inter, system-ui, sans-serif`;
+    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillText(`Trait: ${trait.name}`, traitBtn.x + pad(token, 1.5), traitBtn.y + pad(token, 1));
-    ctx.fillStyle = 'rgba(242,239,230,0.62)';
-    ctx.font = `400 ${token.fontCaption}px Inter, system-ui, sans-serif`;
-    const desc = truncateText(ctx, trait.description, traitBtn.w - pad(token, 3));
-    ctx.fillText(desc, traitBtn.x + pad(token, 1.5), traitBtn.y + pad(token, 1) + token.fontBody * 1.6);
-    ctx.fillStyle = 'rgba(242,239,230,0.4)';
-    ctx.textAlign = 'right';
-    ctx.fillText('tap to change', traitBtn.x + traitBtn.w - pad(token, 1.5), traitBtn.y + pad(token, 1));
+    ctx.fillText(trait.name, bodyX + pad(token, 1.5), traitY + pad(token, 1.2));
+    ctx.fillStyle = token.textMuted;
+    ctx.font = `400 ${token.fontCaption}px ${token.fontFamily}`;
+    ctx.fillText(
+      truncateText(ctx, trait.description, bodyW - pad(token, 3)),
+      bodyX + pad(token, 1.5),
+      traitY + pad(token, 1.2) + token.fontBody * 1.5,
+    );
     ctx.restore();
 
-    // Confirm
-    const confirm: ButtonDef = {
-      x: this.nameBox.x,
-      y: traitBtn.y + traitBtn.h + pad(token, 3),
-      w: this.nameBox.w,
-      h: Math.max(pad(token, 8), token.fontDisplay * 1.6),
-      label: 'Create Driver  →',
-      primary: true,
-      onClick: () => this.confirm(),
-    };
-    drawButton(ctx, confirm, ui);
-    handleButton(confirm, ui);
+    const footer = shell.footerRect;
+    if (footer !== null) {
+      paintFooterDock(ctx, w, h, footer, token);
+      const confirm = heroFooterButton(footer, token, {
+        label: 'Create Driver',
+        onClick: () => this.confirm(),
+      });
+      drawButton(ctx, confirm, ui);
+      handleButton(confirm, ui);
+    }
   }
 
   private confirm(): void {
     const g = getGameContext();
-    if (g.state === null) g.bootstrap();
     const state = g.state;
     if (state === null) return;
     const rng = mulberry32((Date.now() ^ (Math.random() * 1e9)) >>> 0);
@@ -251,6 +301,9 @@ export class DriverCreateScene implements Scene {
     setActiveDriver(state, driver.id);
     g.state = state;
     g.autosave();
-    g.scenes.replaceRoot(new CareerHubScene());
+    void import('./TitleScene').then(({ TitleScene }) => {
+      g.scenes.replaceRoot(new TitleScene());
+      g.scenes.push(careerHomeScene());
+    });
   }
 }

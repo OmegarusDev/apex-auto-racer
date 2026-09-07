@@ -37,6 +37,7 @@ import {
 } from '../career/garage';
 import { carSetupFromParts, tuningSpeedReadout } from '../engine/vehicle/CarSetup';
 import { effectiveStats } from '../engine/stats';
+import { DEFAULT_SPEED_UNIT, formatSpeed, speedUnitLabel } from '../engine/units';
 
 /** One labeled pace row: caption left, value right, ⓘ at the edge. */
 interface PaceRow {
@@ -92,10 +93,12 @@ export class TuningScene implements Scene {
     const stats = effectiveStats(this.discipline, vehicle.partTiers, vehicle.condition);
     const mu = getDiscipline(this.discipline).muSurface;
     const readout = tuningSpeedReadout(setup, mu, stats.aAccel, stats.D);
+    const unit = getGameContext().state?.options.speedUnit ?? DEFAULT_SPEED_UNIT;
+    const unitTag = speedUnitLabel(unit);
     return [
       {
         label: 'Corner peg',
-        value: `~${readout.vDeslot.toFixed(1)} m/s`,
+        value: `~${formatSpeed(readout.vDeslot, unit)} ${unitTag}`,
         info: {
           title: 'Corner peg',
           body: 'Predicted speed through a typical tight corner at the very edge of grip — the anchor your braking points hang off.',
@@ -103,7 +106,7 @@ export class TuningScene implements Scene {
       },
       {
         label: 'Aero limit',
-        value: `~${readout.vMax.toFixed(1)} m/s`,
+        value: `~${formatSpeed(readout.vMax, unit)} ${unitTag}`,
         info: {
           title: 'Aero limit',
           body: 'Straight-line top speed after paying the drag bill — wings add corner grip but bleed straight-line pace.',
@@ -244,7 +247,7 @@ export class TuningScene implements Scene {
         { x: icx - r * 1.6, y: icy - r * 1.6, w: r * 3.2, h: r * 3.2 },
         {
           title: 'Performance',
-          body: 'Ratings come from part tiers. Top Speed & Accel set straight-line pace; Braking stops later; Grip holds corners; Downforce pins the car in its slot.',
+          body: 'Ratings come from part tiers. Top Speed & Accel set straight-line pace; Braking stops later; Grip is the tyres (how hard you can corner); suspension plants the car; Downforce adds grip at speed.',
         },
         tooltipOrigin,
       );
@@ -320,8 +323,8 @@ export class TuningScene implements Scene {
     }
     this.previewPart = hoveredPart;
 
-    drawUpgradePanel(ctx, { ...panel, y }, ui);
-    handleUpgradePanel({ ...panel, y }, ui);
+    drawUpgradePanel(ctx, { ...panel, y }, lui);
+    handleUpgradePanel({ ...panel, y }, lui);
     y += upgradePanelHeight(panel, token);
 
     this.scroller.end(ctx);

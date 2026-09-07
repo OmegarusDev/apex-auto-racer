@@ -94,8 +94,7 @@ export function updateVehicle(
     (mods.aAccel ?? car.stats.aAccel) *
     (1 + PHYSICS.draftAccelBonus * ctx.draft) *
     // Clutch launch quality: a low-clutch car bogs off the line, a good one
-    // launches clean. Only bite at launch speed (a clutch isn't slipping at
-    // 100 km/h).
+    // launches clean. Only bite at launch speed (v < 8 m/s ≈ 29 km/h).
     (car.v < 8 ? (car.stats.launchMul ?? 1) : 1);
   const aBrakeEff = mods.aBrake ?? car.stats.aBrake;
 
@@ -110,6 +109,7 @@ export function updateVehicle(
     car.isPlayerControlled,
     Math.max(0, Math.min(1, ctx.skill / 100)),
     inputs.clutchKick === true,
+    inputs.clutchHeld === true,
   );
 
   // Steering: the driver commands it (rad). Default to 0 if absent.

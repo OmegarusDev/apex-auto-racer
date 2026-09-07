@@ -445,8 +445,12 @@ export interface TitleScreenLayout {
   menuW: number;
   btnH: number;
   btnGap: number;
-  /** Display label size for title menu buttons. */
+  /** Display label size for the yellow CTA. */
   btnFont: number;
+  /** Display label size for the two plates and Quick Race. */
+  plateFont: number;
+  /** Extra space between the last menu row and the safe/margin floor. */
+  menuBottomPad: number;
   /** Y where bottom readability fade should begin. */
   fadeTop: number;
   /** Optional scrim behind the menu column (portrait). */
@@ -462,23 +466,43 @@ export interface TitleMenuRows {
   primary: number;
   linkRow: number;
   gap: number;
+  quietRow: number;
+  quietGap: number;
 }
 
 /**
- * Title menu: one CTA plus a text-link row. Layout reserve and TitleScene
- * both call this — they cannot drift.
+ * Title menu: one yellow CTA, two plates, then a full-width Quick Race plate
+ * (or a tagline in that same slot). Layout reserve and TitleScene both call
+ * this — they cannot drift.
  */
 export function titleMenuRowHeights(token: ThemeTokens, btnH: number): TitleMenuRows {
+  const secondary = Math.max(token.touchMin, Math.round(btnH * 0.92), pad(token, 6));
   return {
-    primary: Math.max(btnH + pad(token, 1), pad(token, 7)),
-    linkRow: Math.max(token.touchMin, pad(token, 5)),
-    gap: pad(token, 1.25),
+    primary: Math.max(btnH + pad(token, 1.25), pad(token, 7.5)),
+    linkRow: secondary,
+    gap: pad(token, 1.35),
+    quietGap: pad(token, 1.15),
+    quietRow: secondary,
   };
+}
+
+/** Keep the stack off the physical bottom edge in both orientations. */
+export function titleMenuBottomPad(token: ThemeTokens, w: number, h: number): number {
+  const phone = Math.min(w, h) < 520;
+  const landscape = w / Math.max(h, 1) >= 1.15;
+  if (landscape) {
+    return phone
+      ? Math.max(24, pad(token, 3), h * 0.06)
+      : Math.max(32, pad(token, 3.5));
+  }
+  return phone
+    ? Math.max(40, pad(token, 5), h * 0.05)
+    : Math.max(44, pad(token, 5.5));
 }
 
 export function titleMenuStackHeight(token: ThemeTokens, btnH: number): number {
   const r = titleMenuRowHeights(token, btnH);
-  return r.primary + r.gap + r.linkRow;
+  return r.primary + r.gap + r.linkRow + r.quietGap + r.quietRow;
 }
 
 export function computeTitleLayout(w: number, h: number, token: ThemeTokens): TitleScreenLayout {
@@ -499,16 +523,25 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     ? Math.max(token.touchMin * 1.28, pad(token, 7.25), 56)
     : Math.max(token.touchMin * 1.1, pad(token, 5.75), 50);
   let btnGap = phone ? Math.max(10, pad(token, 1.15)) : Math.max(8, pad(token, 0.85));
+  const bottomPad = titleMenuBottomPad(token, w, h);
   let menuH = titleMenuStackHeight(token, btnH);
   const btnFontFor = (height: number): number =>
     Math.max(
       token.fontTitle,
-      Math.min(height * 0.44, phone ? token.fontDisplay * 1.05 : token.fontDisplay * 0.9),
+      Math.min(height * 0.5, phone ? token.fontDisplay * 1.18 : token.fontDisplay * 1.05),
+    );
+  const plateFontFor = (height: number): number =>
+    Math.max(
+      token.fontTitle,
+      Math.min(height * 0.42, phone ? token.fontDisplay * 0.95 : token.fontDisplay * 0.85),
     );
 
   if (landscape) {
     // Give the menu column room — don't crush buttons on phones in landscape.
-    const menuBudget = innerH * (shortH || phone ? 0.88 : 0.62);
+    const menuBudget = Math.max(
+      token.touchMin * 3,
+      (innerH - bottomPad) * (shortH || phone ? 0.88 : 0.62),
+    );
     if (menuH > menuBudget) {
       const s = menuBudget / menuH;
       btnH = Math.max(token.touchMin, btnH * s);
@@ -533,14 +566,15 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     // The menu may never paint over the brand — shrink buttons (touchMin floor)
     // rather than cover the wordmark.
     const menuFloor = logoY + logoH + margin;
-    const availForMenu = innerB - menuFloor;
+    const menuAnchor = innerB - bottomPad;
+    const availForMenu = menuAnchor - menuFloor;
     if (menuH > availForMenu && availForMenu > 0) {
       const s = availForMenu / menuH;
       btnH = Math.max(token.touchMin, btnH * s);
       btnGap = Math.max(phone ? 6 : 4, btnGap * s);
       menuH = titleMenuStackHeight(token, btnH);
     }
-    const menuY = Math.max(menuFloor, innerB - menuH);
+    const menuY = Math.max(menuFloor, menuAnchor - menuH);
 
     const trackLeft = colX + colW + margin;
     const trackRight = innerR;
@@ -566,6 +600,8 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
       btnH,
       btnGap,
       btnFont: btnFontFor(btnH),
+      plateFont: plateFontFor(Math.max(token.touchMin, Math.round(btnH * 0.92))),
+      menuBottomPad: bottomPad,
       fadeTop: menuY - margin,
       menuScrim: {
         x: colX - scrimPad,
@@ -578,7 +614,8 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
 
   // Portrait / square — brand top, track mid, menu bottom.
   // Reserve a larger share for the menu so buttons stay fat on phones.
-  const menuBudget = innerH * (phone ? 0.46 : h < 700 ? 0.4 : 0.36);
+  const menuAnchor = innerB - bottomPad;
+  const menuBudget = (innerH - bottomPad) * (phone ? 0.46 : h < 700 ? 0.4 : 0.36);
   if (menuH > menuBudget) {
     const s = menuBudget / menuH;
     btnH = Math.max(token.touchMin, btnH * s);
@@ -588,7 +625,7 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
 
   const menuW = Math.min(innerW, Math.min(phone ? 480 : 420, Math.max(phone ? 300 : 260, w * 0.9)));
   const menuX = innerL + (innerW - menuW) * 0.5;
-  const menuY = innerB - menuH;
+  const menuY = menuAnchor - menuH;
 
   const brandCeiling = menuY - margin * 1.5;
   const apexSize = Math.min(
@@ -634,6 +671,8 @@ export function computeTitleLayout(w: number, h: number, token: ThemeTokens): Ti
     btnH,
     btnGap,
     btnFont: btnFontFor(btnH),
+    plateFont: plateFontFor(Math.max(token.touchMin, Math.round(btnH * 0.92))),
+    menuBottomPad: bottomPad,
     fadeTop: menuY - trackBand * 0.35,
     menuScrim,
   };

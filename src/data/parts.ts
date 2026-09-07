@@ -58,7 +58,7 @@ export const PARTS: PartDef[] = [
     id: 'suspension',
     name: 'Suspension',
     baseCost: 450,
-    perTier: { grip: 2 },
+    perTier: {},
   },
   {
     id: 'spoiler',
@@ -70,19 +70,19 @@ export const PARTS: PartDef[] = [
     id: 'clutch',
     name: 'Clutch',
     baseCost: 320,
-    perTier: { acceleration: 1 },
+    perTier: {},
   },
   {
     id: 'gearbox',
     name: 'Gearbox',
     baseCost: 520,
-    perTier: { topSpeed: 2 },
+    perTier: {},
   },
   {
     id: 'differential',
     name: 'Differential',
     baseCost: 460,
-    perTier: { grip: 1 },
+    perTier: {},
   },
 ];
 

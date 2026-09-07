@@ -4,20 +4,36 @@ export const PHYSICS = {
   dt: 1 / 120,
   brainEveryN: 4,
   g: 9.81,
-  carLength: 5.1,
-  carWidth: 2.3,
+  /**
+   * Car size in world metres. Mesh, contact, and HUD speed share this frame:
+   * v is m/s along the track, km/h = v × 3.6. Do not add a second toy scale
+   * on draw — that makes the speedo lie relative to body lengths.
+   * A touch larger than a 5 m GT so the field reads on 27–36 m ribbons.
+   */
+  carLength: 6.6,
+  carWidth: 2.95,
   pedalEaseMs: 80,
   /** Cosmetic/engine RPM anchors for the assisted gearbox. */
   rpmIdle: 900,
   rpmMin: 2500,
   rpmMax: 8000,
-  /** Seconds after a shift before another upshift is accepted. */
+  /** Seconds after a shift before another clutch-in is accepted. */
   shiftCooldown: 0.2,
   /**
-   * Pin-throttle safety net: player auto-upshifts after this long held at the
-   * redline band. Manual Shift earlier (green window) stays the fast path.
+   * Pin-throttle safety net: after this long at the redline the car clutches
+   * itself and dumps in the bite — so a held-gas player is never stuck in gear.
    */
   redlineAutoShiftSec: 1.0,
+  /** Delay after clutch-in before the bite window opens (s). Stock fallback. */
+  clutchBiteDelay: 0.3,
+  /** Force-dump if the pedal stays in this long (late slip). */
+  clutchMaxHold: 0.78,
+  /** Drive reconnect time after a perfect dump (s). */
+  clutchEngagePerfect: 0.07,
+  /** Drive reconnect time after an early dump (s). */
+  clutchEngageDump: 0.22,
+  /** Drive reconnect time after a late dump (s). */
+  clutchEngageSlip: 0.28,
   /** Redline dwell decays this fast (1/s) when not pinned in red. */
   redlineDwellDecay: 2.5,
   /**
@@ -36,7 +52,7 @@ export const PHYSICS = {
    * Equals half carWidth so the body edge meets the visible wall/kerb rim —
    * never an arbitrary mid-asphalt clamp.
    */
-  wallMargin: 1.15,
+  wallMargin: 1.475,
   /** Starting-grid row spacing along the track (m). */
   gridRowSpacing: 12,
   /** Grid gap (m) from the start/finish line to the front row — the whole

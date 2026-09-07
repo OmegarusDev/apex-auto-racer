@@ -51,6 +51,149 @@ export function buildCircleTrack(radius: number, width = 30, runoff = 6, ds = 2)
   } as TrackData;
 }
 
+/** Geometry for the crawl-hairpin feel gates. */
+export const HAIRPIN = {
+  radius: 10,
+  straight: 48,
+  width: 28,
+  runoff: 6,
+} as const;
+
+/**
+ * Straight → 180° of R=10 → straight. Isolates "from a stop / after a brake,
+ * the car must still take the U-turn" — a circle at speed cannot catch that.
+ */
+export function buildHairpinTrack(ds = 2): TrackData {
+  const radius = HAIRPIN.radius;
+  const straight = HAIRPIN.straight;
+  const width = HAIRPIN.width;
+  const runoff = HAIRPIN.runoff;
+  const arcLen = Math.PI * radius;
+  const length = straight * 2 + arcLen;
+  const n = Math.max(48, Math.ceil(length / ds));
+  const nodes = [];
+  for (let i = 0; i < n; i++) {
+    const s = (i * length) / n;
+    let x: number;
+    let y: number;
+    let tx: number;
+    let ty: number;
+    let kappa = 0;
+    if (s <= straight) {
+      x = s;
+      y = 0;
+      tx = 1;
+      ty = 0;
+    } else if (s <= straight + arcLen) {
+      const a = (s - straight) / radius;
+      const ang = -Math.PI / 2 + a;
+      x = straight + radius * Math.cos(ang);
+      y = radius + radius * Math.sin(ang);
+      tx = -Math.sin(ang);
+      ty = Math.cos(ang);
+      kappa = 1 / radius;
+    } else {
+      const t = s - straight - arcLen;
+      x = straight - t;
+      y = 2 * radius;
+      tx = -1;
+      ty = 0;
+    }
+    nodes.push({
+      pos: { x, y },
+      tangent: { x: tx, y: ty },
+      normal: { x: -ty, y: tx },
+      s,
+      width,
+      runoffWidth: runoff,
+      kappa,
+      kappaLine: kappa,
+      o: 0,
+    });
+  }
+  const pad = width + 8;
+  return {
+    length,
+    nodes,
+    archetype: 'oval',
+    seed: 1,
+    discipline: 'track',
+    bounds: { minX: -pad, minY: -pad, maxX: straight + radius + pad, maxY: 2 * radius + pad },
+  } as TrackData;
+}
+
+/** Left then right 90° — the geometry that used to make drivers steer into the second apex. */
+export const SBEND = { radius: 12, straight: 30, width: 28, runoff: 6 } as const;
+
+export function buildSBendTrack(ds = 2): TrackData {
+  const R = SBEND.radius;
+  const straight = SBEND.straight;
+  const width = SBEND.width;
+  const runoff = SBEND.runoff;
+  const arc = (Math.PI / 2) * R;
+  const length = straight * 2 + arc * 2;
+  const n = Math.max(48, Math.ceil(length / ds));
+  const nodes = [];
+  for (let i = 0; i < n; i++) {
+    const s = (i * length) / n;
+    let x: number;
+    let y: number;
+    let tx: number;
+    let ty: number;
+    let kappa = 0;
+    if (s <= straight) {
+      x = s;
+      y = 0;
+      tx = 1;
+      ty = 0;
+    } else if (s <= straight + arc) {
+      const a = (s - straight) / R;
+      const ang = -Math.PI / 2 + a;
+      x = straight + R * Math.cos(ang);
+      y = R + R * Math.sin(ang);
+      tx = -Math.sin(ang);
+      ty = Math.cos(ang);
+      kappa = 1 / R;
+    } else if (s <= straight + arc * 2) {
+      const a = (s - straight - arc) / R;
+      const ang = Math.PI - a;
+      const cx = straight + 2 * R;
+      const cy = R;
+      x = cx + R * Math.cos(ang);
+      y = cy + R * Math.sin(ang);
+      tx = Math.sin(ang);
+      ty = -Math.cos(ang);
+      kappa = -1 / R;
+    } else {
+      const t = s - straight - arc * 2;
+      x = straight + 2 * R + t;
+      y = 2 * R;
+      tx = 1;
+      ty = 0;
+    }
+    nodes.push({
+      pos: { x, y },
+      tangent: { x: tx, y: ty },
+      normal: { x: -ty, y: tx },
+      s,
+      width,
+      runoffWidth: runoff,
+      kappa,
+      kappaLine: kappa,
+      o: 0,
+    });
+  }
+  const pad = width + 8;
+  return {
+    length,
+    nodes,
+    archetype: 'oval',
+    seed: 1,
+    discipline: 'track',
+    bounds: { minX: -pad, minY: -pad, maxX: straight + 2 * R + straight + pad, maxY: 2 * R + pad },
+  } as TrackData;
+}
+
 function makeDriver(id: string, skill = 40): Driver {
   return {
     id,

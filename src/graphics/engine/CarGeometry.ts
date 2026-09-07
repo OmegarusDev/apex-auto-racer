@@ -71,12 +71,12 @@ export function buildCarGeometry(): { vertices: Float32Array; indices: Uint16Arr
  */
 export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Uint16Array | Uint32Array } {
   const mb = new MeshBuilder();
-  // The rendered car is scaled 1.2× (half-length ≈ 3.06 m), so the ring must
-  // poke out beyond the whole silhouette — a car-sized ring is hidden under
-  // the body from the tabletop camera.
-  const inner = 3.5;
-  const outer = 4.2;
-  const segs = 30;
+  // Soft disc under the chassis, then a thin rim — world metres, 1:1 with the car.
+  const disc = PHYSICS.carWidth * 0.72;
+  const rimIn = PHYSICS.carWidth * 0.82;
+  const rimOut = PHYSICS.carWidth * 1.05;
+  const segs = 28;
+  const y = 0.012;
   for (let i = 0; i < segs; i++) {
     const a0 = (i / segs) * Math.PI * 2;
     const a1 = ((i + 1) / segs) * Math.PI * 2;
@@ -84,78 +84,65 @@ export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Ui
     const s0 = Math.sin(a0);
     const c1 = Math.cos(a1);
     const s1 = Math.sin(a1);
-    const i0 = mb.vertex(inner * c0, 0, inner * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    const i1 = mb.vertex(inner * c1, 0, inner * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    const i2 = mb.vertex(outer * c1, 0, outer * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    const i3 = mb.vertex(outer * c0, 0, outer * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const z = mb.vertex(0, y, 0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const d0 = mb.vertex(disc * c0, y, disc * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const d1 = mb.vertex(disc * c1, y, disc * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    mb.tri(z, d0, d1);
+    const i0 = mb.vertex(rimIn * c0, y, rimIn * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i1 = mb.vertex(rimIn * c1, y, rimIn * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i2 = mb.vertex(rimOut * c1, y, rimOut * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
+    const i3 = mb.vertex(rimOut * c0, y, rimOut * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
     mb.quad(i0, i1, i2, i3);
   }
   return mb.build();
 }
 
 /**
- * Floating arrow marker above the player car — a downward-pointing arrow
- * that hovers above the car for easy identification. Uses the same MAT_GENERIC
- * material; rendered with additive blending for a glowing effect.
+ * Golden marker hovering above the player, tip pointing down at the roof.
+ * Built in world metres; Y is up.
  */
 export function buildPlayerArrowGeometry(): { vertices: Float32Array; indices: Uint16Array | Uint32Array } {
   const mb = new MeshBuilder();
-  // Arrow dimensions: positioned above the car (y ~ 1.5), pointing down (-Y)
-  // Arrow shaft: vertical cylinder
-  // Arrow head: cone at the bottom
-  const shaftHeight = 0.8;
-  const shaftRadius = 0.18;
-  const headHeight = 0.4;
-  const headRadius = 0.35;
-  const shaftSegs = 8;
-  const headSegs = 8;
-  const yBase = 1.5; // Height above ground where arrow starts
+  const tipY = 1.22;
+  const headHeight = 0.48;
+  const headRadius = 0.32;
+  const shaftHeight = 0.78;
+  const shaftRadius = 0.1;
+  const segs = 10;
+  const baseY = tipY + headHeight;
+  const topY = baseY + shaftHeight;
+  const gold: [number, number, number] = [0.94, 0.74, 0.22];
 
-  // Shaft (vertical tube)
-  for (let i = 0; i < shaftSegs; i++) {
-    const a0 = (i / shaftSegs) * Math.PI * 2;
-    const a1 = ((i + 1) / shaftSegs) * Math.PI * 2;
-    const c0 = Math.cos(a0) * shaftRadius;
-    const s0 = Math.sin(a0) * shaftRadius;
-    const c1 = Math.cos(a1) * shaftRadius;
-    const s1 = Math.sin(a1) * shaftRadius;
-    const y0 = yBase;
-    const y1 = yBase + shaftHeight;
-    const i0 = mb.vertex(c0, y0, s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    const i1 = mb.vertex(c1, y0, s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    const i2 = mb.vertex(c1, y1, s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    const i3 = mb.vertex(c0, y1, s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    mb.quad(i0, i1, i2, i3);
+  const tipIdx = mb.vertex(0, tipY, 0, 0, -1, 0, gold[0], gold[1], gold[2], MAT_GENERIC);
+  for (let i = 0; i < segs; i++) {
+    const a0 = (i / segs) * Math.PI * 2;
+    const a1 = ((i + 1) / segs) * Math.PI * 2;
+    const c0 = Math.cos(a0);
+    const s0 = Math.sin(a0);
+    const c1 = Math.cos(a1);
+    const s1 = Math.sin(a1);
+    const h0 = mb.vertex(headRadius * c0, baseY, headRadius * s0, c0, 0.35, s0, gold[0], gold[1], gold[2], MAT_GENERIC);
+    const h1 = mb.vertex(headRadius * c1, baseY, headRadius * s1, c1, 0.35, s1, gold[0], gold[1], gold[2], MAT_GENERIC);
+    mb.tri(tipIdx, h0, h1);
+
+    const n0x = c0;
+    const n0z = s0;
+    const n1x = c1;
+    const n1z = s1;
+    const s0i = mb.vertex(shaftRadius * c0, baseY, shaftRadius * s0, n0x, 0, n0z, gold[0], gold[1], gold[2], MAT_GENERIC);
+    const s1i = mb.vertex(shaftRadius * c1, baseY, shaftRadius * s1, n1x, 0, n1z, gold[0], gold[1], gold[2], MAT_GENERIC);
+    const s2i = mb.vertex(shaftRadius * c1, topY, shaftRadius * s1, n1x, 0, n1z, gold[0], gold[1], gold[2], MAT_GENERIC);
+    const s3i = mb.vertex(shaftRadius * c0, topY, shaftRadius * s0, n0x, 0, n0z, gold[0], gold[1], gold[2], MAT_GENERIC);
+    mb.quad(s0i, s1i, s2i, s3i);
   }
 
-  // Arrow head (cone at top of shaft)
-  const tipY = yBase + shaftHeight + headHeight;
-  const tipIdx = mb.vertex(0, tipY, 0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-  const baseY = yBase + shaftHeight;
-  for (let i = 0; i < headSegs; i++) {
-    const a0 = (i / headSegs) * Math.PI * 2;
-    const a1 = ((i + 1) / headSegs) * Math.PI * 2;
-    const c0 = Math.cos(a0) * headRadius;
-    const s0 = Math.sin(a0) * headRadius;
-    const c1 = Math.cos(a1) * headRadius;
-    const s1 = Math.sin(a1) * headRadius;
-    const b0 = mb.vertex(c0, baseY, s0, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
-    const b1 = mb.vertex(c1, baseY, s1, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
-    mb.tri(b0, b1, tipIdx);
-  }
-
-  // Base cap of arrow head (flat circle at base of cone)
-  for (let i = 0; i < headSegs; i++) {
-    const a0 = (i / headSegs) * Math.PI * 2;
-    const a1 = ((i + 1) / headSegs) * Math.PI * 2;
-    const c0 = Math.cos(a0) * headRadius;
-    const s0 = Math.sin(a0) * headRadius;
-    const c1 = Math.cos(a1) * headRadius;
-    const s1 = Math.sin(a1) * headRadius;
-    const b0 = mb.vertex(c0, baseY, s0, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
-    const b1 = mb.vertex(c1, baseY, s1, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
-    const centerIdx = mb.vertex(0, baseY, 0, 0, -1, 0, 1, 1, 1, MAT_GENERIC);
-    mb.tri(b0, b1, centerIdx);
+  const cap = mb.vertex(0, topY, 0, 0, 1, 0, gold[0], gold[1], gold[2], MAT_GENERIC);
+  for (let i = 0; i < segs; i++) {
+    const a0 = (i / segs) * Math.PI * 2;
+    const a1 = ((i + 1) / segs) * Math.PI * 2;
+    const t0 = mb.vertex(shaftRadius * Math.cos(a0), topY, shaftRadius * Math.sin(a0), 0, 1, 0, gold[0], gold[1], gold[2], MAT_GENERIC);
+    const t1 = mb.vertex(shaftRadius * Math.cos(a1), topY, shaftRadius * Math.sin(a1), 0, 1, 0, gold[0], gold[1], gold[2], MAT_GENERIC);
+    mb.tri(cap, t1, t0);
   }
 
   return mb.build();

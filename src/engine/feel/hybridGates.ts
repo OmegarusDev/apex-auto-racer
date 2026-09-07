@@ -3,7 +3,7 @@
  */
 import { PHYSICS } from '../../data/physics';
 import { SURFACES } from '../../data/surfaces';
-import { buildCircleTrack } from './harnessGates';
+import { buildCircleTrack, buildHairpinTrack, buildSBendTrack, HAIRPIN, SBEND } from './harnessGates';
 import { createCarState, buildVehicleContext } from '../Vehicle';
 import { effectiveStats } from '../stats';
 import { defaultVehicleSave } from '../types';
@@ -106,6 +106,11 @@ export function runLineFollowsCornerGate(): FeelGateResult {
   const bctx = brainCtx(track);
   let maxAbsL = 0;
   let lastSteer = 0;
+  let prevSteerSamp = 0;
+  let prevDelta = 0;
+  let haveSamp = false;
+  let weave = 0;
+  let samp = 0;
   for (let t = 0; t < 4; t += PHYSICS.dt) {
     bctx.raceTime = t;
     const out = tickDriverBrain(state, car, bctx);
@@ -114,11 +119,24 @@ export function runLineFollowsCornerGate(): FeelGateResult {
     // chase vMax and this gate would become an overspeed test.
     stepVehicle(car, track, PHYSICS.dt, 0.18, 0, out.steer, 'track', SURFACES.track.mu, false);
     maxAbsL = Math.max(maxAbsL, Math.abs(car.l));
+    // Oscillation, not a slow ramp as speed bleeds: reversing steer deltas.
+    if (t > 0.8 && samp % 8 === 0) {
+      if (!haveSamp) {
+        prevSteerSamp = lastSteer;
+        haveSamp = true;
+      } else {
+        const d = lastSteer - prevSteerSamp;
+        if (d * prevDelta < 0) weave += Math.abs(d);
+        prevDelta = d;
+        prevSteerSamp = lastSteer;
+      }
+    }
+    samp += 1;
   }
   return {
     id: 'LINE_FOLLOWS_CORNER',
-    ok: maxAbsL < 6 && car.spinCount === 0,
-    detail: `circle R=50 @82% vGrip maxL=${maxAbsL.toFixed(2)}m steer=${lastSteer.toFixed(3)} spin=${car.spinCount}`,
+    ok: maxAbsL < 6 && car.spinCount === 0 && weave < 0.08,
+    detail: `circle R=50 @82% vGrip maxL=${maxAbsL.toFixed(2)}m steer=${lastSteer.toFixed(3)} weave=${weave.toFixed(3)} spin=${car.spinCount}`,
   };
 }
 
@@ -199,6 +217,122 @@ export function runMarshalGate(): FeelGateResult {
   };
 }
 
+/** A rolling crawl on a hairpin must follow the wheels, not drive straight off. */
+export function runCrawlTakesCornerGate(): FeelGateResult {
+  const track = buildHairpinTrack();
+  const car = makeProbe();
+  car.tyreTemp = 0.85;
+  car.s = HAIRPIN.straight + 2;
+  car.v = 1.0;
+  car.slipAngle = 0;
+  car.headingErr = 0;
+  car.yawRate = 0;
+  car.l = 0;
+  const kappa = 1 / HAIRPIN.radius;
+  const steer = Math.atan((car.setup.wheelbase ?? 2.7) * kappa);
+  const s0 = car.s;
+  let maxAbsL = 0;
+  for (let t = 0; t < 4.5; t += PHYSICS.dt) {
+    stepVehicle(car, track, PHYSICS.dt, 0.14, 0, steer, 'track', SURFACES.track.mu, false);
+    maxAbsL = Math.max(maxAbsL, Math.abs(car.l));
+  }
+  const progressed = car.s - s0;
+  const wrapped = progressed < 0 ? progressed + track.length : progressed;
+  return {
+    id: 'CRAWL_TAKES_CORNER',
+    ok: wrapped > 8 && maxAbsL < 4.2 && car.spinCount === 0,
+    detail: `crawl hairpin Δs=${wrapped.toFixed(1)}m maxL=${maxAbsL.toFixed(2)}m spin=${car.spinCount}`,
+  };
+}
+
+/** From a near-stop into a U-turn, the driver + car must make the bend. */
+export function runHairpinFromStopGate(): FeelGateResult {
+  const track = buildHairpinTrack();
+  const car = makeProbe();
+  car.tyreTemp = 0.85;
+  car.s = HAIRPIN.straight - 3;
+  car.v = 0.4;
+  car.slipAngle = 0;
+  car.headingErr = 0;
+  car.yawRate = 0;
+  car.l = 0;
+  car.gear = 1;
+  car.clutchEngage = 1;
+  const g = 9.81;
+  car.lineO = track.nodes.map(() => 0);
+  car.idealVLine = track.nodes.map((n) => {
+    const k = Math.max(Math.abs(n.kappaLine), 0.003);
+    return Math.min(car.stats.vMax * 0.95, Math.sqrt((g * SURFACES.track.mu) / k) * 0.8);
+  });
+  car.brakeZoneStart = track.nodes.map((n) =>
+    n.s < HAIRPIN.straight && n.s > HAIRPIN.straight - 22 ? HAIRPIN.straight - n.s : -1,
+  );
+  car.turnInPoint = track.nodes.map((n) =>
+    n.s < HAIRPIN.straight && n.s > HAIRPIN.straight - 10 ? 1 : -1,
+  );
+  const state = createBrainState();
+  const bctx = brainCtx(track);
+  const ctx = ctxFor(car);
+  let maxAbsL = 0;
+  const arcEnd = HAIRPIN.straight + Math.PI * HAIRPIN.radius;
+  const doneS = arcEnd + 6;
+  for (let t = 0; t < 12 && car.s < doneS; t += PHYSICS.dt) {
+    bctx.raceTime = t;
+    const out = tickDriverBrain(state, car, bctx);
+    updateVehicle(car, track, PHYSICS.dt, { throttle: 1, brake: 0 }, out, ctx);
+    if (car.s >= HAIRPIN.straight && car.s <= arcEnd) {
+      maxAbsL = Math.max(maxAbsL, Math.abs(car.l));
+    }
+  }
+  const madeTurn = car.s > HAIRPIN.straight + (arcEnd - HAIRPIN.straight) * 0.7;
+  return {
+    id: 'HAIRPIN_FROM_STOP',
+    ok: madeTurn && maxAbsL < 8 && car.spinCount === 0 && car.penaltySec < 0.1,
+    detail: `s=${car.s.toFixed(1)} (need >${(HAIRPIN.straight + (arcEnd - HAIRPIN.straight) * 0.7).toFixed(0)}) maxL(in-arc)=${maxAbsL.toFixed(2)} spin=${car.spinCount} penalty=${car.penaltySec.toFixed(1)}`,
+  };
+}
+
+/** Steer must match the road into a left, and must not pre-turn for the following right. */
+export function runTurnInSignGate(): FeelGateResult {
+  const left = 1 / HAIRPIN.radius;
+  const hairpin = buildHairpinTrack();
+  const sBend = buildSBendTrack();
+  const firstArc = (Math.PI / 2) * SBEND.radius;
+
+  const inLeft = steerAt(hairpin, HAIRPIN.straight + 3, 16);
+  const intoLeft = steerAt(hairpin, HAIRPIN.straight - 6, 18);
+  const intoS = steerAt(sBend, SBEND.straight - 3, 16);
+
+  const hairpinOk = inLeft > 0.08 && Math.sign(inLeft) === Math.sign(left);
+  const approachOk = intoLeft > 0.05;
+  const sOk = intoS > 0.05;
+  return {
+    id: 'TURN_IN_SIGN',
+    ok: hairpinOk && approachOk && sOk,
+    detail: `in-left=${inLeft.toFixed(3)} approach=${intoLeft.toFixed(3)} S-entry=${intoS.toFixed(3)} (first arc ${firstArc.toFixed(1)}m)`,
+  };
+}
+
+function steerAt(track: ReturnType<typeof buildHairpinTrack>, s: number, v: number): number {
+  const car = makeProbe();
+  car.tyreTemp = 0.85;
+  car.s = s;
+  car.v = v;
+  car.slipAngle = 0;
+  car.headingErr = 0;
+  car.yawRate = 0;
+  car.l = 0;
+  car.lineO = track.nodes.map(() => 0);
+  const g = 9.81;
+  car.idealVLine = track.nodes.map((n) => {
+    const k = Math.max(Math.abs(n.kappa), 0.003);
+    return Math.min(car.stats.vMax * 0.95, Math.sqrt((g * SURFACES.track.mu) / k) * 0.8);
+  });
+  const state = createBrainState();
+  const bctx = brainCtx(track);
+  return tickDriverBrain(state, car, bctx).steer;
+}
+
 export function runHybridGates(): FeelGateResult[] {
   void PHYSICS;
   return [
@@ -207,6 +341,9 @@ export function runHybridGates(): FeelGateResult[] {
     runRejoinNaturalGate(),
     runDirtBankRejoinGate(),
     runMarshalGate(),
+    runCrawlTakesCornerGate(),
+    runHairpinFromStopGate(),
+    runTurnInSignGate(),
   ];
 }
 

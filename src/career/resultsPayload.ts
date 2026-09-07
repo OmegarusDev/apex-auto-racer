@@ -176,6 +176,8 @@ function computePayout(
   playerCarPodiated: boolean,
   session?: SessionKind,
 ): PayoutBreakdown {
+  void handsOffRatio;
+  void playerTeamWon;
   const rankBase = BALANCE.rankBasePayout[rank] ?? BALANCE.rankBasePayout[0]!;
 
   // A time trial is practice, not a payday — a modest flat fee with none of the
@@ -209,9 +211,7 @@ function computePayout(
     objective += def?.reward ?? 0;
   }
 
-  const handsOff = playerTeamWon
-    ? Math.round(rankBase * BALANCE.handsOffBonusMax * handsOffRatio)
-    : 0;
+  const handsOff = 0;
   const entertainmentFrac = Math.min(1, Math.max(0, entertainmentScore / 80));
   const entertainment = Math.round(
     rankBase * BALANCE.entertainmentBonusMax * entertainmentFrac,

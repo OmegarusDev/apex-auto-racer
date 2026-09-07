@@ -5,7 +5,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { runAuthorityGates, runTyreGates, runTrackScaleGates } from '../src/engine/feel/unitGates.ts';
+import { runAuthorityGates, runTyreGates, runTrackScaleGates, runClutchFeelGates, runOrdinalGate } from '../src/engine/feel/unitGates.ts';
 import { runHarnessGates } from '../src/engine/feel/harnessGates.ts';
 import { runHybridGates } from '../src/engine/feel/hybridGates.ts';
 import type { FeelGateResult } from '../src/engine/feel/types.ts';
@@ -30,6 +30,8 @@ async function main() {
   const results: FeelGateResult[] = [
     ...runAuthorityGates(),
     ...runTyreGates(),
+    ...runClutchFeelGates(),
+    runOrdinalGate(),
     ...runTrackScaleGates(),
     ...runHarnessGates(),
     ...runHybridGates(),

@@ -167,6 +167,7 @@ export class RaceDirector {
   private playerBrake = 0;
   private playerUpshift = false;
   private playerClutchKick = false;
+  private playerClutchHeld = false;
   private paused = false;
   private retired = false;
   private finished = false;
@@ -363,11 +364,13 @@ export class RaceDirector {
     brake: number,
     upshift = false,
     clutchKick = false,
+    clutchHeld = false,
   ): void {
     this.playerThrottle = Math.max(0, Math.min(1, throttle));
     this.playerBrake = Math.max(0, Math.min(1, brake));
     this.playerUpshift = upshift;
     this.playerClutchKick = clutchKick;
+    this.playerClutchHeld = clutchHeld;
   }
 
   pause(): void {
@@ -603,7 +606,8 @@ export class RaceDirector {
       const stIdx = this.standingIndexById.get(player.car.id);
       position = stIdx !== undefined ? (this.standings[stIdx]?.position ?? 8) : 8;
       draft = player.draft;
-      cleanUpshift = player.car.lastShiftKind === 'up';
+      cleanUpshift =
+        player.car.lastShiftKind === 'up' && player.car.clutchQuality === 'perfect';
 
       // Nearby showboat / pull-out intents from rivals within ~25m arc.
       for (const e of this.entries) {
@@ -676,6 +680,7 @@ export class RaceDirector {
         brake: this.playerBrake,
         upshift: up,
         clutchKick: kick,
+        clutchHeld: this.playerClutchHeld,
       };
     }
     return { throttle: 0, brake: 0, upshift: false };

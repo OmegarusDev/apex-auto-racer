@@ -18,7 +18,8 @@ export type BrainIntentTag =
   | 'HOTHEAD_LATE'
   | 'ICE_COLD_CALM'
   | 'SHOWBOAT_RISK'
-  | 'CONTACT_BLOCKED';
+  | 'CONTACT_BLOCKED'
+  | 'BLOCK';
 
 export interface BrainIntent {
   tag: BrainIntentTag;
@@ -34,6 +35,7 @@ export const INTENT_PRIORITY: Record<BrainIntentTag, number> = {
   REJOIN_CRAWL: 100,
   UNSTICK_SIDE: 90,
   PULL_OUT: 80,
+  BLOCK: 75,
   AVOID_WRECK: 70,
   CONTACT_BLOCKED: 60,
   DRAFT_HOLD: 50,
@@ -59,6 +61,7 @@ export function makeIntent(tag: BrainIntentTag, ttl = DEFAULT_TTL): BrainIntent 
 /** Tags that edge-trigger a race ticker event (rate-limited in RaceDirector). */
 export const STORY_INTENT_TAGS: ReadonlySet<BrainIntentTag> = new Set([
   'PULL_OUT',
+  'BLOCK',
   'DRAFT_HOLD',
   'REJOIN_CRAWL',
   'AVOID_WRECK',
@@ -105,6 +108,8 @@ export function intentHudLabel(tag: BrainIntentTag): string {
       return 'In the tow';
     case 'PULL_OUT':
       return 'Going for it';
+    case 'BLOCK':
+      return 'Covering';
     case 'UNSTICK_SIDE':
       return 'Unsticking';
     case 'MISTAKE_LATE_BRAKE':
@@ -129,6 +134,8 @@ export function intentTickerPhrase(name: string, tag: BrainIntentTag): string {
   switch (tag) {
     case 'PULL_OUT':
       return `${name} goes for the pass`;
+    case 'BLOCK':
+      return `${name} covers the door`;
     case 'DRAFT_HOLD':
       return `${name} sits in the tow`;
     case 'REJOIN_CRAWL':

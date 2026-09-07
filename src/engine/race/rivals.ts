@@ -20,6 +20,7 @@ export function buildRivals(
       s: other.s,
       l: other.l,
       deslotted: other.slotMode === 'deslot' || other.spinRemaining > 0,
+      finished: other.finished,
     });
   }
 

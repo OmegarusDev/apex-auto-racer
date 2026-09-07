@@ -4,10 +4,11 @@
  */
 
 import { PHYSICS } from '../../data/physics';
+import { CAR_WORLD_SCALE } from '../constants';
 import type { TrackPalette } from '../materials';
 import { raceCameraPull } from '../raceCameraZoom';
 import type { CarFrameDto, FxImpulse, RaceFrameView, TrackView } from '../types';
-import { buildCarGeometry, buildPlayerRingGeometry } from './CarGeometry';
+import { buildCarGeometry, buildPlayerArrowGeometry, buildPlayerRingGeometry } from './CarGeometry';
 import {
   bindLitAttribs,
   createGL,
@@ -64,6 +65,7 @@ export class ApexRenderer {
   private trackMesh: GpuMesh | null = null;
   private carMesh: GpuMesh | null = null;
   private playerRingMesh: GpuMesh | null = null;
+  private playerBeaconMesh: GpuMesh | null = null;
   private minimap: Array<{ nx: number; ny: number }> = [];
   private minimapExtent: { minX: number; maxX: number; minY: number; maxY: number } = { minX: 0, maxX: 1, minY: 0, maxY: 1 };
   private rain = false;
@@ -126,9 +128,11 @@ export class ApexRenderer {
     if (this.trackMesh) destroyMesh(gl, this.trackMesh);
     if (this.carMesh) destroyMesh(gl, this.carMesh);
     if (this.playerRingMesh) destroyMesh(gl, this.playerRingMesh);
+    if (this.playerBeaconMesh) destroyMesh(gl, this.playerBeaconMesh);
     this.trackMesh = null;
     this.carMesh = null;
     this.playerRingMesh = null;
+    this.playerBeaconMesh = null;
     gl.deleteProgram(this.litProg);
   }
 
@@ -166,6 +170,10 @@ export class ApexRenderer {
       destroyMesh(gl, this.playerRingMesh);
       this.playerRingMesh = null;
     }
+    if (this.playerBeaconMesh) {
+      destroyMesh(gl, this.playerBeaconMesh);
+      this.playerBeaconMesh = null;
+    }
 
     const track = buildTrackGeometry(opts.track, opts.palette);
     this.trackMesh = createMesh(gl, track.vertices, track.indices);
@@ -176,6 +184,8 @@ export class ApexRenderer {
     this.carMesh = createMesh(gl, car.vertices, car.indices);
     const ring = buildPlayerRingGeometry();
     this.playerRingMesh = createMesh(gl, ring.vertices, ring.indices);
+    const beacon = buildPlayerArrowGeometry();
+    this.playerBeaconMesh = createMesh(gl, beacon.vertices, beacon.indices);
 
     this.rain = opts.rain;
     this.fxCount = 0;
@@ -344,57 +354,57 @@ export class ApexRenderer {
     this.drawMesh(this.trackMesh, [1, 1, 1], 1);
     gl.disable(gl.POLYGON_OFFSET_FILL);
 
-    // Player glow ring — subtle pulsing halo under the car so it is always
-    // findable in the pack. Additive, drawn under the solid cars.
+    const gold: Vec3 = [0.94, 0.74, 0.22];
+
+    // Quiet gold disc on the asphalt — not an additive body glow.
     if (this.playerRingMesh !== null && player !== undefined && player.isPlayer) {
       const t = performance.now() / 1000;
-      const glow = 0.26 + 0.12 * Math.sin(t * 2.6);
+      const glow = 0.16 + 0.04 * Math.sin(t * 2.1);
       gl.enable(gl.BLEND);
       gl.depthMask(false);
       this.placeRing(player.worldX, player.worldY);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      this.drawMesh(this.playerRingMesh, hexToRgb(player.color), glow);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      this.drawMesh(this.playerRingMesh, gold, glow);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
     }
 
-    // Solid cars first (no blend)
     for (const car of frame.cars) {
+      if (car.isPlayer) continue;
       const lift = car.slotMode === 'deslot' ? 0.35 : 0.12;
       this.placeCar(car.worldX, car.worldY, car.heading, lift);
       const tint = hexToRgb(car.color);
-      if (car.isPlayer) {
-        tint[0] = Math.min(1, tint[0]! * 1.12 + 0.06);
-        tint[1] = Math.min(1, tint[1]! * 1.08 + 0.05);
-        tint[2] = Math.min(1, tint[2]! * 1.05 + 0.04);
-      }
-      // Keep cars colourful — condition only gently desaturates
       const cond = Math.max(0.65, car.condition);
       tint[0]! = tint[0]! * (0.7 + cond * 0.35);
       tint[1]! = tint[1]! * (0.7 + cond * 0.35);
       tint[2]! = tint[2]! * (0.7 + cond * 0.35);
-      // Player keeps a steady rim highlight (subtle border glow on the body).
-      this.drawMesh(this.carMesh, tint, 1, car.isPlayer ? 0.8 : 0, tint);
+      this.drawMesh(this.carMesh, tint, 1);
     }
 
-    // Ghost + FX need blending (ghost alpha is ignored with blend off).
+    if (player !== undefined && player.isPlayer) {
+      const lift = player.slotMode === 'deslot' ? 0.35 : 0.12;
+      this.placeCar(player.worldX, player.worldY, player.heading, lift);
+      const tint = hexToRgb(player.color);
+      tint[0] = Math.min(1, tint[0]! * 1.08 + 0.03);
+      tint[1] = Math.min(1, tint[1]! * 1.05 + 0.02);
+      tint[2] = Math.min(1, tint[2]! * 1.02);
+      const cond = Math.max(0.65, player.condition);
+      tint[0]! = tint[0]! * (0.7 + cond * 0.35);
+      tint[1]! = tint[1]! * (0.7 + cond * 0.35);
+      tint[2]! = tint[2]! * (0.7 + cond * 0.35);
+      this.drawMesh(this.carMesh, tint, 1, 0.22, gold);
+      if (this.playerBeaconMesh !== null) {
+        const bob = 0.05 * Math.sin(performance.now() / 1000 * 2.2);
+        this.placeCar(player.worldX, player.worldY, player.heading, 0.12 + bob);
+        this.drawMesh(this.playerBeaconMesh, gold, 1, 0.15, gold);
+      }
+    }
+
     gl.enable(gl.BLEND);
     gl.depthMask(false);
     if (frame.ghost) {
       this.placeCar(frame.ghost.worldX, frame.ghost.worldY, frame.ghost.heading, 1);
       this.drawMesh(this.carMesh, hexToRgb(frame.ghost.color), 0.35);
-    }
-    // Player halo — an additive silhouette glow poking out around the car's
-    // outline. Depth writes are off and the solid car already occupies the
-    // centre, so only the ring of body poking outside shows: a clear border
-    // that reads from the tabletop angle (the fresnel rim alone is invisible
-    // at ~45° elevation).
-    if (player !== undefined && player.isPlayer) {
-      this.placeCar(player.worldX, player.worldY, player.heading, 0.12, 1.1);
-      gl.blendFunc(gl.ONE, gl.ONE);
-      this.drawMesh(this.carMesh, hexToRgb(player.color), 0.5);
-      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     }
     this.drawFxPoints(frame);
     gl.depthMask(true);
@@ -462,10 +472,10 @@ export class ApexRenderer {
     gl.uniform3f(gl.getUniformLocation(p, 'uCameraPos'), this.eyeX, this.eyeY, this.eyeZ);
   }
 
-  private placeCar(worldX: number, worldY: number, heading: number, lift: number, scale = 1.2): void {
+  private placeCar(worldX: number, worldY: number, heading: number, lift: number, scale = CAR_WORLD_SCALE): void {
     // Engine Z = -worldY, so yaw must match Canvas2D's rotate(-heading).
     // Local +X is car forward (same as CarPainter length axis).
-    // Mild toy scale — distance is user-controlled via raceZoom.
+    // Scale 1: mesh metres = physics metres = HUD speed.
     const s = scale;
     mat4Identity(this.tmp);
     mat4RotateY(this.model, this.tmp, -heading);

@@ -5,15 +5,20 @@ import { activeDriver } from '../engine/SaveManager';
 import {
   drawButton,
   handleButton,
+  drawHeader,
+  handleHeader,
   drawModal,
   handleModal,
   layoutModalButtons,
+  headerBandH,
   pad,
   ToastManager,
   type ButtonDef,
+  type HeaderDef,
   type ModalDef,
 } from '../ui/components';
 import { BRAND_SIGNAL } from '../ui/brand';
+import { HOW_TO_PLAY } from '../ui/howToPlay';
 import {
   buildUi,
   drawBackground,
@@ -28,14 +33,14 @@ import {
   drawTitleLogo,
   freshTitlePreviewSeed,
   titleMenuRowHeights,
-  titleMenuStackHeight,
   type TitlePreviewTrack,
 } from './titleArt';
 import { DISCIPLINE_ORDER } from '../career/disciplinesUi';
 import { OptionsScene } from './OptionsScene';
 import { DisciplineSelectScene } from './DisciplineSelectScene';
-import { CareerHubScene } from './CareerHubScene';
 import { QuickRaceSetupScene } from './QuickRaceSetupScene';
+import { LoadCareerScene } from './LoadCareerScene';
+import { careerHomeScene } from './careerHome';
 
 export class TitleScene implements Scene {
   private time = 0;
@@ -92,51 +97,33 @@ export class TitleScene implements Scene {
     g.scenes.push(new DisciplineSelectScene());
   }
 
-  private confirmNewCareer(): void {
+  private openHowTo(): void {
     this.modal = {
       open: true,
-      title: 'New Career?',
-      body: 'This replaces your current career.\nThere is no undo.',
+      title: 'How to Play',
+      body: HOW_TO_PLAY,
       buttons: [
         {
           x: 0,
           y: 0,
           w: 0,
           h: 0,
-          label: 'Cancel',
+          label: 'Got it',
+          primary: true,
           onClick: () => {
             this.modal.open = false;
-          },
-        },
-        {
-          x: 0,
-          y: 0,
-          w: 0,
-          h: 0,
-          label: 'Start New',
-          danger: true,
-          onClick: () => {
-            this.modal.open = false;
-            this.beginCareer();
           },
         },
       ],
     };
   }
 
-  private onNewCareer(): void {
-    const g = getGameContext();
-    if ((g.state?.roster.length ?? 0) > 0) {
-      this.confirmNewCareer();
-      return;
-    }
-    this.beginCareer();
-  }
-
   render(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const g = getGameContext();
     const state = g.state;
     const active = state !== null ? activeDriver(state) : null;
+    const slots = g.save.listSaves();
+    const canContinue = active !== null;
     const { ui, token } = buildUi(w, h, 0, BRAND_SIGNAL);
     const layout = computeTitleLayout(w, h, token);
 
@@ -167,19 +154,32 @@ export class TitleScene implements Scene {
       ctx.restore();
     }
 
+    const chrome: HeaderDef = {
+      x: 0,
+      y: 0,
+      w,
+      h: headerBandH(token),
+      title: '',
+      ghost: true,
+      settings: true,
+      onSettings: () => g.scenes.push(new OptionsScene()),
+    };
+    drawHeader(ctx, chrome, ui);
+
     const rows = titleMenuRowHeights(token, layout.btnH);
+    const plateFont = layout.plateFont;
     const cta: ButtonDef = {
       x: layout.menuX,
       y: layout.menuY,
       w: layout.menuW,
       h: rows.primary,
-      label: active !== null ? 'Continue' : 'New Career',
+      label: canContinue ? 'Continue' : 'New Career',
       primary: true,
       cta: true,
-      fontSize: Math.max(layout.btnFont, token.fontBody),
+      fontSize: Math.max(layout.btnFont, token.fontTitle),
       onClick: () => {
-        if (active !== null) g.scenes.push(new CareerHubScene());
-        else this.onNewCareer();
+        if (canContinue) g.scenes.push(careerHomeScene());
+        else this.beginCareer();
       },
     };
     drawButton(ctx, cta, ui);
@@ -187,39 +187,71 @@ export class TitleScene implements Scene {
 
     const linkY = layout.menuY + rows.primary + rows.gap;
     const linkW = (layout.menuW - pad(token, 1)) * 0.5;
-    const quick: ButtonDef = {
+    const left: ButtonDef = {
       x: layout.menuX,
       y: linkY,
       w: linkW,
       h: rows.linkRow,
-      label: 'Quick Race',
-      quiet: true,
-      fontSize: token.fontBody,
-      onClick: () => g.scenes.push(new QuickRaceSetupScene({ returnTo: 'title' })),
+      label: canContinue ? 'New Career' : 'Quick Race',
+      fontSize: plateFont,
+      onClick: () => {
+        if (canContinue) this.beginCareer();
+        else g.scenes.push(new QuickRaceSetupScene({ returnTo: 'title' }));
+      },
     };
-    const opts: ButtonDef = {
+    const right: ButtonDef = {
       x: layout.menuX + linkW + pad(token, 1),
       y: linkY,
       w: linkW,
       h: rows.linkRow,
-      label: 'Options',
-      quiet: true,
-      fontSize: token.fontBody,
-      onClick: () => g.scenes.push(new OptionsScene()),
+      label: slots.length > 0 ? 'Load Career' : 'How to Play',
+      fontSize: plateFont,
+      onClick: () => {
+        if (slots.length > 0) g.scenes.push(new LoadCareerScene());
+        else this.openHowTo();
+      },
     };
-    drawButton(ctx, quick, ui);
-    drawButton(ctx, opts, ui);
+    drawButton(ctx, left, ui);
+    drawButton(ctx, right, ui);
     if (!this.modal.open) {
-      handleButton(quick, ui);
-      handleButton(opts, ui);
+      handleButton(left, ui);
+      handleButton(right, ui);
     }
+
+    if (canContinue) {
+      const qr: ButtonDef = {
+        x: layout.menuX,
+        y: linkY + rows.linkRow + rows.quietGap,
+        w: layout.menuW,
+        h: rows.quietRow,
+        label: 'Quick Race',
+        fontSize: plateFont,
+        onClick: () => g.scenes.push(new QuickRaceSetupScene({ returnTo: 'title' })),
+      };
+      drawButton(ctx, qr, ui);
+      if (!this.modal.open) handleButton(qr, ui);
+    } else {
+      ctx.save();
+      ctx.font = `500 ${token.fontBody}px ${token.fontFamily}`;
+      ctx.fillStyle = token.textDim;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        'Hold gas. The car steers.',
+        layout.menuX + layout.menuW * 0.5,
+        linkY + rows.linkRow + rows.quietGap + rows.quietRow * 0.5,
+      );
+      ctx.restore();
+    }
+
+    if (!this.modal.open) handleHeader(chrome, ui);
 
     if (this.modal.open) layoutModalButtons(this.modal, ui);
     drawModal(ctx, this.modal, ui);
     handleModal(this.modal, ui);
 
     this.toasts.draw(ctx, ui, {
-      avoidBottomPx: titleMenuStackHeight(token, layout.btnH) + pad(token, 2),
+      avoidBottomPx: h - layout.menuY + pad(token, 1),
     });
   }
 }

@@ -21,7 +21,7 @@ export const BALANCE = {
   /** Softened from 0.75 so rain + cold + novice does not auto-spin early ranks. */
   rainMuMult: 0.82,
   rainMistakeMult: 1.35,
-  handsOffBonusMax: 0.5,
+  handsOffBonusMax: 0,
   /** Max entertainment cash as fraction of rank base payout. */
   entertainmentBonusMax: 0.35,
   /** Entertainment score threshold for crowd_pleaser objective. */
@@ -100,7 +100,7 @@ export const BALANCE = {
   /** Lateral offset onto a clear lane — sized for ~27–36 m asphalt. */
   overtakeLateralShift: 4.2,
   /** Bumper clearance used by AI sensing (matches PHYSICS.carLength). */
-  contactGap: 5.1,
+  contactGap: 6.6,
   /** Follower speed cap vs leader on longitudinal contact. */
   contactSpeedCap: 0.9,
   /** Extra lateral separation rate (m/s) while bodies overlap (pass-lane only). */

@@ -130,6 +130,8 @@ export function updateVehicle(
     aAccelEff,
     aBrakeEff,
     live.condGrip,
+    ctx.focus,
+    ctx.bravery,
   );
 }
 

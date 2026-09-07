@@ -19,8 +19,6 @@ import {
   drawCard,
   drawRow,
   drawSectionTitle,
-  drawInfoIcon,
-  infoIconRadius,
   drawModal,
   handleModal,
   layoutModalButtons,
@@ -51,7 +49,7 @@ import { disciplineAccent, disciplineLabel } from '../career/disciplinesUi';
 import { defaultLeadDriver, defaultLineup } from '../career/roster';
 import { launchRace } from '../career/launchRace';
 import { getObjectiveDef } from '../career/objectives';
-import { QuickRaceSetupScene } from './QuickRaceSetupScene';
+import { OptionsScene } from './OptionsScene';
 
 const LINEUP_VISIBLE_ROWS = 4;
 
@@ -86,14 +84,11 @@ export class CampaignScene implements Scene {
 
   enter(): void {
     onSceneEnter();
-    this.modal.open = false;
-    this.lineupModalOpen = false;
-    this.pendingTournamentId = null;
-    this.lineupScroll = 0;
-    this.scroller.scroll.offset = 0;
     this.scroller.onUserScroll = () => this.tooltips.close();
     const canvas = getGameContext().canvas;
+    this.detachWheel?.();
     this.detachWheel = this.scroller.attachWheel(canvas, () => !this.modal.open);
+    canvas.removeEventListener('wheel', this.onLineupWheel);
     canvas.addEventListener('wheel', this.onLineupWheel, { passive: false });
   }
 
@@ -459,14 +454,15 @@ export class CampaignScene implements Scene {
       title: 'Campaign',
       back: true,
       cash: state.cash,
+      settings: true,
       onBack: () => this.handleBack(),
+      onSettings: () => g.scenes.push(new OptionsScene()),
     };
     drawHeader(ctx, header, ui);
 
     const view = shell.contentRect;
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const objGap = pad(token, 0.5);
-    const heroH = pad(token, 12);
     // Objective rows stack title (fontBody) + description (fontCaption) with
     // explicit positions — fractional anchors overlapped the two on phones.
     const objH = ensureMinTouch(
@@ -481,7 +477,7 @@ export class CampaignScene implements Scene {
     const progress = this.inProgress();
     const chipH = token.fontCaption + pad(token, 1);
 
-    let contentH = chipH + pad(token, 1) + heroH + pad(token, 1.5);
+    let contentH = chipH + pad(token, 1);
     contentH += token.fontCaption + pad(token, 0.75);
     contentH += objCount * (objH + objGap);
     contentH += pad(token, 0.75);
@@ -498,54 +494,11 @@ export class CampaignScene implements Scene {
     this.scroller.update(ui, view);
     const lui = this.scroller.localUi(ui, view);
     const interactive = !this.modal.open;
-    const tooltipOrigin = { x: view.x, y: view.y - this.scroller.scroll.offset };
     this.tooltips.beginFrame();
 
     this.scroller.begin(ctx, view);
     let y = 0;
     y += this.drawDisciplineChip(ctx, 0, y, lui) + pad(token, 1);
-
-    drawCard(ctx, { x: 0, y, w: view.w, h: heroH }, lui);
-    ctx.save();
-    ctx.font = `700 ${token.fontTitle}px ${token.fontDisplayFamily}`;
-    ctx.fillStyle = token.text;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('Quick Race', pad(token, 1.5), y + pad(token, 1.5));
-    ctx.font = `${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    // Keep clear of the Start button on the right.
-    const subtitleMax = view.w - pad(token, 3) - pad(token, 12);
-    ctx.fillText(
-      truncateText(ctx, 'Jump in for cash and XP', subtitleMax),
-      pad(token, 1.5),
-      y + pad(token, 1.5) + token.fontTitle,
-    );
-    ctx.restore();
-
-    const startBtn: ButtonDef = {
-      x: view.w - pad(token, 1.5) - pad(token, 12),
-      y: y + heroH - pad(token, 1.5) - btnH,
-      w: pad(token, 12),
-      h: btnH,
-      label: 'Start',
-      primary: true,
-      onClick: () => {
-        if (state.roster.length < 1) {
-          this.toasts.push('Need a driver on the roster', accent);
-          return;
-        }
-        getGameContext().scenes.push(
-          new QuickRaceSetupScene({
-            discipline: this.discipline,
-            returnTo: 'campaign',
-          }),
-        );
-      },
-    };
-    drawButton(ctx, startBtn, lui);
-    if (interactive) handleButton(startBtn, lui);
-    y += heroH + pad(token, 1.5);
 
     y += drawSectionTitle(ctx, 0, y, 'Objectives', lui);
 
@@ -553,14 +506,12 @@ export class CampaignScene implements Scene {
       const def = getObjectiveDef(objId);
       drawRow(ctx, { x: 0, y, w: view.w, h: objH }, lui);
       const rewardStr = fmtCash(def?.reward ?? 0);
-      const infoR = infoIconRadius(token);
       const titleY = y + pad(token, 0.5) + token.fontBody * 0.5;
       const descY = y + pad(token, 0.5) + token.fontBody + pad(token, 0.25) + token.fontCaption * 0.5;
       ctx.save();
       ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
       const rewardW = ctx.measureText(rewardStr).width;
-      // Reserve room for the ⓘ between text and the payout figure.
-      const textMax = view.w - pad(token, 2) - rewardW - infoR * 3.6;
+      const textMax = view.w - pad(token, 2) - rewardW - pad(token, 1);
       ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.text;
       ctx.textAlign = 'left';
@@ -574,16 +525,6 @@ export class CampaignScene implements Scene {
       ctx.textAlign = 'right';
       ctx.fillText(rewardStr, view.w - pad(token, 1), y + objH * 0.5);
       ctx.restore();
-
-      // ⓘ — when the cash lands.
-      const icx = view.w - pad(token, 1) - rewardW - infoR * 2.2;
-      const icy = y + objH * 0.5;
-      drawInfoIcon(ctx, icx, icy, infoR, lui, false);
-      this.tooltips.register(
-        { x: icx - infoR * 1.6, y: icy - infoR * 1.6, w: infoR * 3.2, h: infoR * 3.2 },
-        { title: 'Reward', body: 'Cash bonus, paid the moment the objective completes.' },
-        tooltipOrigin,
-      );
       y += objH + objGap;
     }
 
@@ -606,10 +547,9 @@ export class CampaignScene implements Scene {
         const lockLabel = `Locked · ${RANK_NAMES[rank]}`;
         ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
         const lockW = ctx.measureText(lockLabel).width;
-        const infoR2 = infoIconRadius(token);
         ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
         ctx.fillText(
-          truncateText(ctx, t.name, view.w - pad(token, 1.5) - lockW - infoR2 * 3.6),
+          truncateText(ctx, t.name, view.w - pad(token, 1.5) - lockW - pad(token, 1)),
           pad(token, 1),
           y + lockedH * 0.5,
         );
@@ -618,15 +558,6 @@ export class CampaignScene implements Scene {
         ctx.textAlign = 'right';
         ctx.fillText(lockLabel, view.w - pad(token, 1), y + lockedH * 0.5);
         ctx.restore();
-        // ⓘ — how ranks unlock (winning the current top series promotes you).
-        const icx = view.w - pad(token, 1) - lockW - infoR2 * 2.4;
-        const icy = y + lockedH * 0.5;
-        drawInfoIcon(ctx, icx, icy, infoR2, lui, false);
-        this.tooltips.register(
-          { x: icx - infoR2 * 1.6, y: icy - infoR2 * 1.6, w: infoR2 * 3.2, h: infoR2 * 3.2 },
-          { title: 'Locked', body: `Reach ${RANK_NAMES[rank]} rank to enter — win the current top series in this discipline to promote.` },
-          tooltipOrigin,
-        );
         y += lockedH + objGap;
         continue;
       }

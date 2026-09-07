@@ -90,6 +90,38 @@ export function runDisciplineIdentityGate(): FeelGateResult[] {
   ];
 }
 
+/** Driver on a circle at ~82% grip speed must hold the ribbon — not fly tangent. */
+export function runLineFollowsCornerGate(): FeelGateResult {
+  const R = 50;
+  const track = buildCircleTrack(R);
+  const car = makeProbe();
+  car.tyreTemp = 0.85;
+  const vHold = Math.sqrt(SURFACES.track.mu * 9.81 * R) * 0.82;
+  car.v = vHold;
+  car.yawRate = 0;
+  car.slipAngle = 0;
+  car.l = 0;
+  car.lineO = track.nodes.map(() => 0);
+  const state = createBrainState();
+  const bctx = brainCtx(track);
+  let maxAbsL = 0;
+  let lastSteer = 0;
+  for (let t = 0; t < 4; t += PHYSICS.dt) {
+    bctx.raceTime = t;
+    const out = tickDriverBrain(state, car, bctx);
+    lastSteer = out.steer;
+    // Isolate steering: light drive holds pace. AI throttle would otherwise
+    // chase vMax and this gate would become an overspeed test.
+    stepVehicle(car, track, PHYSICS.dt, 0.18, 0, out.steer, 'track', SURFACES.track.mu, false);
+    maxAbsL = Math.max(maxAbsL, Math.abs(car.l));
+  }
+  return {
+    id: 'LINE_FOLLOWS_CORNER',
+    ok: maxAbsL < 6 && car.spinCount === 0,
+    detail: `circle R=50 @82% vGrip maxL=${maxAbsL.toFixed(2)}m steer=${lastSteer.toFixed(3)} spin=${car.spinCount}`,
+  };
+}
+
 /** A wide run (on-track, off-line) is recovered by the driver — no marshal. */
 export function runRejoinNaturalGate(): FeelGateResult {
   const car = makeProbe();
@@ -117,6 +149,38 @@ export function runRejoinNaturalGate(): FeelGateResult {
   };
 }
 
+/** After a short hold on the dirt bank, the driver steers back onto the asphalt. */
+export function runDirtBankRejoinGate(): FeelGateResult {
+  const R = 50;
+  const width = 30;
+  const track = buildCircleTrack(R, width, 8);
+  const halfW = width / 2;
+  const car = makeProbe();
+  car.tyreTemp = 0.85;
+  car.v = 14;
+  car.l = halfW + 2.4;
+  car.slipAngle = 0.04;
+  car.yawRate = 0;
+  car.slotMode = 'deslot';
+  const state = createBrainState();
+  const ctx = ctxFor(car);
+  const bctx = brainCtx(track);
+  let stillOnDirtAtHold = false;
+  let backOnTarmac = false;
+  for (let t = 0; t < 2.8; t += PHYSICS.dt) {
+    bctx.raceTime = t;
+    const out = tickDriverBrain(state, car, bctx);
+    updateVehicle(car, track, PHYSICS.dt, { throttle: 0.35, brake: 0 }, out, ctx);
+    if (t >= 0.28 && t <= 0.32) stillOnDirtAtHold = Math.abs(car.l) >= halfW - 0.2;
+    if (Math.abs(car.l) < halfW) backOnTarmac = true;
+  }
+  return {
+    id: 'DIRT_BANK_REJOINS',
+    ok: stillOnDirtAtHold && backOnTarmac && car.penaltySec === 0,
+    detail: `holdOnDirt=${stillOnDirtAtHold} backOnTarmac=${backOnTarmac} endL=${car.l.toFixed(2)} penalty=${car.penaltySec}`,
+  };
+}
+
 /** A stopped, backward car is re-slotted by the marshal — diegetic, priced. */
 export function runMarshalGate(): FeelGateResult {
   const car = makeProbe();
@@ -137,7 +201,13 @@ export function runMarshalGate(): FeelGateResult {
 
 export function runHybridGates(): FeelGateResult[] {
   void PHYSICS;
-  return [...runDisciplineIdentityGate(), runRejoinNaturalGate(), runMarshalGate()];
+  return [
+    ...runDisciplineIdentityGate(),
+    runLineFollowsCornerGate(),
+    runRejoinNaturalGate(),
+    runDirtBankRejoinGate(),
+    runMarshalGate(),
+  ];
 }
 
 export type { RaceConfig };

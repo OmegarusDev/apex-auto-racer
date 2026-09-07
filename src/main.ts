@@ -11,13 +11,23 @@ function setupHudCanvas(canvas: HTMLCanvasElement): { w: number; h: number; dpr:
   const vv = window.visualViewport;
   const w = Math.max(1, Math.floor(vv?.width ?? canvas.clientWidth));
   const h = Math.max(1, Math.floor(vv?.height ?? canvas.clientHeight));
-  canvas.style.width = `${w}px`;
-  canvas.style.height = `${h}px`;
-  canvas.width = Math.max(1, Math.floor(w * dpr));
-  canvas.height = Math.max(1, Math.floor(h * dpr));
-  const ctx = canvas.getContext('2d', { alpha: true });
-  if (ctx !== null) {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const bufW = Math.max(1, Math.floor(w * dpr));
+  const bufH = Math.max(1, Math.floor(h * dpr));
+  const cssChanged = canvas.style.width !== `${w}px` || canvas.style.height !== `${h}px`;
+  const bufChanged = canvas.width !== bufW || canvas.height !== bufH;
+  if (cssChanged) {
+    canvas.style.width = `${w}px`;
+    canvas.style.height = `${h}px`;
+  }
+  // Assigning canvas.width/height clears the 2D context even when the value is
+  // unchanged — that flash is what felt like a mid-session refresh.
+  if (bufChanged) {
+    canvas.width = bufW;
+    canvas.height = bufH;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (ctx !== null) {
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
   }
   return { w, h, dpr };
 }
@@ -71,9 +81,17 @@ function main(): void {
   let visible = !document.hidden;
   let lastTs = 0;
 
+  let lastCssW = 0;
+  let lastCssH = 0;
+  let lastDpr = 0;
+
   const resize = (): void => {
-    invalidateSafeArea();
     const dims = setupHudCanvas(canvas);
+    if (dims.w === lastCssW && dims.h === lastCssH && dims.dpr === lastDpr) return;
+    lastCssW = dims.w;
+    lastCssH = dims.h;
+    lastDpr = dims.dpr;
+    invalidateSafeArea();
     if (world !== null) setupWorldCanvas(world, dims.w, dims.h, dims.dpr);
     game.scenes.onResize(dims.w, dims.h);
   };
@@ -82,7 +100,8 @@ function main(): void {
   window.addEventListener('orientationchange', resize);
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', resize);
-    window.visualViewport.addEventListener('scroll', resize);
+    // Do not listen to visualViewport.scroll — iOS fires it continuously as
+    // the URL bar moves, and it was wiping the HUD canvas every tick.
   }
   resize();
 
@@ -121,7 +140,7 @@ function main(): void {
 
   requestAnimationFrame(loop);
   // After first frame is scheduled — keep the title interactive while checks run.
-  window.setTimeout(runDevBootChecks, 0);
+  window.setTimeout(runDevBootChecks, 2000);
 }
 
 // Mark module evaluation so index.html's timeout can distinguish "never loaded"

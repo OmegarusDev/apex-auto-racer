@@ -153,7 +153,7 @@ export class DisciplineSelectScene implements Scene {
       setActiveDriver(cur, existing.id);
       g.state = cur;
       g.autosave();
-      g.scenes.replace(new CareerHubScene());
+      g.scenes.replaceRoot(new CareerHubScene());
     } else {
       g.scenes.push(new DriverCreateScene(id));
     }

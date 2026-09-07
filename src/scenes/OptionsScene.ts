@@ -1,6 +1,6 @@
 import type { Scene } from '../engine/SceneManager';
 import { getGameContext } from '../engine/GameContext';
-import type { VolumeOptions } from '../engine/types';
+import { DEFAULT_RACE_ZOOM, type VolumeOptions } from '../engine/types';
 import {
   drawButton,
   handleButton,
@@ -23,8 +23,9 @@ import {
   type SliderDef,
 } from '../ui/components';
 import { ACCENT_TRACK } from '../ui/theme';
+import { HOW_TO_PLAY } from '../ui/howToPlay';
 import { buildUi, drawBackground, onSceneEnter, onSceneResize } from './sceneChrome';
-import { TitleScene } from './TitleScene';
+import { DisciplineSelectScene } from './DisciplineSelectScene';
 
 export class OptionsScene implements Scene {
   private toasts = new ToastManager();
@@ -33,6 +34,7 @@ export class OptionsScene implements Scene {
   private detachWheel: (() => void) | null = null;
   /** Live fallback so sliders work before any save exists. */
   private localVols: VolumeOptions | null = null;
+  private localZoom: number | null = null;
 
   enter(): void {
     onSceneEnter();
@@ -76,7 +78,6 @@ export class OptionsScene implements Scene {
     const g = getGameContext();
     const vols = this.volumes();
     vols[key] = value;
-    // Always audible immediately; persisted only when a save exists.
     g.audio.setVolumes(vols);
     if (g.state !== null) {
       g.state.options.volumes[key] = value;
@@ -84,11 +85,52 @@ export class OptionsScene implements Scene {
     }
   }
 
-  private openResetConfirm(): void {
+  private raceZoom(): number {
+    const g = getGameContext();
+    if (g.state !== null) {
+      const z = g.state.options.raceZoom;
+      return typeof z === 'number' && Number.isFinite(z) ? Math.max(0, Math.min(1, z)) : DEFAULT_RACE_ZOOM;
+    }
+    return this.localZoom ?? DEFAULT_RACE_ZOOM;
+  }
+
+  private setRaceZoom(value: number): void {
+    const z = Math.max(0, Math.min(1, value));
+    const g = getGameContext();
+    if (g.state !== null) {
+      g.state.options.raceZoom = z;
+      g.autosave();
+    } else {
+      this.localZoom = z;
+    }
+  }
+
+  private openHowTo(): void {
     this.modal = {
       open: true,
-      title: 'Reset Save?',
-      body: 'This will permanently delete\nyour career progress.',
+      title: 'How to Play',
+      body: HOW_TO_PLAY,
+      buttons: [
+        {
+          x: 0,
+          y: 0,
+          w: 0,
+          h: 0,
+          label: 'Got it',
+          primary: true,
+          onClick: () => {
+            this.modal.open = false;
+          },
+        },
+      ],
+    };
+  }
+
+  private openNewCareerConfirm(): void {
+    this.modal = {
+      open: true,
+      title: 'New Career?',
+      body: 'This replaces your current career.\nThere is no undo.',
       buttons: [
         {
           x: 0,
@@ -107,17 +149,17 @@ export class OptionsScene implements Scene {
           h: 0,
           label: 'Continue',
           primary: true,
-          onClick: () => this.openResetConfirm2(),
+          onClick: () => this.openNewCareerConfirm2(),
         },
       ],
     };
   }
 
-  private openResetConfirm2(): void {
+  private openNewCareerConfirm2(): void {
     this.modal = {
       open: true,
       title: 'Are you absolutely sure?',
-      body: 'There is no undo.\nAll progress will be lost.',
+      body: 'All progress will be lost.',
       buttons: [
         {
           x: 0,
@@ -134,15 +176,13 @@ export class OptionsScene implements Scene {
           y: 0,
           w: 0,
           h: 0,
-          label: 'Delete Save',
+          label: 'Start New',
           danger: true,
           onClick: () => {
             const g = getGameContext();
-            g.save.reset();
-            g.state = null;
+            g.startNewGame();
             this.modal.open = false;
-            this.toasts.push('Save deleted', '#f87171');
-            g.scenes.replace(new TitleScene());
+            g.scenes.replaceRoot(new DisciplineSelectScene());
           },
         },
       ],
@@ -154,6 +194,7 @@ export class OptionsScene implements Scene {
     const { ui, token } = buildUi(w, h, 0, ACCENT_TRACK);
     const vols = this.volumes();
     const shell = layoutShell(w, h, token);
+    const hasSave = g.save.hasSave();
 
     drawBackground(ctx, w, h, token);
 
@@ -174,13 +215,20 @@ export class OptionsScene implements Scene {
     const btnH = ensureMinTouch(pad(token, 5.5), token);
     const sectionGap = pad(token, 2);
     const resetH = Math.max(btnH, pad(token, 6));
-    // Content height — mirrors the draw chain below exactly.
-    const contentH =
+
+    let contentH =
+      btnH + sectionGap +
       token.fontCaption + pad(token, 0.75) + pad(token, 1) +
       rowH * 5 +
       sectionGap +
       token.fontCaption + pad(token, 0.75) + pad(token, 1) +
-      resetH;
+      rowH;
+    if (hasSave) {
+      contentH +=
+        sectionGap +
+        token.fontCaption + pad(token, 0.75) + pad(token, 1) +
+        resetH;
+    }
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
@@ -189,9 +237,19 @@ export class OptionsScene implements Scene {
     this.scroller.begin(ctx, view);
     let y = 0;
 
-    // ════════════════════════════════════════════
-    // AUDIO SETTINGS
-    // ════════════════════════════════════════════
+    const howBtn: ButtonDef = {
+      x: pad(token, 1.5),
+      y,
+      w: view.w - pad(token, 3),
+      h: btnH,
+      label: 'How to Play',
+      primary: true,
+      onClick: () => this.openHowTo(),
+    };
+    drawButton(ctx, howBtn, lui);
+    if (!this.modal.open) handleButton(howBtn, lui);
+    y += btnH + sectionGap;
+
     y += drawSectionTitle(ctx, 0, y, 'Audio', lui);
     y += pad(token, 1);
 
@@ -219,23 +277,36 @@ export class OptionsScene implements Scene {
     }
 
     y += sectionGap;
-
-    // ═══════════════════════════════════════════
-    // SAVE DATA — DESTRUCTIVE ACTIONS
-    // ════════════════════════════════════════════
-    y += drawSectionTitle(ctx, 0, y, 'Save Data', lui);
+    y += drawSectionTitle(ctx, 0, y, 'Camera', lui);
     y += pad(token, 1);
-    const resetBtn: ButtonDef = {
-      x: pad(token, 1.5),
+    const zoomSlider: SliderDef = {
+      x: 0,
       y,
-      w: view.w - pad(token, 3),
-      h: resetH,
-      label: 'Reset Save Data',
-      cta: false,
-      onClick: () => this.openResetConfirm(),
+      w: view.w,
+      h: trackH,
+      label: 'Race Zoom',
+      value: this.raceZoom(),
+      onChange: (v) => this.setRaceZoom(v),
     };
-    drawButton(ctx, resetBtn, lui);
-    if (!this.modal.open) handleButton(resetBtn, lui);
+    drawSlider(ctx, zoomSlider, lui);
+    if (!this.modal.open) handleSlider(zoomSlider, lui);
+    y += rowH;
+
+    if (hasSave) {
+      y += sectionGap;
+      y += drawSectionTitle(ctx, 0, y, 'Career', lui);
+      y += pad(token, 1);
+      const newBtn: ButtonDef = {
+        x: pad(token, 1.5),
+        y,
+        w: view.w - pad(token, 3),
+        h: resetH,
+        label: 'New Career',
+        onClick: () => this.openNewCareerConfirm(),
+      };
+      drawButton(ctx, newBtn, lui);
+      if (!this.modal.open) handleButton(newBtn, lui);
+    }
 
     this.scroller.end(ctx);
 

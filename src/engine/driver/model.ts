@@ -36,6 +36,18 @@ const nodeScratch: InterpolatedNode = {
   s: 0,
 };
 
+const lookScratch: InterpolatedNode = {
+  pos: { x: 0, y: 0 },
+  tangent: { x: 1, y: 0 },
+  normal: { x: 0, y: 1 },
+  width: 0,
+  runoffWidth: 0,
+  kappa: 0,
+  kappaLine: 0,
+  o: 0,
+  s: 0,
+};
+
 export interface RivalSnapshot {
   arcGap: number;
   lateralSep: number;
@@ -73,6 +85,10 @@ export interface BrainState {
   suppressBrakeUntil: number;
   mistakeLUntil: number;
   mistakeLShift: number;
+  /**
+   * Race time when the driver starts steering off the dirt bank (0 = on
+   * tarmac). A short hold so a wide moment can exist, then they come home.
+   */
   recoveryUntil: number;
   /** Confidence 0..1 — edges the driver closer to the limit (drama). */
   conf: number;
@@ -149,6 +165,10 @@ export function idleBrainOutput(car: CarSimState, _track: TrackData): BrainOutpu
 }
 
 const G = 9.81;
+/** Seconds on the dirt before the driver commits to coming back. */
+const DIRT_HOLD_SEC = 0.45;
+/** Extra hold for a rookie (elite uses DIRT_HOLD_SEC only). */
+const DIRT_HOLD_ROOKIE = 0.3;
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
@@ -178,6 +198,27 @@ function findNodeIndexAtS(track: TrackData, s: number): number {
 function gripEstimate(car: CarSimState, muSurface: number, tempGrip: number): number {
   const mu = muSurface * (car.setup?.compoundMu ?? 1) * tempGrip;
   return mu * G;
+}
+
+/**
+ * Steer feedforward for a path of curvature κ.
+ * Ackermann (wb·κ) is rolling-without-slip; these tyres need extra road-wheel
+ * to build the slip that actually makes aY = v²κ. Without that term the car
+ * cuts straight across the inside of every bend.
+ */
+function steerForKappa(wb: number, pathK: number, v: number, aGrip: number): number {
+  const k = Math.max(-0.28, Math.min(0.28, pathK));
+  const ack = Math.atan(wb * k);
+  const aYCmd = Math.max(-aGrip, Math.min(aGrip, v * v * k));
+  return ack + 0.075 * (aYCmd / G);
+}
+
+/** Preview κ: turn in on the upcoming bend, hold the current one through the apex. */
+function previewKappa(now: number, ahead: number): number {
+  if (now === 0) return ahead;
+  if (ahead === 0) return now;
+  if (Math.sign(now) !== Math.sign(ahead)) return now;
+  return Math.abs(ahead) >= Math.abs(now) ? ahead : now;
 }
 
 function trafficBrake(car: CarSimState, rivals: readonly RivalSnapshot[], aBrake: number): number {
@@ -252,6 +293,7 @@ export function tickDriverBrain(
   } else {
     state.shaken = Math.max(0, state.shaken - (PHYSICS.dt * 4) / 8);
   }
+  if (car.slotMode !== 'deslot') state.recoveryUntil = 0;
   state.prevSlotMode = car.slotMode;
 
   const node = interpolateAtSInto(track.nodes, track.length, car.s, nodeScratch);
@@ -260,6 +302,9 @@ export function tickDriverBrain(
   const v = Math.max(0, car.v);
   const tempGrip = tyreTempGrip(car.tyreTemp);
   const aGrip = gripEstimate(car, ctx.muSurface ?? SURFACES[disc].mu, tempGrip);
+  // Groove = this car's personal line (κ feedforward + lateral pursuit).
+  // Corner speed is planned against tyre grip; too hot → tyres saturate and
+  // the car runs wide — that is the hybrid.
 
   // --- Unrecoverable / recovering states first ---
   if (car.spinRemaining > 0) {
@@ -274,27 +319,41 @@ export function tickDriverBrain(
     };
   }
   if (car.slotMode === 'deslot') {
-    // Running wide / sliding: back off, aim at the line ahead (pure pursuit).
+    // Kerb kiss: ease toward the line. Dirt bank: hold a beat, then come home.
+    // A high-speed cap used to leave them running parallel on the runoff.
+    const onBank = Math.abs(car.l) > halfW + 1.0;
+    const delay = DIRT_HOLD_SEC + DIRT_HOLD_ROOKIE * (1 - skill01);
+    if (onBank && state.recoveryUntil <= 0) state.recoveryUntil = raceTime + delay;
+    const comeHome = state.recoveryUntil > 0 && raceTime >= state.recoveryUntil;
     const lineT = Math.max(-lineClamp, Math.min(lineClamp, personalLineAt(car, track, car.s)));
-    const lookS = (car.s + 18) % track.length;
-    const lineTAhead = Math.max(
-      -lineClamp,
-      Math.min(lineClamp, personalLineAt(car, track, lookS)),
+    const home = comeHome
+      ? Math.sign(car.l || 1) * Math.max(0, halfW - 1.5)
+      : lineT;
+    const errNow = home - car.l;
+    const wbR = car.setup?.wheelbase ?? 2.7;
+    const gain = comeHome ? 0.95 : 0.4;
+    const steerRaw =
+      Math.atan((gain * errNow) / Math.max(v, 6)) - 0.18 * (car.dl / Math.max(v, 6));
+    const cap = comeHome ? 0.42 : Math.atan((G * wbR) / Math.max(v * v, 18));
+    let steer = Math.max(-cap, Math.min(cap, steerRaw));
+    const speedBoost = v < 15 ? 1.5 : 1;
+    const rate = (2.6 + 1.9 * skill01) * speedBoost;
+    steer = Math.max(
+      state.prevSteer - rate * PHYSICS.dt * 4,
+      Math.min(state.prevSteer + rate * PHYSICS.dt * 4, steer),
     );
-    const errLat = lineTAhead - (car.l + 18 * Math.sin(car.slipAngle));
-    const steerCapR = Math.atan((G * (car.setup?.wheelbase ?? 2.7)) / Math.max(v * v, 18));
-    const steer = Math.max(
-      -steerCapR,
-      Math.min(
-        steerCapR,
-        Math.atan((2 * errLat * (car.setup?.wheelbase ?? 2.7)) / (18 * 18)) - car.dl * 0.2,
-      ),
-    );
-    const throttle = Math.abs(car.slipAngle) > 0.5 ? 0.5 : 0.8;
+    state.prevSteer = steer;
+    const throttle = comeHome
+      ? Math.abs(car.slipAngle) > 0.5
+        ? 0.28
+        : 0.42
+      : Math.abs(car.slipAngle) > 0.5
+        ? 0.5
+        : 0.75;
     return {
       desiredThrottle: throttle,
-      desiredBrake: 0.05,
-      lTarget: lineT,
+      desiredBrake: comeHome ? 0.12 : 0.05,
+      lTarget: home,
       steerTarget: steer,
       steer,
       intent: makeIntent('REJOIN_CRAWL'),
@@ -469,8 +528,11 @@ export function tickDriverBrain(
     if (car.v < 3) desiredThrottle = 1;
   }
 
-  // Pure pursuit: aim at the racing line a lookahead ahead of the car, so the
-  // recovery arcs in smoothly instead of yanking across the track.
+  // Point at the groove: Ackermann for the path curvature (feedforward) plus
+  // pursuit on lateral error. Feedforward is what actually turns the car in a
+  // corner — offset-only pursuit is ~0 when already on the line, and the
+  // tyres then generate no aY, so the ribbon rotates under a world-straight
+  // velocity. The tyres still accept or refuse the turn.
   const wb = car.setup?.wheelbase ?? 2.7;
   // Anticipatory corner setup: drivers KNOW the track (turnInPoint/apex are
   // precomputed). Skill sets how early they begin rotating — an elite leads far
@@ -514,31 +576,32 @@ export function tickDriverBrain(
     }
   }
   const lookS = (car.s + laDist) % track.length;
+  interpolateAtSInto(track.nodes, track.length, lookS, lookScratch);
+  const kappaCmd = previewKappa(node.kappaLine, lookScratch.kappaLine);
+  const pathK = kappaCmd / Math.max(0.45, 1 - kappaCmd * car.l);
+  // While the nose is only a few degrees off the path, unwind that attitude
+  // into extra/less curvature. Past ~12° this is a slide — leave it to the
+  // recovery block so a held drift isn't countersteered away.
+  const unwind =
+    Math.abs(car.slipAngle) < 0.22 ? (1.6 * car.slipAngle) / Math.max(v, 5) : 0;
+  const steerFF = steerForKappa(wb, pathK - unwind, v, aGrip);
   // Same grid-anchored blend as the position target (see blendedLineAt above).
   const lineTAhead = Math.max(-lineClamp, Math.min(lineClamp, blendedLineAt(lookS)));
   const errLat = lineTAhead - (car.l + laDist * Math.sin(car.slipAngle));
-  // Kinematic pursuit: requested curvature = 2·err/λ² → steer angle for that arc.
   const lam = Math.max(laDist, 19);
   const steerPursuit = Math.atan((2 * errLat * wb) / (lam * lam));
-  // The wheels point where the Racer aims the nose (pure pursuit) plus a hint
-  // of countersteer (the Racer reads its own slide) — and a SMALL lateral
-  // damper that catches a momentum plow in a hairpin without erasing the drift
-  // (the drift lives in the body slip, not the lateral velocity). This D term
-  // is the stabilizer: weakening it (or dropping the max(v,6) floor) let the
-  // lateral loop go unstable and oscillate the car across the track.
+  const errNow = lineT - car.l;
+  const ffBlend = Math.max(0.45, 1 - Math.abs(errNow) / 7);
   const steerYaw = -0.15 * car.slipAngle;
   const steerDamp = -0.18 * (car.dl / Math.max(v, 6));
-  let steer = Math.max(-0.7, Math.min(0.7, steerPursuit + steerYaw + steerDamp));
-  // Grip-limited steering: the tyres can only yield yaw up to aGrip/v, so the
-  // steer angle that delivers that yaw is ~aGrip·wb/v² (bicycle model). Capping
-  // the COMMAND here stops the brain demanding a turn the rubber can't deliver —
-  // which otherwise overloads the front and breaks the rear loose into a spin.
-  // At the correct corner-entry speed the ideal line sets, this cap exactly
-  // matches what the corner needs, so it never starves normal cornering; it only
-  // refuses impossible demands. Factor 1.0 (was 1.5) grants full grip authority
-  // so slightly-too-fast entries still rotate instead of ploughing wide.
-  const steerCap = Math.atan((1.5 * G * wb) / Math.max(v * v, 18));
-  steer = Math.max(-steerCap, Math.min(steerCap, steer));
+  const steerCap = Math.atan((1.5 * aGrip * wb) / Math.max(v * v, 18));
+  // Budget-cap the curvature command only. Clipping the sum starved turn-in
+  // (pursuit is ~0 on the line, so a grip cap on the total killed the FF).
+  const steerFFCapped = Math.max(-steerCap, Math.min(steerCap, steerFF));
+  let steer = Math.max(
+    -0.7,
+    Math.min(0.7, ffBlend * steerFFCapped + steerPursuit + steerYaw + steerDamp),
+  );
   // Steering is NEVER suppressed by braking — the wheel stays full (grip-capped
   // above). Real drivers trail-brake (brake + steer together), and the friction
   // circle in tyre.ts axleForces naturally penalises over-brake-through-corner as

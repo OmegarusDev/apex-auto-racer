@@ -1,9 +1,11 @@
 /**
- * Two-axle real-plane vehicle on the Frenet ribbon — the greenfield core.
+ * Two-axle vehicle on the Frenet ribbon — hybrid line + tyre physics.
  *
- * Real racing car: the driver steers (δ), the tyres have a grip peak + falloff,
- * load transfers under accel/brake/lat, aero adds downforce + drag. Spins,
- * understeer-wide and drift all EMERGE from this. No magnet, no slot.
+ * Groove = the personal racing line. The driver steers toward it (that is how
+ * the AI knows where to go). Tyres are the grip limit: peak, falloff, load
+ * transfer, aero. If the turn asks for more than the tyres can give, the car
+ * runs wide / slides / spins — that is the emergent behaviour. There is no
+ * magnet force on the chassis; two lateral writers would fight.
  */
 import { BALANCE } from '../../data/balance';
 import { PHYSICS } from '../../data/physics';
@@ -196,6 +198,7 @@ function maybeMarshal(car: CarSimState, track: TrackData, dt: number): void {
  * The main vehicle step — one tick of the coupled tyre/vehicle/load model.
  * `throttle`/`brake` are the APPLIED demands (player ceiling + driver plan).
  * `steer` is the driver's steering angle (rad).
+ * `focus` / `bravery` (0–100) scale wall-stun only.
  */
 export function stepVehicle(
   car: CarSimState,
@@ -211,6 +214,8 @@ export function stepVehicle(
   aAccelEff?: number,
   aBrakeEff?: number,
   condGrip?: number,
+  focus = 50,
+  bravery = 50,
 ): void {
   void rain; // rain is already folded into muSurface by RaceDirector.
   const setup = car.setup as CarSetup;
@@ -327,12 +332,10 @@ export function stepVehicle(
   const aX = (fxF + fxR) / mass - drag;
 
   const aY = ((fyF + fyR) / mass) * latScale;
-  car.fzFront = loads.fzFront;
-  car.fzRear = loads.fzRear;
   car.alphaFront = alphaF;
   car.alphaRear = alphaR;
 
-  // Recompute loads once with the true lateral g.
+  // Quasi-steady loads from this tick's accel (HUD / next-tick seed).
   loads = computeAxleLoads({
     massKg: mass,
     cgHeight: setup.cgHeight,
@@ -345,6 +348,8 @@ export function stepVehicle(
     aeroDownforceN: aero.downforceN,
     loadSens: LOAD_SENS_N,
   });
+  car.fzFront = loads.fzFront;
+  car.fzRear = loads.fzRear;
 
   // Yaw moment, damped by the tyres' self-aligning moments (without this the
   // bicycle model's yaw oscillates and runs away — a car that spins in place).
@@ -389,7 +394,7 @@ export function stepVehicle(
   }
 
   // Barrier.
-  applyBarrier(car, car.l, car.dl, width, runoff, discipline, 50, 50, dt);
+  applyBarrier(car, car.l, car.dl, width, runoff, discipline, focus, bravery, dt);
 
   // Grip usage for the HUD / audio + driver: total accel demand ÷ the grip the
   // tyres can actually provide. (The old version divided by the CURRENT force,

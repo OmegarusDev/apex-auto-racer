@@ -179,6 +179,12 @@ export function runUnderOversteerGates(): FeelGateResult[] {
   const under = runCornerProbe(probeCar(0.7), track, 2.2, vBase * 1.01);
   const over = runCornerProbe(probeCar(0.25), track, 3.2, vBase * 1.06, 1, -0.12);
 
+  // Hybrid contract: the racing line is only a steer target. A balanced car
+  // carried 22% too hot must run wide — tyres cannot hold that corner.
+  const hot = probeCar(0.48);
+  hot.lineO = track.nodes.map(() => 0);
+  const tooFast = runCornerProbe(hot, track, 2.4, vBase * 1.22, 0, -0.1);
+
   return [
     {
       id: 'UNDERSTEER_EMERGES',
@@ -194,6 +200,11 @@ export function runUnderOversteerGates(): FeelGateResult[] {
       id: 'SPIN_EMERGENT',
       ok: over.maxAbsBeta > 0.7,
       detail: `rear-heavy exit-throttle → beta ${over.maxAbsBeta.toFixed(2)} rad (a 40°+ rotation, emergent from the tyre model)`,
+    },
+    {
+      id: 'SLOT_YIELDS_AT_LIMIT',
+      ok: tooFast.maxAbsL > 4,
+      detail: `overspeed 1.22×vGrip maxL=${tooFast.maxAbsL.toFixed(2)}m — tyres saturate, car runs wide`,
     },
   ];
 }

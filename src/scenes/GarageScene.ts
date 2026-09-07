@@ -10,7 +10,6 @@ import {
   drawRadarChart,
   drawInfoIcon,
   infoIconRadius,
-  drawSectionTitle,
   layoutShell,
   ContentScroller,
   TooltipManager,
@@ -35,9 +34,7 @@ import {
   disciplineLabel,
 } from '../career/disciplinesUi';
 import { vehicleRadarValues } from '../career/garage';
-import { CampaignScene } from './CampaignScene';
 import { TuningScene } from './TuningScene';
-import { TeamManagementScene } from './TeamManagementScene';
 import { OptionsScene } from './OptionsScene';
 
 export class GarageScene implements Scene {
@@ -100,34 +97,21 @@ export class GarageScene implements Scene {
 
     const view = shell.contentRect;
     const navSize = ensureMinTouch(pad(token, 5), token);
-    const btnH = ensureMinTouch(pad(token, 5.5), token);
-    const btnGap = pad(token, 0.75);
-    // Tighter hero so Tuning/Team sit nearer the action, not over empty floor.
     const carW = Math.min(view.w * (portrait ? 0.48 : 0.38), pad(token, 17));
     const carH = carW * 1.1;
     const radarR = portrait
       ? Math.min(view.w * 0.2, pad(token, 7))
       : Math.min(view.w * 0.16, pad(token, 7.5));
-    // Extra inset so radar labels never clip the content edge.
     const radarInset = pad(token, 2.5) + token.fontCaption;
+    const tuneH = ctaHeight(token);
 
-    // ════════════════════════════════════════════
-    // PRIMARY CTA — ENTER CAMPAIGN (large, prominent, top)
-    // ════════════════════════════════════════════
-    const campaignBtnH = ctaHeight(token);
-
-    // Content height — mirrors the draw chain below exactly.
     let contentH = pad(token, 0.25) + navSize + pad(token, 1);
     if (portrait) {
       contentH += carH + pad(token, 0.75) + radarR * 2 + pad(token, 2.5) + pad(token, 1);
     } else {
       contentH += Math.max(carH, radarR * 2 + pad(token, 2.5)) + pad(token, 1);
     }
-    contentH +=
-      campaignBtnH + pad(token, 1.5) +
-      token.fontCaption + pad(token, 0.75) + pad(token, 0.35) +
-      btnH + btnGap + pad(token, 0.25) +
-      statBarHeight(token) + pad(token, 1);
+    contentH += tuneH + pad(token, 1.5) + statBarHeight(token) + pad(token, 1);
 
     this.scroller.layout(view, contentH);
     this.scroller.update(ui, view);
@@ -213,51 +197,19 @@ export class GarageScene implements Scene {
       y += blockH + pad(token, 1);
     }
 
-    // ═══════════════════════════════════════════
-    // PRIMARY CTA — ENTER CAMPAIGN (large, prominent)
-    // ════════════════════════════════════════════
-    const campaignBtn: ButtonDef = {
+    const tuneBtn: ButtonDef = {
       x: pad(token, 1.5),
       y,
       w: view.w - pad(token, 3),
-      h: campaignBtnH,
-      label: 'Enter Campaign',
+      h: tuneH,
+      label: 'Tuning',
       cta: true,
       fontSize: token.fontDisplay,
-      onClick: () => g.scenes.push(new CampaignScene(discipline)),
-    };
-    drawButton(ctx, campaignBtn, { ...lui, accent });
-    if (!this.scroller.isScrolling) handleButton(campaignBtn, lui);
-    y += campaignBtnH + pad(token, 1.5);
-
-    // ════════════════════════════════════════════
-    // GARAGE ACTIONS ROW (Tuning / Team)
-    // ════════════════════════════════════════════
-    y += drawSectionTitle(ctx, 0, y, 'Garage', lui);
-    y += pad(token, 0.35);
-    const rowW = (view.w - btnGap) * 0.5;
-    const tuningBtn: ButtonDef = {
-      x: pad(token, 1.5),
-      y,
-      w: rowW,
-      h: btnH,
-      label: 'Tuning',
       onClick: () => g.scenes.push(new TuningScene(discipline)),
     };
-    const teamBtn: ButtonDef = {
-      x: pad(token, 1.5) + rowW + btnGap,
-      y,
-      w: rowW,
-      h: btnH,
-      label: 'Team',
-      onClick: () => g.scenes.push(new TeamManagementScene()),
-    };
-
-    drawButton(ctx, tuningBtn, lui);
-    drawButton(ctx, teamBtn, lui);
-    handleButton(tuningBtn, lui);
-    handleButton(teamBtn, lui);
-    y += btnH + btnGap + pad(token, 0.25);
+    drawButton(ctx, tuneBtn, { ...lui, accent });
+    if (!this.scroller.isScrolling) handleButton(tuneBtn, lui);
+    y += tuneH + pad(token, 1.5);
 
     // Condition bar
     const conditionBar = {

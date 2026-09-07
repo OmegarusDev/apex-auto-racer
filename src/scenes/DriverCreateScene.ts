@@ -251,6 +251,6 @@ export class DriverCreateScene implements Scene {
     setActiveDriver(state, driver.id);
     g.state = state;
     g.autosave();
-    g.scenes.replace(new CareerHubScene());
+    g.scenes.replaceRoot(new CareerHubScene());
   }
 }

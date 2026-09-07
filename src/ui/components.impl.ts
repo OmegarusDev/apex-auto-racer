@@ -48,8 +48,10 @@ export interface ButtonDef {
   primary?: boolean;
   /** Destructive action — red plate regardless of primary/secondary. */
   danger?: boolean;
-  /** Hero CTA — filled accent with a play mark (title Quick Race). */
+  /** Hero CTA — filled accent with a play mark. */
   cta?: boolean;
+  /** Text-only control — no plate. Secondary title/hub actions. */
+  quiet?: boolean;
   /** Optional label size — defaults to fontBody. Title menu uses a larger display size. */
   fontSize?: number;
   onClick?: () => void;
@@ -460,16 +462,37 @@ function drawGearIcon(
 
 export function drawButton(ctx: CanvasRenderingContext2D, btn: ButtonDef, ui: UiContext): void {
   const { token, accent } = ui;
-  // Destructive actions keep their identity even when styled primary.
   const actionAccent = btn.danger === true && !btn.disabled ? token.danger : accent;
   const hovered = !btn.disabled && hitRect(ui.pointerX, ui.pointerY, btn.x, btn.y, btn.w, btn.h);
-  // Sharp pit-plate corners — not soft app cards.
   const r = Math.max(2, pad(token, 0.25));
   const rail = Math.max(3, pad(token, 0.35));
   const isCta = btn.cta === true && !btn.disabled;
-  const isPrimary = (btn.primary === true || btn.danger === true || isCta) && !btn.disabled;
+  const isQuiet = btn.quiet === true;
+  const isPrimary = (btn.primary === true || btn.danger === true || isCta) && !btn.disabled && !isQuiet;
 
   ctx.save();
+  if (isQuiet) {
+    setFont(ctx, token, btn.fontSize ?? token.fontBody, hovered ? '700' : '600', true);
+    ctx.fillStyle = btn.disabled
+      ? token.disabled
+      : btn.danger
+        ? token.danger
+        : hovered
+          ? actionAccent
+          : token.textMuted;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = truncateText(ctx, btn.label.toUpperCase(), btn.w - pad(token));
+    ctx.fillText(label, btn.x + btn.w * 0.5, btn.y + btn.h * 0.52);
+    if (hovered && !btn.disabled) {
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = actionAccent;
+      ctx.fillRect(btn.x + (btn.w - tw) * 0.5, btn.y + btn.h * 0.72, tw, 2);
+    }
+    ctx.restore();
+    return;
+  }
+
   if (btn.disabled) {
     ctx.fillStyle = token.disabledBg;
     roundRectPath(ctx, btn.x, btn.y, btn.w, btn.h, r);
@@ -1399,130 +1422,119 @@ export function fmtCash(n: number): string {
 
 // ── Header ──────────────────────────────────────────────────────────────────
 
-/** Wide enough for "Back" / "Options" labels beside icons. */
-function headerWideLabels(headerW: number, token: ThemeTokens): boolean {
-  return headerW >= pad(token, 48);
+function headerIconSize(token: ThemeTokens): number {
+  return ensureMinTouch(pad(token, 5), token);
 }
 
 function headerBackRect(header: HeaderDef, token: ThemeTokens): Rect {
-  const btnSize = ensureMinTouch(pad(token, 5.5), token);
+  const btnSize = headerIconSize(token);
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
-  const wide = headerWideLabels(header.w, token);
-  // pad(12.5) keeps '← Back' un-truncated at the max 1.35 scale.
-  const w = wide ? ensureMinTouch(pad(token, 12.5), token) : btnSize;
   return {
-    x: header.x + pad(token, 0.75) + token.safe.left,
+    x: header.x + pad(token, 0.5) + token.safe.left,
     y: midY - btnSize * 0.5,
-    w,
+    w: btnSize,
     h: btnSize,
   };
 }
 
 function headerSettingsRect(header: HeaderDef, token: ThemeTokens): Rect {
-  const btnSize = ensureMinTouch(pad(token, 5.5), token);
+  const btnSize = headerIconSize(token);
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
-  const wide = headerWideLabels(header.w, token);
-  const w = wide ? ensureMinTouch(pad(token, 13), token) : btnSize;
-  const rightEdge = header.x + header.w - pad(token, 0.75) - token.safe.right;
+  const rightEdge = header.x + header.w - pad(token, 0.5) - token.safe.right;
   return {
-    x: rightEdge - w,
+    x: rightEdge - btnSize,
     y: midY - btnSize * 0.5,
-    w,
+    w: btnSize,
     h: btnSize,
   };
+}
+
+function drawHeaderIconHit(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  hovered: boolean,
+  accent: string,
+): void {
+  if (!hovered) return;
+  ctx.save();
+  ctx.fillStyle = `${accent}22`;
+  ctx.beginPath();
+  ctx.arc(rect.x + rect.w * 0.5, rect.y + rect.h * 0.5, rect.h * 0.42, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBackChevron(ctx: CanvasRenderingContext2D, rect: Rect, color: string): void {
+  const cx = rect.x + rect.w * 0.5;
+  const cy = rect.y + rect.h * 0.5;
+  const s = rect.h * 0.16;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx + s * 0.4, cy - s * 1.3);
+  ctx.lineTo(cx - s, cy);
+  ctx.lineTo(cx + s * 0.4, cy + s * 1.3);
+  ctx.stroke();
+  ctx.restore();
 }
 
 export function drawHeader(ctx: CanvasRenderingContext2D, header: HeaderDef, ui: UiContext): void {
   const { token, accent } = ui;
   const midY = headerContentTop(token) + headerContentH(token) * 0.5;
-  const wide = headerWideLabels(header.w, token);
 
   ctx.save();
-  // Translucent strip — reads as pit wall, not a solid app bar.
-  const bar = ctx.createLinearGradient(0, header.y, 0, header.y + header.h);
-  bar.addColorStop(0, 'rgba(11,13,12,0.55)');
-  bar.addColorStop(0.7, 'rgba(14,18,16,0.82)');
-  bar.addColorStop(1, 'rgba(14,18,16,0.92)');
-  ctx.fillStyle = bar;
+  ctx.fillStyle = 'rgba(11,13,12,0.78)';
   ctx.fillRect(header.x, header.y, header.w, header.h);
-  ctx.fillStyle = accent;
-  ctx.fillRect(header.x, header.y + header.h - 3, header.w, 3);
-  ctx.fillStyle = 'rgba(242,239,230,0.06)';
+  ctx.fillStyle = `${accent}99`;
   ctx.fillRect(header.x, header.y + header.h - 1, header.w, 1);
 
-  let titleX = header.x + pad(token, 1.5) + token.safe.left;
-  let rightEdge = header.x + header.w - pad(token, 0.75) - token.safe.right;
+  let left = header.x + pad(token, 0.5) + token.safe.left;
+  let right = header.x + header.w - pad(token, 0.5) - token.safe.right;
 
   if (header.back) {
     const back = headerBackRect(header, token);
-    const backBtn: ButtonDef = {
-      x: back.x,
-      y: back.y,
-      w: back.w,
-      h: back.h,
-      label: wide ? '← Back' : '←',
-      onClick: header.onBack,
-    };
-    drawButton(ctx, backBtn, ui);
-    titleX = back.x + back.w + pad(token, 0.75);
+    const hovered = hitRect(ui.pointerX, ui.pointerY, back.x, back.y, back.w, back.h);
+    drawHeaderIconHit(ctx, back, hovered, accent);
+    drawBackChevron(ctx, back, hovered ? accent : token.text);
+    left = back.x + back.w + pad(token, 0.5);
   }
 
   if (header.settings) {
     const settings = headerSettingsRect(header, token);
-    if (wide) {
-      drawButton(
-        ctx,
-        {
-          x: settings.x,
-          y: settings.y,
-          w: settings.w,
-          h: settings.h,
-          label: 'Options',
-          onClick: header.onSettings,
-        },
-        ui,
-      );
-    } else {
-      const hovered = hitRect(ui.pointerX, ui.pointerY, settings.x, settings.y, settings.w, settings.h);
-      const r = Math.max(2, pad(token, 0.25));
-      const rail = Math.max(3, pad(token, 0.35));
-      ctx.fillStyle = hovered ? '#1f2622' : token.card;
-      roundRectPath(ctx, settings.x, settings.y, settings.w, settings.h, r);
-      ctx.fill();
-      ctx.fillStyle = hovered ? accent : `${accent}99`;
-      ctx.fillRect(settings.x, settings.y, rail, settings.h);
-      ctx.strokeStyle = hovered ? `${accent}55` : token.cardStroke;
-      ctx.lineWidth = 1;
-      roundRectPath(ctx, settings.x, settings.y, settings.w, settings.h, r);
-      ctx.stroke();
-      drawGearIcon(
-        ctx,
-        settings.x + settings.w * 0.5 + rail * 0.15,
-        settings.y + settings.h * 0.5,
-        Math.min(settings.w, settings.h) * 0.22,
-        token.text,
-      );
-    }
-    rightEdge = settings.x - pad(token, 0.75);
+    const hovered = hitRect(ui.pointerX, ui.pointerY, settings.x, settings.y, settings.w, settings.h);
+    drawHeaderIconHit(ctx, settings, hovered, accent);
+    drawGearIcon(
+      ctx,
+      settings.x + settings.w * 0.5,
+      settings.y + settings.h * 0.5,
+      Math.min(settings.w, settings.h) * 0.18,
+      hovered ? accent : token.textMuted,
+    );
+    right = settings.x - pad(token, 0.5);
   }
 
   if (header.cash !== undefined) {
-    setFont(ctx, token, token.fontBody, '700');
+    setFont(ctx, token, token.fontCaption, '700');
     const cashStr = fmtCash(header.cash);
     const cashW = ctx.measureText(cashStr).width;
     ctx.fillStyle = accent;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    ctx.fillText(cashStr, rightEdge, midY);
-    rightEdge -= cashW + pad(token, 1);
+    ctx.fillText(cashStr, right, midY);
+    right -= cashW + pad(token, 1);
   }
 
-  const titleMax = Math.max(pad(token, 8), rightEdge - titleX - pad(token, 0.5));
-  setFont(ctx, token, token.fontTitle, '400', true);
-  ctx.fillStyle = token.text;
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(truncateText(ctx, header.title.toUpperCase(), titleMax), titleX, midY);
+  if (header.title !== '') {
+    const titleMax = Math.max(0, right - left);
+    setFont(ctx, token, token.fontBody, '600', true);
+    ctx.fillStyle = token.textMuted;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(truncateText(ctx, header.title.toUpperCase(), titleMax), left, midY);
+  }
 
   ctx.restore();
 }

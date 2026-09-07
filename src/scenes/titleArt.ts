@@ -458,15 +458,27 @@ export interface TitleScreenLayout {
  * Priority: brand → menu → track (track shrinks first).
  * Portrait phones get fat touch targets and large display labels.
  */
+export interface TitleMenuRows {
+  primary: number;
+  linkRow: number;
+  gap: number;
+}
+
 /**
- * Exact height of the title's three-row menu stack.
- * Layout reserve and TitleScene's draw chain both call this — they cannot drift.
+ * Title menu: one CTA plus a text-link row. Layout reserve and TitleScene
+ * both call this — they cannot drift.
  */
+export function titleMenuRowHeights(token: ThemeTokens, btnH: number): TitleMenuRows {
+  return {
+    primary: Math.max(btnH + pad(token, 1), pad(token, 7)),
+    linkRow: Math.max(token.touchMin, pad(token, 5)),
+    gap: pad(token, 1.25),
+  };
+}
+
 export function titleMenuStackHeight(token: ThemeTokens, btnH: number): number {
-  const quickH = Math.max(btnH + pad(token, 2), pad(token, 8));
-  const secondaryH = Math.max(btnH, pad(token, 5.5));
-  const tertiaryH = Math.max(btnH, pad(token, 5));
-  return quickH + pad(token, 2) + secondaryH + pad(token, 2) + tertiaryH;
+  const r = titleMenuRowHeights(token, btnH);
+  return r.primary + r.gap + r.linkRow;
 }
 
 export function computeTitleLayout(w: number, h: number, token: ThemeTokens): TitleScreenLayout {

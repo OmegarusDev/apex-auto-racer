@@ -17,11 +17,7 @@ export interface RaceChromeLayout {
   gas: ChromeRect;
   shift: ChromeRect;
   pause: ChromeRect;
-  /** Racing-lines toggle — stacked under Pause, above Zoom. */
-  lines: ChromeRect;
   minimap: ChromeRect;
-  /** Race tabletop zoom slider (draw + hit). */
-  zoomSlider: ChromeRect;
   /** Regions that must not register as pedals. */
   deadZones: ChromeRect[];
   deckTop: number;
@@ -39,8 +35,8 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
   // Short landscape needs a taller deck so SHIFT stays ≥ touchMin and labels fit.
   const deckFloor = shortLandscape
     ? ensureMinTouch(pad(token, 12), token) + safe.bottom + gap * 2
-    : pad(token, 11) + safe.bottom;
-  const deckH = Math.max(h * (shortLandscape ? 0.32 : 0.26), deckFloor);
+    : pad(token, 9) + safe.bottom;
+  const deckH = Math.max(h * (shortLandscape ? 0.22 : 0.18), deckFloor);
   const deckTop = h - deckH;
   const shiftW = Math.min(w * 0.28, pad(token, 14));
   const shiftX = (w - shiftW) * 0.5;
@@ -74,7 +70,6 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
   const mmX = w - safe.right - pad(token) - mmSize;
   const mmY = safe.top + pad(token);
   const minimap: ChromeRect = { x: mmX, y: mmY, w: mmSize, h: mmSize * 0.72 };
-  // Pause under minimap — wide enough for "Pause" label when chrome column allows.
   const pauseW = Math.max(pauseSize, Math.min(mmSize, pad(token, 9)));
   const pause: ChromeRect = {
     x: w - safe.right - pad(token) - pauseW,
@@ -83,36 +78,12 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     h: pauseSize,
   };
 
-  // Show-Lines toggle under pause — part of the layout so the zoom slider
-  // stacks BELOW it instead of sharing its hit zone.
-  const lines: ChromeRect = {
-    x: pause.x,
-    y: pause.y + pause.h + pad(token, 0.5),
-    w: pause.w,
-    h: pauseSize,
-  };
-
-  // Zoom under show-lines — same chrome column, fat enough for a thumb.
-  const zoomH = ensureMinTouch(pad(token, 4.25), token);
-  const zoomSlider: ChromeRect = {
-    x: mmX,
-    y: lines.y + lines.h + pad(token, 0.65),
-    w: mmSize,
-    h: zoomH,
-  };
-
-  // Rain + night chips stack under zoom — keep them out of the gas pad.
-  const chipH = pad(token, 2.6);
-  const chipStack =
-    pad(token, 0.5) + chipH + pad(token, 0.4) + chipH;
-
-  // Expand TR dead zone so fat fingers don't gas through chrome.
   const trPad = pad(token, 0.75);
   const trZone: ChromeRect = {
-    x: Math.min(mmX, pause.x, zoomSlider.x) - trPad,
+    x: Math.min(mmX, pause.x) - trPad,
     y: safe.top,
-    w: w - Math.min(mmX, pause.x, zoomSlider.x) + trPad,
-    h: zoomSlider.y + zoomSlider.h + chipStack + trPad - safe.top,
+    w: w - Math.min(mmX, pause.x) + trPad,
+    h: pause.y + pause.h + trPad - safe.top,
   };
 
   return {
@@ -120,9 +91,7 @@ export function raceChromeLayout(w: number, h: number, token: ThemeTokens): Race
     gas,
     shift,
     pause,
-    lines,
     minimap,
-    zoomSlider,
     deadZones: [trZone],
     deckTop,
   };

@@ -149,7 +149,7 @@ export function pad(token: ThemeTokens, units = 1): number {
  * Visual track heights must NOT use touchMin — only hit targets should.
  */
 export function headerContentH(token: ThemeTokens): number {
-  return Math.max(token.touchMin, pad(token, 6.5));
+  return Math.max(44, pad(token, 5.5));
 }
 
 /** Y where header controls (back/title/cash) are vertically centered. */

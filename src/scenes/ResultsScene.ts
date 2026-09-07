@@ -167,10 +167,14 @@ export class ResultsScene implements Scene {
 
   private navigateBack(): void {
     const g = getGameContext();
-    if (this.payload.config.returnTo === 'title' || this.payload.config.mode === 'quick') {
+    if (this.payload.config.returnTo === 'title') {
       void import('./TitleScene').then((mod) => {
-        g.scenes.replace(new mod.TitleScene());
+        g.scenes.replaceRoot(new mod.TitleScene());
       });
+      return;
+    }
+    if (g.scenes.depth > 1) {
+      g.scenes.back();
       return;
     }
     g.scenes.replace(new CampaignScene(this.payload.discipline));

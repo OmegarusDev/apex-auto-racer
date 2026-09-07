@@ -66,13 +66,12 @@ export const PHYSICS = {
   /** Soft inward nudge (m/s²) when stuck on the wall while deslotted. */
   /** Seconds of raw (undelayed) brain output after rejoining the groove. */
 
-  // --- Scalextric groove / deslot ---
-  /** |kappa| below this is treated as a straight — no deslot at any throttle. */
+  // --- Groove (racing line) ---
+  /** |kappa| below this is treated as a straight for HUD / deslot threat. */
   grooveKappaMin: 0.012,
   /**
-   * Groove magnet: restoring lateral accel toward personal line.
-   * magnet = roll(v) × (1 − loadKill×longLoad) × (1 − cornerKill×cornerLoad)
-   * aLat = spring×magnet×err − damp×dl; |dl| ≤ maxDlPerV×v
+   * The groove is the personal racing line the driver steers toward — not a
+   * chassis magnet. Tyres are the grip limit; overspeed runs wide.
    */
   /** How hard accel/brake kills magnet (0–1 scale on |aLongDemand|/aGrip). */
   /** How hard corner load (aLat/aGrip) kills magnet. */

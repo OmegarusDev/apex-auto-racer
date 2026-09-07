@@ -11,7 +11,6 @@ import {
 } from '../engine/RaceDirector';
 import type { OnboardingFlags, RaceEvent } from '../engine/types';
 import {
-  intentHudLabel,
   intentTickerPhrase,
   type BrainIntentTag,
 } from '../engine/BrainIntent';
@@ -47,8 +46,6 @@ import {
   drawModal,
   handleModal,
   layoutModalButtons,
-  drawSlider,
-  handleSlider,
   pad,
   ensureMinTouch,
   truncateText,
@@ -56,8 +53,8 @@ import {
   layoutHintBox,
   type ButtonDef,
   type ModalDef,
-  type SliderDef,
 } from '../ui/components';
+import { PAUSE_HINT } from '../ui/howToPlay';
 import { toOrdinal } from '../utils/helpers';
 import { accentForDiscipline, createTheme, type ThemeTokens } from '../ui/theme';
 import { gearboxFor } from '../engine/Gearbox';
@@ -108,7 +105,6 @@ export class RaceScene implements Scene {
   private camOut = { x: 0, y: 0, zoom: 1 };
   private chrome: RaceChromeLayout | null = null;
   private paused = false;
-  private zoomDirty = false;
   private pauseModal: ModalDef = { open: false, title: '', body: '', buttons: [] };
   private finishTimer = 0;
   private transitioned = false;
@@ -296,7 +292,7 @@ export class RaceScene implements Scene {
 
   handleBack(): boolean {
     if (this.resultsImportFailed) {
-      this.leaveToCampaign();
+      this.leaveRace();
       return true;
     }
     if (this.enterError !== null || this.director === null) {
@@ -320,11 +316,26 @@ export class RaceScene implements Scene {
     if (resume) this.director?.resume();
   }
 
-  private leaveToCampaign(): void {
+  private leaveRace(): void {
+    const to = this.launch.returnTo ?? 'campaign';
+    if (to === 'title') {
+      void import('./TitleScene')
+        .then((mod) => {
+          this.g.scenes.replaceRoot(new mod.TitleScene());
+        })
+        .catch(() => {
+          this.g.scenes.back();
+        });
+      return;
+    }
+    if (this.g.scenes.depth > 1) {
+      this.g.scenes.back();
+      return;
+    }
     const discipline = this.launch.discipline;
     void import('./CampaignScene')
       .then((mod) => {
-        this.g.scenes.replace(new mod.CampaignScene(discipline));
+        this.g.scenes.replaceRoot(new mod.CampaignScene(discipline));
       })
       .catch(() => {
         this.g.scenes.back();
@@ -495,20 +506,11 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
     return buildCarFrameDto(this.view, director, this.frameCars);
   }
 
-  private openPause(): void {
-    this.director?.pause();
-    this.paused = true;
-    this.g.input.setUiCapture(true);
+  private fillPauseModal(): void {
     this.pauseModal = {
       open: true,
       title: 'Paused',
-      body: [
-        'Resume racing or retire from the event.',
-        '',
-        'GROOVE — grip margin before deslot',
-        'SHIFT bar — shift while it pulses',
-        'Car·Tyres·Line — wear · temp · focus',
-      ].join('\n'),
+      body: PAUSE_HINT,
       buttons: [
         {
           x: 0,
@@ -527,6 +529,17 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
           y: 0,
           w: 0,
           h: 0,
+          label: this.showRacingLines ? 'Hide Lines' : 'Lines',
+          onClick: () => {
+            this.showRacingLines = !this.showRacingLines;
+            this.fillPauseModal();
+          },
+        },
+        {
+          x: 0,
+          y: 0,
+          w: 0,
+          h: 0,
           label: 'Resume',
           primary: true,
           onClick: () => {
@@ -535,6 +548,13 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
         },
       ],
     };
+  }
+
+  private openPause(): void {
+    this.director?.pause();
+    this.paused = true;
+    this.g.input.setUiCapture(true);
+    this.fillPauseModal();
   }
 
   private handlePauseInput(): void {
@@ -600,7 +620,7 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
       label: 'Back',
       primary: true,
       onClick: () => {
-        if (this.resultsImportFailed) this.leaveToCampaign();
+        if (this.resultsImportFailed) this.leaveRace();
         else this.g.scenes.back();
       },
     };
@@ -1029,7 +1049,6 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
   ): void {
     const player = director.cars.find((c) => c.isPlayerControlled);
     const standing = director.currentStandings.find((s) => s.isPlayerControlled);
-    const leadDriver = this.resolveLeadDriver();
 
     const chrome = this.chrome ?? raceChromeLayout(w, h, token);
     this.chrome = chrome;
@@ -1043,175 +1062,75 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
       w: chrome.pause.w,
       h: chrome.pause.h,
       label: 'Pause',
+      quiet: true,
+      fontSize: token.fontCaption,
       onClick: () => this.openPause(),
     };
 
-    // Racing lines toggle — geometry lives in the shared chrome layout so the
-    // zoom slider stacks below it instead of overlapping its hit zone.
-    const linesBtn: ButtonDef = {
-      x: chrome.lines.x,
-      y: chrome.lines.y,
-      w: chrome.lines.w,
-      h: chrome.lines.h,
-      label: this.showRacingLines ? 'Hide Lines' : 'Show Lines',
-      onClick: () => { this.showRacingLines = !this.showRacingLines; },
-    };
-
     ctx.save();
-    // Position plate — big timing-board numeral
     ctx.font = `400 ${Math.max(token.fontDisplay * 1.15, token.fontTitle * 1.4)}px ${token.fontDisplayFamily}`;
     ctx.fillStyle = token.text;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur = 8;
 
     const safe = token.safe;
     const hudX = safe.left + pad(token);
     let hudY = safe.top + pad(token);
     const telemetryMaxW = Math.max(pad(token, 14), chrome.minimap.x - hudX - pad(token));
 
-    // Hide the telemetry column while the pre-race card / countdown is up —
-    // the card (top-centre) overlaps these lines on narrow phones.
     if (director.countdown === null) {
-      // Backing plate so micro-text stays readable over the moving world.
-      // Mirrors the draw chain below (peg meter advance = caption + 0.25u + bar + 0.5u).
-      {
-        const pegAdv =
-          token.fontCaption + pad(token, 0.25) + Math.max(5, pad(token, 0.55)) + pad(token, 0.5);
-        let plateH = pad(token);
-        if (standing !== undefined) plateH += token.fontDisplay * 1.15 + pad(token, 0.35);
-        plateH += token.fontBody + pad(token, 0.45);
-        if (director.session === 'sprint') plateH += token.fontBody + pad(token, 0.45);
-        if (player !== undefined) {
-          plateH +=
-            token.fontTitle + pad(token, 0.35) +
-            pegAdv +
-            token.fontCaption + pad(token, 0.35) +
-            token.fontCaption;
-        }
-        ctx.fillStyle = 'rgba(11,13,12,0.6)';
-        ctx.beginPath();
-        ctx.roundRect(
-          safe.left + pad(token, 0.4),
-          safe.top + pad(token, 0.4),
-          telemetryMaxW + pad(token, 1.2),
-          plateH + pad(token, 1),
-          Math.max(2, pad(token, 0.35)),
-        );
-        ctx.fill();
-      }
 
       if (standing !== undefined) {
         ctx.fillStyle = accent;
         ctx.fillText(`${toOrdinal(standing.position)}`, hudX, hudY);
-        // Hairline under position
         const pw = ctx.measureText(`${toOrdinal(standing.position)}`).width;
         ctx.fillStyle = `${accent}88`;
         ctx.fillRect(hudX, hudY + token.fontDisplay * 1.05, Math.min(pw, pad(token, 6)), 3);
         hudY += token.fontDisplay * 1.15 + pad(token, 0.35);
       }
 
-    ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
-    ctx.fillStyle = token.textMuted;
-    const lap = player?.lap ?? 0;
-    if (director.session === 'sprint') {
-      // Sprint progress bar — the trip from the start line to the finish.
-      const pct = Math.round(director.sprintProgress * 100);
-      ctx.fillText(`SPRINT ${pct}%`, hudX, hudY);
-      hudY += token.fontBody + pad(token, 0.45);
-      const barW = telemetryMaxW;
-      const barH = pad(token, 0.5);
-      ctx.fillStyle = `${token.textMuted}33`;
-      ctx.fillRect(hudX, hudY, barW, barH);
-      ctx.fillStyle = accent;
-      ctx.fillRect(hudX, hudY, barW * director.sprintProgress, barH);
-    } else if (director.session === 'timeTrial') {
-      ctx.fillText(`TIME ${director.raceClock.toFixed(1)}s`, hudX, hudY);
-      hudY += token.fontBody + pad(token, 0.45);
-      ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
-    } else {
-      ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
-    }
-    hudY += token.fontBody + pad(token, 0.45);
-
-    if (player !== undefined) {
-      const speedKmh = Math.round(player.v * 3.6);
-      ctx.fillStyle = token.text;
-      ctx.font = `400 ${token.fontTitle}px ${token.fontDisplayFamily}`;
-      ctx.fillText(`${speedKmh}`, hudX, hudY);
-      const sw = ctx.measureText(`${speedKmh}`).width;
-      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillStyle = accent;
-      ctx.fillText(' KM/H', hudX + sw + 4, hudY + token.fontTitle * 0.35);
-      hudY += token.fontTitle + pad(token, 0.35);
-      hudY += drawPegMeter(
-        ctx,
-        hudX,
-        hudY,
-        Math.min(pad(token, 12), telemetryMaxW),
-        player,
-        token,
-        accent,
-      );
-      ctx.fillStyle = token.textDim;
-      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
-      const box = gearboxFor(this.launch.discipline);
-      const early = this.shiftCueArmed ? ' · early' : '';
-      ctx.fillText(`G${player.gear}/${box.gearCount}${early}`, hudX, hudY);
-      hudY += token.fontCaption + pad(token, 0.35);
-
-      const clean = Math.max(0, Math.min(1, 1.2 - player.stats.lineNoise));
-      const slim = `Car ${Math.round(player.condition * 100)} · Tyres ${Math.round(player.tyreTemp * 100)} · Line ${Math.round(clean * 100)}`;
+      ctx.font = `600 ${token.fontBody}px ${token.fontFamily}`;
       ctx.fillStyle = token.textMuted;
-      ctx.font = `500 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.fillText(truncateText(ctx, slim, telemetryMaxW), hudX, hudY);
-      }
-    }
-
-    // Teach band above deck: onboarding owns the channel when present;
-    // otherwise driver chip + ticker may use it (chip left, ticker right/above).
-    const hintUp = this.hintText !== null;
-    if (leadDriver !== undefined && !hintUp) {
-      const trait = getTrait(leadDriver.trait);
-      const playerIntent = player !== undefined ? director.intentForCar(player.id) : undefined;
-      const chipW = Math.min(pad(token, 14), w * 0.34);
-      const chipH = pad(token, playerIntent !== undefined ? 5.2 : 3.5);
-      const chipX = hudX;
-      // Leave room for ticker lines above the deck when no hint.
-      const tickerReserve =
-        this.ticker.length > 0
-          ? Math.min(this.ticker.length, 2) * (token.fontCaption + 4) + pad(token, 0.5)
-          : 0;
-      const chipY = chrome.deckTop - pad(token, 0.75) - chipH - tickerReserve;
-      ctx.fillStyle = 'rgba(11,13,12,0.88)';
-      ctx.strokeStyle = `${accent}99`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect(chipX, chipY, chipW, chipH, Math.max(2, pad(token, 0.25)));
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = accent;
-      ctx.fillRect(chipX, chipY, Math.max(3, pad(token, 0.35)), chipH);
-      ctx.fillStyle = token.text;
-      ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
-      ctx.textBaseline = 'top';
-      const nameMax = chipW - pad(token, 1.8);
-      ctx.fillText(
-        truncateText(ctx, leadDriver.name, nameMax),
-        chipX + pad(token, 0.9),
-        chipY + pad(token, 0.5),
-      );
-      ctx.fillStyle = token.textDim;
-      ctx.fillText(
-        truncateText(ctx, trait.name, nameMax),
-        chipX + pad(token, 0.9),
-        chipY + pad(token, 1.5),
-      );
-      if (playerIntent !== undefined) {
+      const lap = player?.lap ?? 0;
+      if (director.session === 'sprint') {
+        const pct = Math.round(director.sprintProgress * 100);
+        ctx.fillText(`SPRINT ${pct}%`, hudX, hudY);
+        hudY += token.fontBody + pad(token, 0.45);
+        const barW = telemetryMaxW;
+        const barH = pad(token, 0.5);
+        ctx.fillStyle = `${token.textMuted}33`;
+        ctx.fillRect(hudX, hudY, barW, barH);
         ctx.fillStyle = accent;
-        ctx.fillText(
-          truncateText(ctx, intentHudLabel(playerIntent.tag), nameMax),
-          chipX + pad(token, 0.9),
-          chipY + pad(token, 2.6),
+        ctx.fillRect(hudX, hudY, barW * director.sprintProgress, barH);
+      } else if (director.session === 'timeTrial') {
+        ctx.fillText(`TIME ${director.raceClock.toFixed(1)}s`, hudX, hudY);
+        hudY += token.fontBody + pad(token, 0.45);
+        ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
+      } else {
+        ctx.fillText(`Lap ${Math.min(lap + 1, director.config.laps)}/${director.config.laps}`, hudX, hudY);
+      }
+      hudY += token.fontBody + pad(token, 0.45);
+
+      if (player !== undefined) {
+        const speedKmh = Math.round(player.v * 3.6);
+        ctx.fillStyle = token.text;
+        ctx.font = `400 ${token.fontTitle}px ${token.fontDisplayFamily}`;
+        ctx.fillText(`${speedKmh}`, hudX, hudY);
+        const sw = ctx.measureText(`${speedKmh}`).width;
+        ctx.font = `600 ${token.fontCaption}px ${token.fontFamily}`;
+        ctx.fillStyle = accent;
+        ctx.fillText(' KM/H', hudX + sw + 4, hudY + token.fontTitle * 0.35);
+        hudY += token.fontTitle + pad(token, 0.35);
+        drawPegMeter(
+          ctx,
+          hudX,
+          hudY,
+          Math.min(pad(token, 12), telemetryMaxW),
+          player,
+          token,
+          accent,
         );
       }
     }
@@ -1230,55 +1149,9 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
       };
       drawButton(ctx, pauseBtn, pauseUi);
       handleButton(pauseBtn, pauseUi);
-      drawButton(ctx, linesBtn, pauseUi);
-      handleButton(linesBtn, pauseUi);
-      this.drawZoomSlider(ctx, chrome, pauseUi, accent);
     }
 
     ctx.restore();
-  }
-
-  private drawZoomSlider(
-    ctx: CanvasRenderingContext2D,
-    chrome: RaceChromeLayout,
-    ui: {
-      pointerX: number;
-      pointerY: number;
-      pointerDown: boolean;
-      pointerClicked: boolean;
-      dt: number;
-      w: number;
-      h: number;
-      token: ThemeTokens;
-      accent: string;
-    },
-    _accent: string,
-  ): void {
-    const state = this.g.state;
-    if (state === null) return;
-    if (typeof state.options.raceZoom !== 'number') {
-      state.options.raceZoom = DEFAULT_RACE_ZOOM;
-    }
-    const z = Math.max(0, Math.min(1, state.options.raceZoom));
-    const r = chrome.zoomSlider;
-    const slider: SliderDef = {
-      x: r.x,
-      y: r.y,
-      w: r.w,
-      h: r.h,
-      label: 'Zoom',
-      value: z,
-      onChange: (v) => {
-        state.options.raceZoom = Math.max(0, Math.min(1, v));
-        this.zoomDirty = true;
-      },
-    };
-    drawSlider(ctx, slider, ui);
-    handleSlider(slider, ui);
-    if (!ui.pointerDown && this.zoomDirty) {
-      this.zoomDirty = false;
-      this.g.autosave();
-    }
   }
 
   private drawPedalDeck(
@@ -1340,48 +1213,33 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
   }
 
   private drawRainChip(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
-    const chrome = this.chrome ?? raceChromeLayout(w, h, token);
-    const chipW = pad(token, 7);
-    const chipH = pad(token, 2.6);
-    const x = w - token.safe.right - pad(token) - chipW;
-    const y = chrome.zoomSlider.y + chrome.zoomSlider.h + pad(token, 0.5);
-    ctx.save();
-    ctx.fillStyle = 'rgba(12, 22, 18, 0.88)';
-    ctx.strokeStyle = 'rgba(94, 207, 142, 0.45)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(x, y, chipW, chipH, Math.max(2, pad(token, 0.25)));
-    ctx.fill();
-    ctx.stroke();
-    ctx.font = `400 ${token.fontCaption}px ${token.fontDisplayFamily}`;
-    ctx.fillStyle = '#5ecf8e';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('RAIN', x + chipW * 0.5, y + chipH * 0.52);
-    ctx.restore();
+    this.drawWeatherTag(ctx, w, h, token, 'RAIN', '#5ecf8e', 0);
   }
 
   private drawNightChip(ctx: CanvasRenderingContext2D, w: number, h: number, token: ThemeTokens): void {
-    void h;
+    const rainOffset = this.director?.rain ? token.fontCaption + 2 : 0;
+    this.drawWeatherTag(ctx, w, h, token, 'NIGHT', '#f0c41a', rainOffset);
+  }
+
+  private drawWeatherTag(
+    ctx: CanvasRenderingContext2D,
+    w: number,
+    h: number,
+    token: ThemeTokens,
+    label: string,
+    fill: string,
+    yOffset: number,
+  ): void {
     const chrome = this.chrome ?? raceChromeLayout(w, h, token);
-    const chipW = pad(token, 7);
-    const chipH = pad(token, 2.6);
-    const rainOffset = this.director?.rain ? chipH + pad(token, 0.4) : 0;
-    const x = w - token.safe.right - pad(token) - chipW;
-    const y = chrome.zoomSlider.y + chrome.zoomSlider.h + pad(token, 0.5) + rainOffset;
+    const mm = chrome.minimap;
     ctx.save();
-    ctx.fillStyle = 'rgba(14, 16, 14, 0.9)';
-    ctx.strokeStyle = 'rgba(240, 196, 26, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(x, y, chipW, chipH, Math.max(2, pad(token, 0.25)));
-    ctx.fill();
-    ctx.stroke();
-    ctx.font = `400 ${token.fontCaption}px ${token.fontDisplayFamily}`;
-    ctx.fillStyle = '#f0c41a';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('NIGHT', x + chipW * 0.5, y + chipH * 0.52);
+    ctx.font = `700 ${token.fontCaption}px ${token.fontDisplayFamily}`;
+    ctx.fillStyle = fill;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur = 6;
+    ctx.fillText(label, mm.x + mm.w - 4, mm.y + mm.h - 4 - yOffset);
     ctx.restore();
   }
 
@@ -1394,7 +1252,7 @@ private buildCarFrame(director: RaceDirector): CarFrameDto[] {
     const maxW = Math.min(w - pad(token, 4) - token.safe.left - token.safe.right, pad(token, 40));
     ctx.save();
     ctx.font = `${token.fontCaption}px ${token.fontFamily}`;
-    const lines = this.ticker.slice(0, 2);
+    const lines = this.ticker.slice(0, 1);
     // Backing plate — ticker text rides over live world pixels.
     {
       const plateH = lines.length * (token.fontCaption + 4) + pad(token, 1.2);

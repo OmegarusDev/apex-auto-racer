@@ -58,7 +58,8 @@ export interface CarSimState extends VehicleState {
   gridS: number;
   /**
    * Personal racing-line offsets (m from centerline), one sample per track node.
-   * Centerline (l=0) is for bounds/graphics; cars magnetize to this profile.
+   * Centerline (l=0) is for bounds/graphics. The driver steers toward this
+   * profile; tyres decide whether the turn holds.
    */
   lineO: number[];
   dl: number;

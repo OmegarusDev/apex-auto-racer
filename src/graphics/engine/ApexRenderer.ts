@@ -38,6 +38,7 @@ export interface ApexRendererPrepareOpts {
   palette: TrackPalette;
   night: boolean;
   rain: boolean;
+  discipline?: import('../../data/disciplines').DisciplineId;
 }
 
 interface FxParticle {
@@ -175,7 +176,7 @@ export class ApexRenderer {
       this.playerBeaconMesh = null;
     }
 
-    const track = buildTrackGeometry(opts.track, opts.palette);
+    const track = buildTrackGeometry(opts.track, opts.palette, opts.discipline ?? 'track');
     this.trackMesh = createMesh(gl, track.vertices, track.indices);
     this.minimap = track.minimap;
     this.minimapExtent = track.minimapExtent;
@@ -194,7 +195,7 @@ export class ApexRenderer {
   clear(): void {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.clearColor(0.52, 0.62, 0.68, 1);
+    gl.clearColor(0.38, 0.56, 0.32, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   }
 
@@ -302,21 +303,20 @@ export class ApexRenderer {
   }
 
   /** @returns false when the frame was skipped (tiny canvas / missing mesh). */
-  // Discipline-specific background colors (day/night variants)
+  // Clear/fog match the far ground plate so distant scenery doesn't fall into
+  // a grey void (the plate fades into fogColor at range).
   private getDisciplineBgColor(discipline: string, night: boolean): [number, number, number] {
-    // Background clear color matches fog color at horizon — the far ground
-    // plate converges to fogColor at distance, so the clear must too.
     if (night) {
       switch (discipline) {
-        case 'street': return [0.06, 0.07, 0.10];
+        case 'street': return [0.06, 0.07, 0.1];
         case 'rally': return [0.07, 0.06, 0.05];
-        default: return [0.08, 0.1, 0.14];         // Night fog color
+        default: return [0.08, 0.1, 0.14];
       }
     }
     switch (discipline) {
-      case 'street': return [0.58, 0.66, 0.7];    // Day fog color
-      case 'rally': return [0.58, 0.66, 0.7];     // Day fog color
-      default: return [0.58, 0.66, 0.7];          // Day fog color
+      case 'street': return [0.52, 0.54, 0.56]; // urban haze over pavement
+      case 'rally': return [0.42, 0.52, 0.34]; // countryside grass horizon
+      default: return [0.38, 0.56, 0.32]; // circuit grass horizon
     }
   }
 
@@ -454,18 +454,20 @@ export class ApexRenderer {
     const p = this.litProg;
     const night = frame.night ? 1 : 0;
     gl.uniform3f(gl.getUniformLocation(p, 'uLightDir'), 0.32, 0.9, 0.24);
+    const disc = frame.discipline ?? 'track';
+    const fog = this.getDisciplineBgColor(disc, !!frame.night);
     if (frame.night) {
       gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.62, 0.7, 0.88);
       gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.2, 0.23, 0.3);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.08, 0.1, 0.14);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), fog[0]!, fog[1]!, fog[2]!);
       gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.7);
       gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.05);
     } else {
-      // Mid exposure — between cave-dark and washed-out
       gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 1.02, 0.98, 0.9);
       gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.34, 0.36, 0.33);
-      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), 0.58, 0.66, 0.7);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.32);
+      gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), fog[0]!, fog[1]!, fog[2]!);
+      // Softer fog so grass/pavement stay readable before the horizon fade.
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), disc === 'street' ? 0.28 : 0.22);
       gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.06);
     }
     gl.uniform1f(gl.getUniformLocation(p, 'uNight'), night);

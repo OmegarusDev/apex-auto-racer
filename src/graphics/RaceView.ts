@@ -65,6 +65,7 @@ export class RaceView {
         palette: this.palette,
         night: opts.night,
         rain: opts.rain,
+        discipline: opts.discipline,
       });
       this.minimapPoints = this.engine.getMinimapPoints();
       this.minimapExtent = this.engine.getMinimapExtent();

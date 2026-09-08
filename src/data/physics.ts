@@ -191,8 +191,9 @@ export const PHYSICS = {
     straightKappa: 0.004,
     /** Half-window (nodes) around apex for lateral pull. */
     apexHalfWindow: 6,
-    /** Outside bias on straights (fraction of half-width). */
-    outsideBias: 0.85,
+    /** Outside bias on straights (fraction of half-width). Keep mild — Mag
+     *  is a groove, not an F1 qualifying line glued to the wall. */
+    outsideBias: 0.22,
     /** Hard cap on the line's transverse slope (m of offset per m of arc).
      *  A car can only change lateral position at ~v·sin(steer) — a line
      *  steeper than this is undrivable and makes the controller snake. */

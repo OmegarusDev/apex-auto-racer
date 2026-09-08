@@ -5,13 +5,14 @@
  * Racer skill lives elsewhere; this is the physics-optimal per-setup line
  * (brake point, turn-in, apex, track-out), computed once per race per setup.
  *
- * Sign convention: +lineO is toward node.normal. For κ>0 (right-hand turn)
- * the apex is on the -normal side, so apex = -sign(κ)·apexFrac·halfWidth.
+ * Sign convention (matches RacingLine / Frenet): κ>0 is a left / CCW bend,
+ * node.normal points left of the tangent (inward on κ>0). Outside bias uses
+ * outwardSign(κ); apex is on the inward side (−outwardSign).
  */
 
 import { PHYSICS } from '../../data/physics';
 import type { TrackData } from '../TrackGenerator';
-import type { RacingLineNode } from '../RacingLine';
+import { outwardSign, type RacingLineNode } from '../RacingLine';
 import type { EffectiveStats } from '../types';
 import type { CarSetup } from './CarSetup';
 import { HYBRID_CL_FROM_D, HYBRID_LOAD_SENS_N, HYBRID_RHO } from './dynamics';
@@ -174,11 +175,14 @@ export function computeIdealLine(
 
   // --- 3. Build the lateral line: wide outside, cut to the apex, blur. ---
   const line = new Array<number>(n).fill(0);
-  let side = 1;
-  // Outside bias: carry the sign of the last significant corner along straights.
+  let side = -1;
+  // Outside bias: carry the outward hand of the last significant corner.
   for (let i = 0; i < n; i++) {
     const k = nodes[i]!.kappaLine;
-    if (Math.abs(k) > STRAIGHT_KAPPA) side = Math.sign(k);
+    if (Math.abs(k) > STRAIGHT_KAPPA) {
+      const out = outwardSign(k);
+      if (out !== 0) side = out;
+    }
     line[i] = side * idealLine.outsideBias * halfWidth(nodes[i]!);
   }
   // Apex zone at each corner: pull a window of nodes inward, ramping back to
@@ -186,8 +190,8 @@ export function computeIdealLine(
   // is where setup differences show in the line SHAPE.
   const apexHalfWindow = idealLine.apexHalfWindow;
   for (const c of corners) {
-    const s = Math.sign(c.kappa) || 1;
-    const apex = -s * c.apexFrac * halfWidth(nodes[c.peak]!);
+    const out = outwardSign(c.kappa) || (c.kappa >= 0 ? -1 : 1);
+    const apex = -out * c.apexFrac * halfWidth(nodes[c.peak]!);
     for (let d = -apexHalfWindow; d <= apexHalfWindow; d++) {
       const i = (c.peak + d + n) % n;
       const t = Math.abs(d) / apexHalfWindow;

@@ -214,14 +214,15 @@ const KAPPA_CORNER = 0.008;
 const KAPPA_REVERSE = 0.02;
 
 /**
- * Command curvature: at speed, turn in on this bend's peak; at crawl, wait
- * until the road has actually started. Never take an opposite-sign peak
- * (that's the following S-apex).
+ * Command curvature: turn in on this bend's peak; never take an opposite-sign
+ * peak (that's the following S-apex). At crawl still keep a floor of look so
+ * Mag doesn't wait until the apex to rotate.
  */
 function previewKappa(now: number, ahead: number, v: number): number {
   if (Math.abs(now) < KAPPA_CORNER) {
-    const t = Math.max(0, Math.min(1, (v - 6) / 10));
-    const w = t * t * (3 - 2 * t);
+    if (ahead === 0) return 0;
+    const t = Math.max(0, Math.min(1, (v - 2) / 12));
+    const w = Math.max(0.55, t * t * (3 - 2 * t));
     return ahead * w;
   }
   if (Math.sign(now) !== Math.sign(ahead) && Math.abs(ahead) > KAPPA_REVERSE) return now;
@@ -236,15 +237,9 @@ function desiredLookaheadM(v: number, skill01: number): number {
   return Math.max(floor, Math.min(ceiling, v * tLook));
 }
 
-function nodeAtLook(
-  track: TrackData,
-  s0: number,
-  dd: number,
-  nodeStep: number,
-): TrackData['nodes'][number] {
+function nodeAtLook(track: TrackData, s0: number, dd: number): TrackData['nodes'][number] {
   const s = ((s0 + dd) % track.length + track.length) % track.length;
-  const n = track.nodes.length;
-  return track.nodes[Math.round(s / nodeStep) % n]!;
+  return track.nodes[findNodeIndexAtS(track, s)]!;
 }
 
 /**
@@ -262,9 +257,10 @@ function lookAlongRoad(
   let lookM = desired;
   let cornerSign = Math.abs(startKappa) > KAPPA_CORNER ? Math.sign(startKappa) : 0;
   let peak = startKappa;
+  const step = Math.max(0.75, Math.abs(nodeStep));
 
-  for (let dd = nodeStep; dd < desired; dd += nodeStep) {
-    const sample = nodeAtLook(track, s0, dd, nodeStep);
+  for (let dd = step; dd < desired; dd += step) {
+    const sample = nodeAtLook(track, s0, dd);
     const mag = Math.abs(sample.kappa);
     const kSign = Math.sign(sample.kappa);
 
@@ -277,7 +273,7 @@ function lookAlongRoad(
     }
 
     if (mag > KAPPA_REVERSE && kSign !== 0 && kSign !== cornerSign) {
-      lookM = Math.max(nodeStep * 2, dd);
+      lookM = Math.max(step * 2, dd);
       break;
     }
     if (kSign === cornerSign && mag > Math.abs(peak)) peak = sample.kappa;
@@ -347,13 +343,38 @@ export function tickDriverBrain(
 
   // --- Unrecoverable / recovering states first ---
   if (car.spinRemaining > 0) {
-    const counter = -Math.sign(car.yawRate || 1) * 0.55;
+    // High |β| with near-zero yaw is a slide, not a pirouette. The old
+    // `-sign(yaw||1)*0.55` slammed Mag opposite the bend whenever yaw was a
+    // tiny positive residual — that's the wall yank after a wide entry.
+    const yaw = car.yawRate;
+    const wbSpin = car.setup?.wheelbase ?? 2.7;
+    const roadMag = steerForKappa(wbSpin, node.kappa, v, aGrip);
+    let steer: number;
+    if (Math.abs(yaw) > 0.45) {
+      const scrub = -Math.sign(yaw) * 0.4;
+      // Keep a soft road hand in the bend so scrub can't reverse Mag into the wall.
+      if (Math.abs(node.kappa) > KAPPA_CORNER && Math.sign(roadMag) !== 0) {
+        const keep = Math.sign(roadMag) * Math.max(0.1, Math.abs(roadMag) * 0.55);
+        steer = Math.max(-0.55, Math.min(0.55, keep * 0.65 + scrub * 0.35));
+      } else {
+        steer = scrub;
+      }
+    } else {
+      steer = Math.max(-0.45, Math.min(0.45, roadMag * 0.7));
+    }
+    const speedBoost = v < 15 ? 1.5 : 1;
+    const rate = (2.6 + 1.9 * skill01) * speedBoost;
+    steer = Math.max(
+      state.prevSteer - rate * PHYSICS.dt * 4,
+      Math.min(state.prevSteer + rate * PHYSICS.dt * 4, steer),
+    );
+    state.prevSteer = steer;
     return {
       desiredThrottle: 0,
       desiredBrake: 0.6,
       lTarget: car.l,
-      steerTarget: counter,
-      steer: counter,
+      steerTarget: steer,
+      steer,
       intent: makeIntent('SPIN_SCRUB'),
     };
   }
@@ -612,17 +633,18 @@ export function tickDriverBrain(
   let steerPursuit = Math.atan((1.35 * errLat * wb) / (lam * lam));
   const steerCap = Math.atan((1.5 * aGrip * wb) / Math.max(v * v, 12));
   const steerFFCapped = Math.max(-steerCap, Math.min(steerCap, steerFF));
-  // Soften line-chase that fights the road while we're ON the groove. Don't
-  // hard-zero it — that step is another weave. Packed cars 2 m offline keep
-  // the pull-out.
+  // Road Mag is primary. Line-chase that fights FF is softened always in a
+  // bend (not only when already on-groove — an inverted line used to sit
+  // metres offline and overpower the wheel).
   if (
     inBend &&
-    Math.abs(errLat) < 1.25 &&
     Math.sign(steerPursuit) !== 0 &&
     Math.sign(steerFFCapped) !== 0 &&
     Math.sign(steerPursuit) !== Math.sign(steerFFCapped)
   ) {
-    steerPursuit *= 0.22;
+    const ffMag = Math.max(0.04, Math.abs(steerFFCapped));
+    const cap = ffMag * (Math.abs(errLat) < 1.6 ? 0.28 : 0.55);
+    steerPursuit = Math.max(-cap, Math.min(cap, steerPursuit));
   }
   const steerDamp = -0.16 * (car.dl / Math.max(v, 6));
   let steer = Math.max(-0.7, Math.min(0.7, steerFFCapped + steerPursuit + steerDamp));
@@ -639,8 +661,43 @@ export function tickDriverBrain(
   );
   desiredBrake *= 1 - reluctance;
 
-  // Skill: rate limit (neuromuscular). No per-tick steer noise — that fights
-  // the groove feedforward every frame and looks like a drunk line.
+  // --- Slide recovery (countersteer) ---
+  // Mag points at the road. Countersteer is ONLY for a broken-loose spin —
+  // ordinary cornering yaw must never reverse the wheel into the wall.
+  const turnSign =
+    Math.sign(kappaCmd) || Math.sign(steerFFCapped) || Math.sign(node.kappa) || 0;
+  // Countersteer only when the car is actually rotating against the bend.
+  // Huge |β| with tiny yaw is not a spin — yanking opposite Mag there is how
+  // cars drove into the wall after a wide entry.
+  const yawAbs = Math.abs(car.yawRate);
+  const trueSpin = Math.abs(car.slipAngle) > 0.62 && yawAbs > 0.45;
+  const slipOpposesTurn =
+    turnSign !== 0 &&
+    Math.sign(car.slipAngle) !== 0 &&
+    Math.sign(car.slipAngle) !== turnSign &&
+    Math.abs(car.slipAngle) > 0.4 &&
+    yawAbs > 0.35;
+  if (trueSpin || slipOpposesTurn) {
+    const reaction = 0.14 * (1 - skill01) * (disc === 'street' ? 0.8 : 1);
+    if (raceTime - state.lastSlideReact >= reaction) {
+      state.lastSlideReact = raceTime;
+      const slideSign = Math.sign(car.yawRate || car.slipAngle || 1);
+      const catchQuality = trueSpin ? 0.28 + 0.28 * skill01 : 0.14 + 0.18 * skill01;
+      let catchSteer = steer - slideSign * catchQuality;
+      if (
+        inBend &&
+        Math.sign(steerFFCapped) !== 0 &&
+        Math.sign(catchSteer) !== Math.sign(steerFFCapped)
+      ) {
+        // Trim only — keep the road hand even in a true spin.
+        catchSteer = Math.sign(steerFFCapped) * Math.max(0.08, Math.abs(steerFFCapped) * 0.55);
+      }
+      steer = Math.max(-0.7, Math.min(0.7, catchSteer));
+      desiredThrottle = Math.min(desiredThrottle, trueSpin ? 0.2 : 0.4);
+    }
+  }
+
+  // Rate-limit LAST so recovery can't slam the wheel opposite Mag in one tick.
   const speedBoost = v < 15 ? 1.5 : 1;
   const rate = (2.6 + 1.9 * skill01) * speedBoost;
   steer = Math.max(
@@ -649,34 +706,6 @@ export function tickDriverBrain(
   );
   steer = Math.max(-0.7, Math.min(0.7, steer));
   state.prevSteer = steer;
-
-  // --- Slide recovery (countersteer) ---
-  // A slide is either YAW oversteer (rear breaks, car rotates) or a LATERAL
-  // slide (body slip grows with little yaw — the rally case). React to both.
-  // The threshold sits ABOVE a normal drift (slip ~0.2–0.3 holds as the drift)
-  // so only the genuine over-rotation gets countersteered.
-  const lateralSlide = Math.abs(car.slipAngle) > 0.34 && car.gripUsage > 0.88;
-  const yawOversteer =
-    Math.abs(car.slipAngle) > 0.26 && Math.abs(car.yawRate) > 0.5;
-  const oversteer = lateralSlide || yawOversteer;
-  if (oversteer) {
-    // Human reaction delay: a low-skill driver is late to the counter — the
-    // slide builds past the point of no return → spin. High skill reacts in time.
-    // The Street drift cars need to catch it a beat sooner (they live on the edge).
-    const reaction = 0.16 * (1 - skill01) * (disc === 'street' ? 0.8 : 1);
-    if (raceTime - state.lastSlideReact >= reaction) {
-      state.lastSlideReact = raceTime;
-      // Counter the dominant motion: the body-slip sign (lateral slide) or the
-      // yaw sign (rotation) — whichever is stronger.
-      const slideSign =
-        Math.abs(car.slipAngle) > Math.abs(car.yawRate) * 0.6
-          ? Math.sign(car.slipAngle || 1)
-          : Math.sign(car.yawRate || 1);
-      const catchQuality = 0.45 + 0.7 * skill01;
-      steer = Math.max(-0.7, Math.min(0.7, steer - slideSign * catchQuality));
-      desiredThrottle = Math.min(desiredThrottle, 0.25);
-    }
-  }
 
   rollMistake(state, driver, raceTime, rng, rain, car.gripUsage > 0.9);
 

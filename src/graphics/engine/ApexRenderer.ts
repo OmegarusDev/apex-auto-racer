@@ -303,20 +303,19 @@ export class ApexRenderer {
   }
 
   /** @returns false when the frame was skipped (tiny canvas / missing mesh). */
-  // Clear/fog match the far ground plate so distant scenery doesn't fall into
-  // a grey void (the plate fades into fogColor at range).
+  // Clear/fog match the ground fill so distant scenery doesn't fall into a void.
   private getDisciplineBgColor(discipline: string, night: boolean): [number, number, number] {
     if (night) {
       switch (discipline) {
-        case 'street': return [0.06, 0.07, 0.1];
-        case 'rally': return [0.07, 0.06, 0.05];
-        default: return [0.08, 0.1, 0.14];
+        case 'street': return [0.08, 0.09, 0.11];
+        case 'rally': return [0.06, 0.1, 0.05];
+        default: return [0.05, 0.1, 0.055]; // dark grass, not navy void
       }
     }
     switch (discipline) {
-      case 'street': return [0.52, 0.54, 0.56]; // urban haze over pavement
-      case 'rally': return [0.42, 0.52, 0.34]; // countryside grass horizon
-      default: return [0.38, 0.56, 0.32]; // circuit grass horizon
+      case 'street': return [0.52, 0.54, 0.56];
+      case 'rally': return [0.42, 0.52, 0.34];
+      default: return [0.38, 0.56, 0.32];
     }
   }
 
@@ -359,12 +358,14 @@ export class ApexRenderer {
     // Quiet gold disc on the asphalt — not an additive body glow.
     if (this.playerRingMesh !== null && player !== undefined && player.isPlayer) {
       const t = performance.now() / 1000;
-      const glow = 0.16 + 0.04 * Math.sin(t * 2.1);
+      const glow = 0.48 + 0.08 * Math.sin(t * 2.1);
       gl.enable(gl.BLEND);
       gl.depthMask(false);
+      gl.disable(gl.CULL_FACE);
       this.placeRing(player.worldX, player.worldY);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       this.drawMesh(this.playerRingMesh, gold, glow);
+      gl.enable(gl.CULL_FACE);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
     }
@@ -392,11 +393,14 @@ export class ApexRenderer {
       tint[0]! = tint[0]! * (0.7 + cond * 0.35);
       tint[1]! = tint[1]! * (0.7 + cond * 0.35);
       tint[2]! = tint[2]! * (0.7 + cond * 0.35);
-      this.drawMesh(this.carMesh, tint, 1, 0.22, gold);
+      this.drawMesh(this.carMesh, tint, 1, 0.28, gold);
       if (this.playerBeaconMesh !== null) {
-        const bob = 0.05 * Math.sin(performance.now() / 1000 * 2.2);
-        this.placeCar(player.worldX, player.worldY, player.heading, 0.12 + bob);
-        this.drawMesh(this.playerBeaconMesh, gold, 1, 0.15, gold);
+        const bob = 0.06 * Math.sin(performance.now() / 1000 * 2.2);
+        gl.disable(gl.CULL_FACE);
+        // Lift clear of the roof so the tip reads from the tabletop camera.
+        this.placeCar(player.worldX, player.worldY, player.heading, 0.55 + bob);
+        this.drawMesh(this.playerBeaconMesh, gold, 1, 0.35, gold);
+        gl.enable(gl.CULL_FACE);
       }
     }
 
@@ -460,7 +464,7 @@ export class ApexRenderer {
       gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 0.62, 0.7, 0.88);
       gl.uniform3f(gl.getUniformLocation(p, 'uAmbient'), 0.2, 0.23, 0.3);
       gl.uniform3f(gl.getUniformLocation(p, 'uFogColor'), fog[0]!, fog[1]!, fog[2]!);
-      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.7);
+      gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 0.38);
       gl.uniform1f(gl.getUniformLocation(p, 'uExposure'), 1.05);
     } else {
       gl.uniform3f(gl.getUniformLocation(p, 'uLightColor'), 1.02, 0.98, 0.9);
@@ -491,9 +495,10 @@ export class ApexRenderer {
   }
 
   private placeRing(worldX: number, worldY: number): void {
-    mat4Identity(this.tmp);
-    mat4Translate(this.model, this.tmp, worldX, 0.015, -worldY);
-    mat4CopyInPlace(this.model, this.tmp);
+    // Write the translate into model and leave it — copying identity tmp over
+    // model used to pin the gold disc at the world origin every frame.
+    mat4Identity(this.model);
+    mat4Translate(this.model, this.model, worldX, 0.04, -worldY);
   }
 
   private drawMesh(mesh: GpuMesh, tint: Vec3, alpha: number, highlight = 0, highlightColor: Vec3 = tint): void {

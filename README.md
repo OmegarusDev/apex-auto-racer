@@ -10,7 +10,7 @@
 
 Scalextric-style pedal autobattler. **Hold gas — steering is Mag autopilot** (no steer stick). Manage speed vs grip; advanced players use trail brake + SHIFT rev windows + Street clutch-kick. Drivers are fallible autopilots — upgrades push the game toward hands-off watching.
 
-**Live fantasy:** hybrid tyre+yaw under groove Mag; Track fishtail / Street JDM latch / Rally loose slide; garage parts feed real mass/aero/bias tradeoffs; peg meter + SHIFT rev strip; zero runtime dependencies.
+**Live fantasy:** hybrid tyre+yaw under groove Mag; Track fishtail / Street JDM latch / Rally loose slide; garage parts feed real mass/aero/bias tradeoffs; peg meter + SHIFT rev strip; zero runtime dependencies. **GDD hybrid contract:** groove = where Mag points, tyres = whether it holds, no chassis magnet — see `PROGRESSION_PLAN.md` §1.
 
 **Visuals:** Procedural sky dome with dynamic sun/day-night cycle; discipline-specific environments (Track=forest green, Street=urban grey, Rally=dirt brown); self-hosted fonts; procedural sky dome with dynamic sun/day-night cycle; discipline-specific sky colors.
 

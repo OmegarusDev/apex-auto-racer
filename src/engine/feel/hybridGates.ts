@@ -13,6 +13,8 @@ import { stepVehicle } from '../sim/vehicle';
 import { mulberry32 } from '../rng';
 import type { RaceConfig } from '../RaceDirector';
 import type { FeelGateResult } from './types';
+import { computeIdealLine } from '../vehicle/IdealLine';
+import { outwardSign } from '../RacingLine';
 
 function makeProbe(staticFront = 0.48) {
   const stats = effectiveStats('track', defaultVehicleSave(1).partTiers, 1);
@@ -333,11 +335,61 @@ function steerAt(track: ReturnType<typeof buildHairpinTrack>, s: number, v: numb
   return tickDriverBrain(state, car, bctx).steer;
 }
 
+/**
+ * Ideal line apex must sit on the INSIDE of the bend (Frenet: κ>0 → +l).
+ * An inverted line made Mag chase the wall while road FF turned the other way.
+ */
+export function runIdealLineInwardGate(): FeelGateResult {
+  const track = buildHairpinTrack();
+  const car = makeProbe();
+  const ideal = computeIdealLine(track, car.setup, car.stats, SURFACES.track.mu);
+  let checked = 0;
+  let okCount = 0;
+  let sampleDetail = 'none';
+  for (const apexIdx of ideal.apexNode) {
+    if (apexIdx < 0) continue;
+    const k = track.nodes[apexIdx]!.kappa;
+    const out = outwardSign(k);
+    if (out === 0) continue;
+    const l = ideal.idealLineO[apexIdx]!;
+    const inward = -out;
+    checked += 1;
+    const dot = l * inward;
+    if (dot > 0.4) okCount += 1;
+    sampleDetail = `apex=${apexIdx} κ=${k.toFixed(3)} l=${l.toFixed(2)} inwardDot=${dot.toFixed(2)}`;
+  }
+  // Also probe mid-hairpin by |κ| peak if apex list empty.
+  if (checked === 0) {
+    let peakI = 0;
+    let peakK = 0;
+    for (let i = 0; i < track.nodes.length; i++) {
+      if (Math.abs(track.nodes[i]!.kappa) > peakK) {
+        peakK = Math.abs(track.nodes[i]!.kappa);
+        peakI = i;
+      }
+    }
+    const k = track.nodes[peakI]!.kappa;
+    const out = outwardSign(k) || (k >= 0 ? -1 : 1);
+    const l = ideal.idealLineO[peakI]!;
+    const dot = l * -out;
+    checked = 1;
+    if (dot > 0.4) okCount = 1;
+    sampleDetail = `peak=${peakI} κ=${k.toFixed(3)} l=${l.toFixed(2)} inwardDot=${dot.toFixed(2)}`;
+  }
+  const ok = checked > 0 && okCount === checked;
+  return {
+    id: 'IDEAL_LINE_INWARD',
+    ok,
+    detail: `${sampleDetail} (${okCount}/${checked} apexes inward)`,
+  };
+}
+
 export function runHybridGates(): FeelGateResult[] {
   void PHYSICS;
   return [
     ...runDisciplineIdentityGate(),
     runLineFollowsCornerGate(),
+    runIdealLineInwardGate(),
     runRejoinNaturalGate(),
     runDirtBankRejoinGate(),
     runMarshalGate(),

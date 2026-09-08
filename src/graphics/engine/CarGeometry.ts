@@ -66,8 +66,8 @@ export function buildCarGeometry(): { vertices: Float32Array; indices: Uint16Arr
 }
 
 /**
- * Flat glowing annulus laid under the player car — the "you are this one"
- * marker. Tinted per draw via uTint; additive-blended in the renderer.
+ * Soft gold disc under the player — alpha-blended in the renderer.
+ * Winding faces +Y so CULL_FACE doesn't erase it from the tabletop camera.
  */
 export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Uint16Array | Uint32Array } {
   const mb = new MeshBuilder();
@@ -76,7 +76,7 @@ export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Ui
   const rimIn = PHYSICS.carWidth * 0.82;
   const rimOut = PHYSICS.carWidth * 1.05;
   const segs = 28;
-  const y = 0.012;
+  const y = 0.028;
   for (let i = 0; i < segs; i++) {
     const a0 = (i / segs) * Math.PI * 2;
     const a1 = ((i + 1) / segs) * Math.PI * 2;
@@ -87,12 +87,13 @@ export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Ui
     const z = mb.vertex(0, y, 0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
     const d0 = mb.vertex(disc * c0, y, disc * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
     const d1 = mb.vertex(disc * c1, y, disc * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    mb.tri(z, d0, d1);
+    // CCW from +Y — opposite of the old culled winding.
+    mb.tri(z, d1, d0);
     const i0 = mb.vertex(rimIn * c0, y, rimIn * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
     const i1 = mb.vertex(rimIn * c1, y, rimIn * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
     const i2 = mb.vertex(rimOut * c1, y, rimOut * s1, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
     const i3 = mb.vertex(rimOut * c0, y, rimOut * s0, 0, 1, 0, 1, 1, 1, MAT_GENERIC);
-    mb.quad(i0, i1, i2, i3);
+    mb.quad(i0, i3, i2, i1);
   }
   return mb.build();
 }
@@ -103,11 +104,11 @@ export function buildPlayerRingGeometry(): { vertices: Float32Array; indices: Ui
  */
 export function buildPlayerArrowGeometry(): { vertices: Float32Array; indices: Uint16Array | Uint32Array } {
   const mb = new MeshBuilder();
-  const tipY = 1.22;
-  const headHeight = 0.48;
-  const headRadius = 0.32;
-  const shaftHeight = 0.78;
-  const shaftRadius = 0.1;
+  const tipY = 1.55;
+  const headHeight = 0.55;
+  const headRadius = 0.42;
+  const shaftHeight = 0.9;
+  const shaftRadius = 0.12;
   const segs = 10;
   const baseY = tipY + headHeight;
   const topY = baseY + shaftHeight;
@@ -123,7 +124,7 @@ export function buildPlayerArrowGeometry(): { vertices: Float32Array; indices: U
     const s1 = Math.sin(a1);
     const h0 = mb.vertex(headRadius * c0, baseY, headRadius * s0, c0, 0.35, s0, gold[0], gold[1], gold[2], MAT_GENERIC);
     const h1 = mb.vertex(headRadius * c1, baseY, headRadius * s1, c1, 0.35, s1, gold[0], gold[1], gold[2], MAT_GENERIC);
-    mb.tri(tipIdx, h0, h1);
+    mb.tri(tipIdx, h1, h0);
 
     const n0x = c0;
     const n0z = s0;
@@ -133,7 +134,7 @@ export function buildPlayerArrowGeometry(): { vertices: Float32Array; indices: U
     const s1i = mb.vertex(shaftRadius * c1, baseY, shaftRadius * s1, n1x, 0, n1z, gold[0], gold[1], gold[2], MAT_GENERIC);
     const s2i = mb.vertex(shaftRadius * c1, topY, shaftRadius * s1, n1x, 0, n1z, gold[0], gold[1], gold[2], MAT_GENERIC);
     const s3i = mb.vertex(shaftRadius * c0, topY, shaftRadius * s0, n0x, 0, n0z, gold[0], gold[1], gold[2], MAT_GENERIC);
-    mb.quad(s0i, s1i, s2i, s3i);
+    mb.quad(s0i, s3i, s2i, s1i);
   }
 
   const cap = mb.vertex(0, topY, 0, 0, 1, 0, gold[0], gold[1], gold[2], MAT_GENERIC);

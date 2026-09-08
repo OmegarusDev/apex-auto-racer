@@ -4,6 +4,11 @@ Authoritative implementation reference for the driving rework. If a decision
 is ambiguous, this file decides. The GDD (`PROGRESSION_PLAN.md`) remains the
 gameplay-intent source; this is the build contract.
 
+**Hybrid contract (GDD §1 — do not violate):** groove = where Mag points;
+tyres = whether it holds; **no chassis magnet**. Corner speed is the game;
+off-slot is emergent from the contact patch. Full table lives in
+`PROGRESSION_PLAN.md` under “The hybrid balance.”
+
 ---
 
 ## 1. Architecture (holistic layer map)

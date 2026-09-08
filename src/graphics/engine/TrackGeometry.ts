@@ -398,8 +398,8 @@ function placeGrandstand(
   // Concrete base
   placeOrientedBox(mb, cx, baseH * 0.5, cz, length * 0.5, baseH * 0.5, 4.2, s.tx, s.tz, 0.55, 0.54, 0.5, MAT_CONCRETE);
   // Seating terrace (crowd tint)
-  placeOrientedBox(mb, cx + side * s.nx * 0.6, baseH + 0.55, cz, length * 0.46, 0.55, 3.2, s.tx, s.tz, 0.55, 0.18, 0.16);
-  placeOrientedBox(mb, cx + side * s.nx * 1.4, baseH + 1.15, cz, length * 0.42, 0.5, 2.6, s.tx, s.tz, 0.2, 0.28, 0.55);
+  placeOrientedBox(mb, cx + side * s.nx * 0.6, baseH + 0.55, cz, length * 0.46, 0.55, 3.2, s.tx, s.tz, 0.62, 0.22, 0.18);
+  placeOrientedBox(mb, cx + side * s.nx * 1.4, baseH + 1.15, cz, length * 0.42, 0.5, 2.6, s.tx, s.tz, 0.55, 0.55, 0.52);
   // Roof slab
   placeOrientedBox(mb, cx + side * s.nx * 0.4, roofH, cz, length * 0.5, 0.18, 5.0, s.tx, s.tz, 0.72, 0.72, 0.7, MAT_CONCRETE);
   // Support posts
@@ -651,20 +651,33 @@ const PAVEMENT_BASE = [0.48, 0.48, 0.46] as const;
 const GROOVE_BASE = [0.25, 0.25, 0.26] as const;
 
 const GROOVE_HALF = 0.55;
-const GRASS_EXTRA = 22;
 
 /** Roll-out past a sprint's finish line so its banner sits fully on tarmac. */
 const SPRINT_ROLLOUT = 8;
-/** Fake-road stub length (m) — long enough to leave the pulled-back camera. */
-const STUB_LENGTH = 720;
-const STUB_STEP = 8;
+/**
+ * Metres of REAL loop ribbon to keep drawing behind the start / past the
+ * finish on a sprint. Synthetic stubs used to wander off-axis; sampling the
+ * mother loop looks like a proper road continuing off-camera.
+ */
+const SPRINT_LEAD_IN = 900;
+const SPRINT_LEAD_OUT = 900;
+const LEAD_STEP = 6;
 
 /**
- * Extrude the full road cross-section (grass verge → dirt runoff → tarmac →
+ * Extrude the full road cross-section (outer fill → dirt runoff → tarmac →
  * recessed groove) along an OPEN ribbon of samples. Circuits pass a closed
  * ribbon (first == last); sprints pass an open one, plus fake-road stubs.
+ *
+ * Outer fill (grass / pavement) sits BELOW asphalt so overlapping fill from
+ * neighbouring ribbon segments never paints over the track.
  */
-function buildRoadBands(mb: MeshBuilder, samples: readonly RibbonSample[]): void {
+function buildRoadBands(
+  mb: MeshBuilder,
+  samples: readonly RibbonSample[],
+  outerExtra: number,
+  outerRgb: readonly [number, number, number],
+  outerMat: number,
+): void {
   const leftAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const rightAsphalt: Array<{ x: number; y: number; z: number }> = [];
   const leftGroove: Array<{ x: number; y: number; z: number }> = [];
@@ -718,36 +731,38 @@ function buildRoadBands(mb: MeshBuilder, samples: readonly RibbonSample[]): void
       y: -0.015,
       z: s.z - s.nz * (s.halfW + dirtW),
     });
+    // Wide outer fill — same material as the verge, deep enough to meet the
+    // opposite side of an infield. Y sits under asphalt/dirt.
     leftGrassOuter.push({
-      x: s.x + s.nx * (s.halfW + dirtW + GRASS_EXTRA),
-      y: -0.04,
-      z: s.z + s.nz * (s.halfW + dirtW + GRASS_EXTRA),
+      x: s.x + s.nx * (s.halfW + dirtW + outerExtra),
+      y: -0.06,
+      z: s.z + s.nz * (s.halfW + dirtW + outerExtra),
     });
     rightGrassOuter.push({
-      x: s.x - s.nx * (s.halfW + dirtW + GRASS_EXTRA),
-      y: -0.04,
-      z: s.z - s.nz * (s.halfW + dirtW + GRASS_EXTRA),
+      x: s.x - s.nx * (s.halfW + dirtW + outerExtra),
+      y: -0.06,
+      z: s.z - s.nz * (s.halfW + dirtW + outerExtra),
     });
   }
 
-  // Grass verges beyond dirt
+  // Outer fill first (under everything else in the same mesh via lower Y).
   mb.ribbon(
     leftGrassOuter,
     leftDirtOuter,
     0,
-    GRASS_BASE[0],
-    GRASS_BASE[1],
-    GRASS_BASE[2],
-    MAT_GRASS,
+    outerRgb[0],
+    outerRgb[1],
+    outerRgb[2],
+    outerMat,
   );
   mb.ribbon(
     rightDirtOuter,
     rightGrassOuter,
     0,
-    GRASS_BASE[0],
-    GRASS_BASE[1],
-    GRASS_BASE[2],
-    MAT_GRASS,
+    outerRgb[0],
+    outerRgb[1],
+    outerRgb[2],
+    outerMat,
   );
 
   // Dirt / gravel runoff
@@ -770,7 +785,7 @@ function buildRoadBands(mb: MeshBuilder, samples: readonly RibbonSample[]): void
     MAT_DIRT,
   );
 
-  // Tarmac decks
+  // Tarmac decks — always above grass (y=0.02 vs -0.06)
   mb.ribbon(
     leftAsphalt,
     leftGroove,
@@ -802,29 +817,70 @@ function buildRoadBands(mb: MeshBuilder, samples: readonly RibbonSample[]): void
   );
 }
 
+/** Tiled ground under the whole locus — small tiles so far-plane / precision
+ *  don't erase a single giant quad into a void. Winding matches MeshBuilder
+ *  box tops (CCW from +Y) so CULL_FACE doesn't delete the fill. */
+function addGroundTiles(
+  mb: MeshBuilder,
+  track: TrackView,
+  pad: number,
+  rgb: readonly [number, number, number],
+  mat: number,
+): void {
+  const b = track.bounds;
+  const minX = b.minX - pad;
+  const maxX = b.maxX + pad;
+  const minZ = -(b.maxY + pad);
+  const maxZ = -(b.minY - pad);
+  const tile = 180;
+  const y = -0.12;
+  for (let x = minX; x < maxX - 0.01; x += tile) {
+    const x1 = Math.min(x + tile, maxX);
+    for (let z = minZ; z < maxZ - 0.01; z += tile) {
+      const z1 = Math.min(z + tile, maxZ);
+      // Same winding as box top: (+X, then toward -Z from high-Z corner).
+      mb.addFace(
+        x,
+        y,
+        z1,
+        x1,
+        y,
+        z1,
+        x1,
+        y,
+        z,
+        x,
+        y,
+        z,
+        0,
+        1,
+        0,
+        rgb[0],
+        rgb[1],
+        rgb[2],
+        mat,
+      );
+    }
+  }
+}
+
 /**
- * A synthetic, gently winding road continuation for a sprint's start (dir -1,
- * running backward out of the start line) or finish (dir +1, running forward
- * from the finish). Presentation only — it never enters physics, the minimap,
- * kerbs, barriers, or line bands. It is deliberately NOT the mother loop's
- * geometry: a sprint is point-to-point, and this only makes the raced section
- * look like a stretch of a longer road that runs off into the fog.
+ * A synthetic road continuation used only when we run out of mother-loop
+ * ribbon (should be rare). Prefer sampleTrackRibbon on the real loop.
  */
 function buildRoadStub(
   anchor: RibbonSample,
   dir: 1 | -1,
   track: TrackView,
+  lengthM: number,
 ): RibbonSample[] {
-  const steps = Math.max(20, Math.round(STUB_LENGTH / STUB_STEP));
+  const steps = Math.max(20, Math.round(lengthM / LEAD_STEP));
   const seed =
     ((Math.round(track.bounds.minX * 13.7 + track.bounds.minY * 29.3) >>> 0) ^ 0x5a17c9e3) >>> 0;
   const rng = scatterRng(seed);
   const out: RibbonSample[] = [];
   let x = anchor.x;
   let z = anchor.z;
-  // Forward tangent heading in engine XZ. The road normal is the tangent
-  // rotated -90°: (sin φ, -cos φ) — matching the track sampler's convention, so
-  // the stub's edges line up with the raced ribbon at the junction.
   let phi = Math.atan2(anchor.tz, anchor.tx);
   let bend = 0;
   const { halfW, runoff } = anchor;
@@ -841,12 +897,27 @@ function buildRoadStub(
       runoff,
       kappa: 0,
     });
-    x += dir * Math.cos(phi) * STUB_STEP;
-    z += dir * Math.sin(phi) * STUB_STEP;
-    // Gentle, mean-reverting wander — the road drifts naturally but never
-    // doubles back on itself.
+    x += dir * Math.cos(phi) * LEAD_STEP;
+    z += dir * Math.sin(phi) * LEAD_STEP;
     bend = (bend + (rng() - 0.5) * 0.012) * 0.97;
     phi += bend;
+  }
+  return out;
+}
+
+/** Drop near-duplicate junction samples when joining ribbon pieces. */
+function joinRibbons(parts: Array<readonly RibbonSample[]>): RibbonSample[] {
+  const out: RibbonSample[] = [];
+  for (const part of parts) {
+    for (const s of part) {
+      const prev = out[out.length - 1];
+      if (prev !== undefined) {
+        const dx = s.x - prev.x;
+        const dz = s.z - prev.z;
+        if (dx * dx + dz * dz < 0.04) continue;
+      }
+      out.push(s);
+    }
   }
   return out;
 }
@@ -861,25 +932,57 @@ export function buildTrackGeometry(
 
   const isSprint = track.sprintFinishS !== undefined;
   const segCount = Math.max(120, track.nodes.length * 2);
-  // Raced ribbon: the full loop for circuits, or the point-to-point trip
-  // (open) for sprints.
   const racedEnd = isSprint ? track.sprintFinishS! + SPRINT_ROLLOUT : track.length;
   const raced = sampleTrackRibbon(track, 0, racedEnd, segCount);
 
-  // Cosmetic stubs so a sprint's road continues past start/finish until it
-  // leaves the camera. Circuits already have the full loop behind the grid —
-  // a stub there would double-draw the ribbon.
-  const stubBefore = isSprint ? buildRoadStub(raced[0]!, -1, track) : null;
-  const stubAfter = isSprint ? buildRoadStub(raced[raced.length - 1]!, 1, track) : null;
+  const b = track.bounds;
+  const span = Math.max(b.maxX - b.minX, b.maxY - b.minY, 80);
+  // Outer verge wide enough to meet across typical infields; asphalt stays
+  // above it so overlapping fill never covers the road.
+  const outerExtra = Math.max(110, Math.min(320, span * 0.45));
+  const street = discipline === 'street';
+  const outerRgb = street ? PAVEMENT_BASE : GRASS_BASE;
+  const outerMat = street ? MAT_CONCRETE : MAT_GRASS;
 
-  if (stubBefore) buildRoadBands(mb, stubBefore);
-  buildRoadBands(mb, raced);
-  if (stubAfter) buildRoadBands(mb, stubAfter);
+  // Tiled fill — pad past the pulled-back countdown frustum.
+  addGroundTiles(mb, track, Math.max(1400, span * 1.6), outerRgb, outerMat);
+
+  // Continuous road ribbon. Sprints keep drawing the mother loop BEHIND the
+  // start line and PAST the finish so the asphalt never ends in a hard cut
+  // under the countdown camera. Circuits already mesh the full lap.
+  let roadRibbon: RibbonSample[] = raced;
+  let clearanceRibbon: RibbonSample[] = raced;
+  if (isSprint) {
+    const leadFrom = Math.max(0, track.length - SPRINT_LEAD_IN);
+    const approach = sampleTrackRibbon(
+      track,
+      leadFrom,
+      track.length,
+      Math.max(24, Math.round(SPRINT_LEAD_IN / LEAD_STEP)),
+    );
+    const tailTo = Math.min(track.length - 1e-3, racedEnd + SPRINT_LEAD_OUT);
+    let exit: RibbonSample[];
+    if (tailTo > racedEnd + 1) {
+      exit = sampleTrackRibbon(
+        track,
+        racedEnd,
+        tailTo,
+        Math.max(24, Math.round((tailTo - racedEnd) / LEAD_STEP)),
+      );
+    } else {
+      // Finish sits near the end of the loop — fake a short continuation.
+      exit = buildRoadStub(raced[raced.length - 1]!, 1, track, SPRINT_LEAD_OUT);
+    }
+    roadRibbon = joinRibbons([approach, raced, exit]);
+    clearanceRibbon = roadRibbon;
+  }
+
+  buildRoadBands(mb, roadRibbon, outerExtra, outerRgb, outerMat);
 
   const concreteBase = [0.65, 0.64, 0.6] as const;
 
   // Red/white rumble strips on corners + muted concrete barriers — raced ribbon
-  // only (fake stubs carry no kerbs or walls).
+  // only (fake approach/exit carry no kerbs or walls).
   for (let i = 0; i < raced.length - 1; i++) {
     const s0 = raced[i]!;
     const s1 = raced[i + 1]!;
@@ -947,44 +1050,6 @@ export function buildTrackGeometry(
     }
   }
 
-  // Far ground plate — sized for the pulled-back tabletop camera so the
-  // frustum never falls into clear-color void.
-  const b = track.bounds;
-  const span = Math.max(b.maxX - b.minX, b.maxY - b.minY, 80);
-  const pad = Math.max(2200, span * 14);
-  const minX = b.minX - pad;
-  const maxX = b.maxX + pad;
-  const minZ = -(b.maxY + pad);
-  const maxZ = -(b.minY - pad);
-  const ground =
-    discipline === 'street'
-      ? ([PAVEMENT_BASE[0], PAVEMENT_BASE[1], PAVEMENT_BASE[2], MAT_CONCRETE] as const)
-      : ([GRASS_BASE[0], GRASS_BASE[1], GRASS_BASE[2], MAT_GRASS] as const);
-  mb.addFace(
-    minX,
-    -0.08,
-    minZ,
-    maxX,
-    -0.08,
-    minZ,
-    maxX,
-    -0.08,
-    maxZ,
-    minX,
-    -0.08,
-    maxZ,
-    0,
-    1,
-    0,
-    ground[0],
-    ground[1],
-    ground[2],
-    ground[3],
-  );
-
-  const clearanceRibbon = stubBefore
-    ? [...raced, ...stubBefore, ...(stubAfter ?? [])]
-    : raced;
   scatterScenery(mb, track, clearanceRibbon, discipline);
 
   // Start line (s=0) always; a sprint also banners its finish wherever it
@@ -997,7 +1062,7 @@ export function buildTrackGeometry(
   const { vertices, indices } = mb.build();
 
   // Minimap normalizes to the RACED ribbon only — the loop for circuits, the
-  // point-to-point trip for sprints (fake stubs are never drawn on the map).
+  // point-to-point trip for sprints (lead-in / exit never drawn on the map).
   let mmMinX = Infinity;
   let mmMaxX = -Infinity;
   let mmMinY = Infinity;

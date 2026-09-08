@@ -451,12 +451,13 @@ export function buildPersonalLineFromIdeal(
   const out = new Array<number>(n);
 
   for (let i = 0; i < n; i++) {
-    // Driver style offset (±3m arcade max)
-    const apexCut = -maxApexCut * skill01;     // cuts tighter toward inside
-    const wideCarry = maxWideCarry * bravery01; // carries wider toward outside
+    // Driver style offset — signed to the local bend hand (inside/outside).
+    const hand = outwardSign(nodes[i]!.kappa);
+    const apexCut = -hand * maxApexCut * skill01; // toward inside
+    const wideCarry = hand * maxWideCarry * bravery01; // toward outside
     const styleOffset = apexCut + wideCarry;
 
-    let line = idealLineO[i]! * (1 - styleWeight) + styleOffset * styleWeight;
+    const line = idealLineO[i]! * (1 - styleWeight) + styleOffset * styleWeight;
 
     // Clamp to track bounds
     const half = Math.max(0.5, nodes[i]!.width / 2 - PHYSICS.racingLineMargin);

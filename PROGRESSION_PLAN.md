@@ -19,10 +19,37 @@ and kick (Street risk move). The driver's skill and the car's parts decide what
 you can safely *trust*.
 
 The **slot-car feel** is the *input and the vibe* — one finger, thrust-only,
-tabletop miniature diorama — not a physical rail. There is no magnet, no groove,
-no deslot. The "line-holding" is the driver's skill expressed through real tyre
-physics. Running wide, understeering, spinning, and kissing barriers are all
-emergent consequences of tyre limits × driver control × your thrust.
+tabletop miniature diorama. The main game at every career level is **corner
+speed management**. Mag/AI holds the wheel; you hold the pin. Off-slot
+behaviour (wide, slide, spin, barrier kiss) must feel **natural and emergent**
+from tyre limits × driver control × your thrust — never an arbitrary modifier
+or a chassis magnet that glues the car to the line.
+
+### The hybrid balance (authoritative — read this first)
+
+This product is a **hybrid of competing systems**. They must stay in tension.
+Collapsing any layer into another (magnet that substitutes for tyres, skill as
+a speed scalar, “grip” as one radar number) destroys the Scalextric essence.
+
+> **Groove = where Mag points. Tyres = whether it holds. No chassis magnet.**
+
+| Layer | Owns | Must not |
+|---|---|---|
+| **Groove / Mag** | Personal racing line (`lineO`). Feedforward on road κ + mild pursuit on line error. Driver skill = brake timing, rate-limited hands, recovery — **not** a fake drunk line or a speed multiplier. | Apply a lateral restoring *force* on the chassis. A second writer on path angle is free cornering and pack glue. |
+| **Physics (tyres)** | Pacejka-lite, friction ellipse, loads, aero Fz, surface/rain/wear/temp. Overspeed → run wide / slide / spin from the contact patch. | Invent bespoke spin flags, marshal “deslot chance,” or fake µ from every garage part. |
+| **Player pin** | Throttle **ceiling** (and brake/shift/kick). You can always arrive too hot; the slot will not catch you. | Steer. The player never gets a steer axis. |
+| **Car build** | Parts change *what the car can do* (mass, µ, Fz, bias, shift bite). Upgrade speed without tyres → faster than the patches can hold. That wash-out **is** the game. | Treat “grip” as one kitchen-sink stat. |
+| **What “grip” actually is** | **Tyres** = contact-patch µ. **Spoiler** = downforce (Fz) at speed — almost nothing in a slow hairpin. **Suspension** = load path / stiffness / CG / how patches share Fz — not rubber. Surface/rain/wear/temp are the other µ multipliers. | Collapse spoiler + suspension into “+Grip” on a radar. |
+
+**Feel contract across career:** stock or maxed, slow or fast, you should still
+be able to **whip a corner** that physics says is within the envelope. A basic
+car is slower; it is not unable to turn. A crawl after a brake or from a stop
+must still rotate with the wheels. Spins are body slip past the tyre peak —
+priced and readable — not a random roll.
+
+**Agent rule of thumb:** if a change adds a force that holds `l` toward the
+line, or makes Mag reverse the road hand to “catch” ordinary cornering yaw,
+it is wrong. Point with Mag; refuse with tyres.
 
 ### The one satisfaction everything exists for
 

@@ -415,7 +415,13 @@ export function stepVehicle(
   // "wide" deslots every race.
   const offTrack = Math.abs(car.l) >= width / 2;
   car.slotMode = offTrack ? 'deslot' : 'groove';
-  if (Math.abs(theta) > SPIN_BETA && car.spinRemaining <= 0) {
+  // Spin stun needs real rotation (or near-backward β). High |β| alone is a
+  // big slide — flagging it as a spin made Mag scrub opposite a tiny yaw and
+  // drive into the wall for a full second.
+  if (
+    car.spinRemaining <= 0 &&
+    ((Math.abs(theta) > SPIN_BETA && Math.abs(r) > 0.5) || Math.abs(theta) > 1.05)
+  ) {
     car.spinRemaining = PHYSICS.spinStun;
     car.spinCount += 1;
   }
